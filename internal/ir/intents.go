@@ -27,6 +27,17 @@ type ExecUnit struct {
 	// ASGIApp names the module-level variable holding the ASGI app, when the
 	// unit is exposed (e.g. "app"). Empty for non-HTTP units.
 	ASGIApp string `json:"asgi_app,omitempty"`
+
+	// The fields below are filled in by the shims stage, which decides how the
+	// unit is packaged, and read by the provider resolver.
+
+	// EntryModule is the dotted module name of Entrypoint within the bundle.
+	EntryModule string `json:"entry_module,omitempty"`
+	// Handler is the Lambda handler string, empty for non-Lambda units.
+	Handler string `json:"handler,omitempty"`
+	// DockerfileProvided reports that the user supplied their own Dockerfile,
+	// in which case cc generated none (D13).
+	DockerfileProvided bool `json:"dockerfile_provided,omitempty"`
 }
 
 // Entrypoint returns the unit's primary entry module: the exposed module when

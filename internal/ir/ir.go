@@ -65,9 +65,14 @@ type Resource interface {
 	Template() string
 	// Props are the resource arguments, before pulumi_params are merged.
 	Props() map[string]any
-	// EnvOutputs maps environment variable names to a property of this
-	// resource, e.g. CC_KV_PETSBYOWNER_TABLE -> "name".
-	EnvOutputs() map[string]string
+	// EnvOutputs maps environment variable names to the value an execution
+	// unit should receive, e.g. CC_KV_PETSBYOWNER_TABLE -> this table's name.
+	//
+	// PLAN-DEVIATION: the brief types this as map[string]string (env name ->
+	// property name). A plain property name cannot express an RDS connection
+	// URL, which is assembled from several outputs, so a binding is either a
+	// property of this resource or an arbitrary expression.
+	EnvOutputs() map[string]EnvBinding
 }
 
 // Edge is a typed connection between two nodes.

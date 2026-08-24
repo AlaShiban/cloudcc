@@ -67,24 +67,6 @@ type Context struct {
 	// ClaimedFiles maps a source path to the static unit that claimed it, so
 	// the execution-unit closure can leave those files out of compute bundles.
 	ClaimedFiles map[string]string
-
-	// Runtime records the artefacts the shim plugin generated, keyed by unit.
-	Runtime map[string]UnitRuntime
-}
-
-// UnitRuntime describes how one execution unit is packaged.
-type UnitRuntime struct {
-	// Type is the resolved compute type, "lambda" or "ecs".
-	Type string
-	// Handler is the Lambda handler string, e.g. "cc_lambda_entry.handler".
-	Handler string
-	// EntryModule is the unit's entrypoint module path within its bundle.
-	EntryModule string
-	// ASGIApp is the module-level ASGI app variable, when the unit is exposed.
-	ASGIApp string
-	// DockerfileProvided reports whether the user supplied their own
-	// Dockerfile, in which case cc did not generate one (D13).
-	DockerfileProvided bool
 }
 
 // NewContext returns a context ready for the plugin chain. Files starts empty;
@@ -100,7 +82,6 @@ func NewContext(cfg *config.App, srcRoot string, out afero.Fs) *Context {
 		SrcRoot:      srcRoot,
 		UnitFiles:    map[string][]string{},
 		ClaimedFiles: map[string]string{},
-		Runtime:      map[string]UnitRuntime{},
 	}
 }
 

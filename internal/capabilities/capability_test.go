@@ -249,9 +249,9 @@ func TestConflictingSecrecyIsAnError(t *testing.T) {
 func TestOnlyCapabilityPluginsCreateIntents(t *testing.T) {
 	// The two IR layers stay separate until the provider resolver runs (D7):
 	// nothing in this package may add a concrete resource.
-	ctx := harness(t, map[string]string{
-		"app.py": "import cloudcompiler as cc\npets = cc.persist_kv(\"a\")\n",
-	})
+	root := t.TempDir()
+	write(t, root, "app.py", "import cloudcompiler as cc\npets = cc.persist_kv(\"a\")\n")
+	ctx := compileWith(t, root, IntentChain())
 	if got := len(ctx.Graph.Resources()); got != 0 {
 		t.Errorf("capability plugins created %d concrete resources; only resolve:aws may", got)
 	}

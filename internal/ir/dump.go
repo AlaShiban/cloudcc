@@ -26,10 +26,10 @@ type DumpIntent struct {
 
 // DumpNode is one concrete resource.
 type DumpNode struct {
-	Key        Key               `json:"key"`
-	Template   string            `json:"template"`
-	Props      map[string]any    `json:"props"`
-	EnvOutputs map[string]string `json:"env_outputs,omitempty"`
+	Key        Key                   `json:"key"`
+	Template   string                `json:"template"`
+	Props      map[string]any        `json:"props"`
+	EnvOutputs map[string]EnvBinding `json:"env_outputs,omitempty"`
 }
 
 // Dump renders the program for --dump-ir. Iteration is sorted throughout, so

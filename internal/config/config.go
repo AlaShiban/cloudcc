@@ -231,6 +231,19 @@ func (a *App) AllPulumiParams(rc ResourceConfig) map[string]any {
 	return DeepMerge(a.PulumiParams, rc.PulumiParams)
 }
 
+// ForOutput returns a copy of the configuration as it should be recorded
+// alongside the generated project.
+//
+// out_dir is rewritten to "." because the emitted file sits *in* the output
+// directory: recording the absolute path the compile happened to use would
+// make otherwise identical output differ between runs, which the golden and
+// double-run tests rely on not happening (D18).
+func (a *App) ForOutput() *App {
+	out := *a
+	out.OutDir = "."
+	return &out
+}
+
 // SortedKeys returns the keys of m in sorted order; used everywhere generation
 // iterates a map, to keep output byte-deterministic (D18).
 func SortedKeys[V any](m map[string]V) []string {

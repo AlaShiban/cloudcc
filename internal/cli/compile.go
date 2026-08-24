@@ -117,7 +117,7 @@ func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compi
 	}
 	ctx.Diags.Strict = opts.strict
 
-	c, err := compiler.NewCompiler(capabilities.Chain(capabilities.NewShimsPlugin()))
+	c, err := compiler.NewCompiler(capabilities.Chain())
 	if err != nil {
 		return nil, compileErr(err)
 	}
@@ -154,7 +154,7 @@ func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compi
 
 // writeResolvedConfig records every decision the compile made (D5).
 func writeResolvedConfig(ctx *compiler.Context) error {
-	data, err := ctx.Config.Marshal()
+	data, err := ctx.Config.ForOutput().Marshal()
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func writeState(ctx *compiler.Context) error {
 // Both are byte-deterministic, so the same source and config always produce
 // the same fingerprint.
 func Fingerprint(ctx *compiler.Context) (string, error) {
-	cfgData, err := ctx.Config.Marshal()
+	cfgData, err := ctx.Config.ForOutput().Marshal()
 	if err != nil {
 		return "", err
 	}

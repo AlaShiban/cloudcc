@@ -219,11 +219,14 @@ func TestUnitFilesWrittenToSeparateOutputDirectories(t *testing.T) {
 	ctx := harness(t, map[string]string{
 		"api.py":    "import cloudcompiler as cc\ncc.execution_unit(id=\"api\")\n",
 		"worker.py": "import cloudcompiler as cc\ncc.execution_unit(id=\"worker\")\n",
-	}, NewShimsPlugin())
+	})
 
 	for path, wantSubstr := range map[string]string{
-		"api/api.py":       "id=\"api\"",
-		"worker/worker.py": "id=\"worker\"",
+		"api/api.py":             "None",
+		"worker/worker.py":       "None",
+		"api/_cc_runtime/kv.py":  "def connect(",
+		"api/cc_lambda_entry.py": "def handler(",
+		"api/requirements.txt":   "boto3",
 	} {
 		data, err := afero.ReadFile(ctx.Out, path)
 		if err != nil {
@@ -244,7 +247,7 @@ func TestStaticAssetsWrittenUnderTheirSiteRoot(t *testing.T) {
 			"cc.static_unit(\"site\", static_files=\"./public/**/*\")\n",
 		"public/index.html":  "<html></html>",
 		"public/css/app.css": "body{}",
-	}, NewShimsPlugin())
+	})
 
 	for _, want := range []string{"static/site/index.html", "static/site/css/app.css"} {
 		if ok, _ := afero.Exists(ctx.Out, want); !ok {
@@ -262,7 +265,7 @@ func TestSourceTreeIsNeverModified(t *testing.T) {
 	cfg.App = "test"
 	ctx := compiler.NewContext(cfg, root, afero.NewMemMapFs())
 	defer ctx.Files.Close()
-	c, err := compiler.NewCompiler(Chain(NewShimsPlugin()))
+	c, err := compiler.NewCompiler(Chain())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,13 +282,20 @@ func TestSourceTreeIsNeverModified(t *testing.T) {
 	}
 }
 
+// compileExpectingDiags runs only the intent stages, so a program with
+// diagnostics still produces a context to assert against rather than failing
+// downstream in the resolver.
 func compileExpectingDiags(t *testing.T, root string) *compiler.Context {
+	return compileWith(t, root, IntentChain())
+}
+
+func compileWith(t *testing.T, root string, plugins []compiler.Plugin) *compiler.Context {
 	t.Helper()
 	cfg := config.New()
 	cfg.App = "test"
 	ctx := compiler.NewContext(cfg, root, afero.NewMemMapFs())
 	t.Cleanup(func() { ctx.Files.Close() })
-	c, err := compiler.NewCompiler(Chain())
+	c, err := compiler.NewCompiler(plugins)
 	if err != nil {
 		t.Fatal(err)
 	}

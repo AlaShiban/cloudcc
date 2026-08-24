@@ -1,0 +1,308 @@
+package aws
+
+import (
+	"fmt"
+	"mime"
+	"path"
+	"sort"
+	"strings"
+
+	"github.com/cloudcompiler/cc/internal/config"
+	"github.com/cloudcompiler/cc/internal/ir"
+	"github.com/cloudcompiler/cc/internal/sanitize"
+)
+
+// LambdaRuntime is the managed runtime generated functions use.
+const LambdaRuntime = "python3.12"
+
+// BuildDir is where bin/package.sh writes each unit's deployment artefact,
+// relative to the output root.
+const BuildDir = "build"
+
+// Resolver expands intents into concrete AWS resources.
+type Resolver struct {
+	App     string
+	Program *ir.Program
+	Config  *config.App
+	// StaticDir is where static site assets were written, relative to the
+	// output root.
+	StaticDir string
+}
+
+// Resolve expands every intent in the program. Iteration is over sorted keys
+// so the resource set -- and therefore the generated project -- is
+// byte-deterministic (D18).
+func (r *Resolver) Resolve() error {
+	for _, in := range r.Program.Intents() {
+		var err error
+		switch typed := in.(type) {
+		case *ir.Persist:
+			err = r.persist(typed)
+		case *ir.Topic:
+			err = r.topic(typed)
+		case *ir.StaticSite:
+			err = r.staticSite(typed)
+		case *ir.ConfigVar:
+			// Config values are pure environment wiring; they resolve to no
+			// infrastructure of their own (D17).
+		}
+		if err != nil {
+			return err
+		}
+	}
+	// Execution units and gateways come second: they reference the stores
+	// above, so those resources must already exist in the graph.
+	for _, in := range r.Program.IntentsOfKind(config.KindExecutionUnit) {
+		if err := r.execUnit(in.(*ir.ExecUnit)); err != nil {
+			return err
+		}
+	}
+	for _, in := range r.Program.IntentsOfKind(config.KindExpose) {
+		if err := r.expose(in.(*ir.Expose)); err != nil {
+			return err
+		}
+	}
+	// Subscriptions reference both a topic and a function, so they come last.
+	if err := r.subscriptions(); err != nil {
+		return err
+	}
+	r.linkReferences()
+	return nil
+}
+
+// linkReferences turns every reference inside a resource's properties into a
+// dependency edge.
+//
+// Declaration order in the emitted project follows these edges, so a resource
+// that mentions another must depend on it. Leaving this to each mapping to
+// remember is exactly the kind of invisible ordering requirement the plugin
+// DAG was meant to eliminate, so it is enforced here once for everything.
+func (r *Resolver) linkReferences() {
+	for _, res := range r.Program.Resources() {
+		for _, ref := range ir.RefsIn(res.Props()) {
+			if ref.Key == res.Key() {
+				continue
+			}
+			if _, ok := r.Program.Resource(ref.Key); ok {
+				r.Program.Connect(res.Key(), ref.Key, ir.EdgeDependsOn)
+			}
+		}
+		for _, binding := range res.EnvOutputs() {
+			for _, ref := range ir.RefsIn(binding.Expr) {
+				if ref.Key == res.Key() {
+					continue
+				}
+				if _, ok := r.Program.Resource(ref.Key); ok {
+					r.Program.Connect(res.Key(), ref.Key, ir.EdgeDependsOn)
+				}
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------- stores
+
+func (r *Resolver) persist(p *ir.Persist) error {
+	switch p.Kind {
+	case config.KindPersistKV:
+		return r.dynamoTable(p)
+	case config.KindPersistFS:
+		return r.fsBucket(p)
+	case config.KindPersistSecret:
+		return r.secret(p)
+	case config.KindPersistORM:
+		return r.database(p)
+	case config.KindPersistRedis:
+		return r.cache(p)
+	}
+	return fmt.Errorf("no AWS mapping for %s", p.Kind)
+}
+
+func (r *Resolver) dynamoTable(p *ir.Persist) error {
+	props := map[string]any{
+		"name":        sanitize.DynamoTable(r.App, p.ID),
+		"billingMode": "PAY_PER_REQUEST",
+		"hashKey":     "id",
+		"attributes": []any{
+			map[string]any{"name": "id", "type": "S"},
+		},
+	}
+	r.resolve(p.Key(), KindDynamoTable, p.ID, "aws.dynamodb.Table", props,
+		ir.Env(EnvKVTable(p.ID), "name"), p.Config())
+	return nil
+}
+
+func (r *Resolver) fsBucket(p *ir.Persist) error {
+	props := map[string]any{
+		"bucket":       sanitize.S3Bucket(r.App, p.ID),
+		"forceDestroy": true,
+	}
+	r.resolve(p.Key(), KindS3Bucket, p.ID, "aws.s3.BucketV2", props,
+		ir.Env(EnvFSBucket(p.ID), "bucket"), p.Config())
+	return nil
+}
+
+func (r *Resolver) secret(p *ir.Persist) error {
+	props := map[string]any{
+		"name":                 sanitize.SecretName(r.App, p.ID),
+		"recoveryWindowInDays": 0,
+	}
+	r.resolve(p.Key(), KindSecret, p.ID, "aws.secretsmanager.Secret", props,
+		ir.Env(EnvSecretARN(p.ID), "arn"), p.Config())
+	return nil
+}
+
+func (r *Resolver) database(p *ir.Persist) error {
+	name := sanitize.RDSIdentifier(r.App, p.ID)
+	dbName := sanitize.DBIdentifier(p.ID)
+	props := map[string]any{
+		"identifier":               name,
+		"engine":                   "postgres",
+		"instanceClass":            "db.t4g.micro",
+		"allocatedStorage":         20,
+		"dbName":                   dbName,
+		"username":                 "ccadmin",
+		"manageMasterUserPassword": true,
+		"skipFinalSnapshot":        true,
+		"publiclyAccessible":       false,
+	}
+	key := ir.Key{Kind: KindRDS, ID: p.ID}
+	// AWS manages the master password, so the URL carries no credential: the
+	// shim fetches the password from the managed secret and splices it in.
+	// Putting a password in an environment variable would defeat D21.
+	url := ir.Lit(
+		"postgresql://ccadmin@", ir.Ref{Key: key, Prop: "address"},
+		":", ir.Ref{Key: key, Prop: "port"},
+		"/", dbName,
+	)
+	r.resolve(p.Key(), KindRDS, p.ID, "aws.rds.Instance", props, ir.Env(
+		EnvORMURL(p.ID), ir.FromExpr(url),
+		EnvORMSecretARN(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "masterUserSecrets[0].secretArn"}),
+	), p.Config())
+	return nil
+}
+
+func (r *Resolver) cache(p *ir.Persist) error {
+	name := sanitize.ElastiCacheCluster(r.App, p.ID)
+	if p.Config().Type == "memorydb" {
+		props := map[string]any{
+			"name":       name,
+			"nodeType":   "db.t4g.small",
+			"numShards":  1,
+			"aclName":    "open-access",
+			"tlsEnabled": true,
+		}
+		key := ir.Key{Kind: KindMemoryDB, ID: p.ID}
+		r.resolve(p.Key(), KindMemoryDB, p.ID, "aws.memorydb.Cluster", props, ir.Env(
+			EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Raw(sanitize.Identifier(p.ID)+".clusterEndpoints[0].address")),
+			EnvRedisPort(p.ID), ir.FromExpr(ir.Raw("\"6379\"")),
+			EnvRedisTLS(p.ID), ir.FromExpr("true"),
+		), p.Config())
+		_ = key
+		return nil
+	}
+	props := map[string]any{
+		"clusterId":     name,
+		"engine":        "redis",
+		"nodeType":      "cache.t4g.micro",
+		"numCacheNodes": 1,
+		"port":          6379,
+	}
+	r.resolve(p.Key(), KindElastiCache, p.ID, "aws.elasticache.Cluster", props, ir.Env(
+		EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Raw(sanitize.Identifier(p.ID)+".cacheNodes[0].address")),
+		EnvRedisPort(p.ID), ir.FromExpr(ir.Raw("\"6379\"")),
+		EnvRedisTLS(p.ID), ir.FromExpr("false"),
+	), p.Config())
+	return nil
+}
+
+func (r *Resolver) topic(t *ir.Topic) error {
+	props := map[string]any{"name": sanitize.SNSTopic(r.App, t.ID)}
+	r.resolve(t.Key(), KindSNSTopic, t.ID, "aws.sns.Topic", props,
+		ir.Env(EnvTopicARN(t.ID), "arn"), t.Config())
+	return nil
+}
+
+func (r *Resolver) staticSite(s *ir.StaticSite) error {
+	bucketKey := ir.Key{Kind: KindS3Bucket, ID: s.ID}
+	bucketProps := map[string]any{
+		"bucket":       sanitize.S3Bucket(r.App, s.ID),
+		"forceDestroy": true,
+	}
+	r.resolve(s.Key(), KindS3Bucket, s.ID, "aws.s3.BucketV2", bucketProps,
+		ir.Env(EnvStaticBucket(s.ID), "bucket"), s.Config())
+
+	website := ir.NewResource(KindS3Website, s.ID, "aws.s3.BucketWebsiteConfigurationV2", map[string]any{
+		"bucket":        ir.Ref{Key: bucketKey, Prop: "id"},
+		"indexDocument": map[string]any{"suffix": s.IndexDocument},
+	}, ir.Env(EnvStaticURL(s.ID), "websiteEndpoint"))
+	r.Program.Resolve(s.Key(), website)
+	r.Program.Connect(website.Key(), bucketKey, ir.EdgeDependsOn)
+
+	// One object per claimed file, in sorted order, so the emitted project is
+	// stable across compiles.
+	files := append([]string(nil), s.Files...)
+	sort.Strings(files)
+	for _, rel := range files {
+		objectID := s.ID + "/" + siteRelative(s, rel)
+		obj := ir.NewResource(KindS3Object, objectID, "aws.s3.BucketObject", map[string]any{
+			"bucket":      ir.Ref{Key: bucketKey, Prop: "id"},
+			"key":         siteRelative(s, rel),
+			"source":      ir.Raw(fmt.Sprintf("new pulumi.asset.FileAsset(%q)", path.Join(r.StaticDir, s.ID, siteRelative(s, rel)))),
+			"contentType": contentType(rel),
+		}, nil)
+		r.Program.Resolve(s.Key(), obj)
+		r.Program.Connect(obj.Key(), bucketKey, ir.EdgeDependsOn)
+	}
+	return nil
+}
+
+// siteRelative strips the declaring module's directory and the glob's fixed
+// root from an asset path, so public/index.html is served as index.html.
+func siteRelative(s *ir.StaticSite, rel string) string {
+	base := trimDir(rel, s.Root)
+	return trimDir(base, globRootDir(s.StaticFiles))
+}
+
+func trimDir(p, dir string) string {
+	if dir == "" || dir == "." {
+		return p
+	}
+	if strings.HasPrefix(p, dir+"/") {
+		return p[len(dir)+1:]
+	}
+	return p
+}
+
+func globRootDir(pattern string) string {
+	pattern = strings.TrimPrefix(pattern, "./")
+	dir := ""
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] != '/' {
+			continue
+		}
+		seg := pattern[:i]
+		if strings.ContainsAny(seg, "*?[{") {
+			return dir
+		}
+		dir = seg
+	}
+	return dir
+}
+
+func contentType(rel string) string {
+	if ct := mime.TypeByExtension(path.Ext(rel)); ct != "" {
+		return ct
+	}
+	return "application/octet-stream"
+}
+
+// resolve adds a concrete resource, merges pulumi_params over its props, and
+// records the resolves_to edge.
+func (r *Resolver) resolve(intent ir.Key, kind, id, template string, props map[string]any,
+	env map[string]ir.EnvBinding, cfg config.ResourceConfig) *ir.GenericResource {
+	merged := config.DeepMerge(props, r.Config.AllPulumiParams(cfg))
+	res := ir.NewResource(kind, id, template, merged, env)
+	r.Program.Resolve(intent, res)
+	return res
+}
