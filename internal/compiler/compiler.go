@@ -68,6 +68,11 @@ type Context struct {
 	// the execution-unit closure can leave those files out of compute bundles.
 	ClaimedFiles map[string]string
 
+	// Notice, when set, reports something worth telling the user that is not a
+	// diagnostic about their code -- an optional tool that was missing, for
+	// instance.
+	Notice func(string)
+
 	// Embedded maps a declaring source file to the paths cc.embed_assets
 	// claimed from it. Those files travel with whichever units bundle the
 	// declaring file, even though no import reaches them.

@@ -31,6 +31,7 @@ func Chain(extra ...compiler.Plugin) []compiler.Plugin {
 		NewShimsPlugin(),
 		NewResolveAWSPlugin(),
 		NewRenderPlugin(pulumi_ts.BackendName),
+		NewTopologyPlugin(),
 	)
 	return append(plugins, extra...)
 }

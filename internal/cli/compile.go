@@ -116,6 +116,7 @@ func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compi
 		ctx.ConfigPath = filepath.ToSlash(rel)
 	}
 	ctx.Diags.Strict = opts.strict
+	ctx.Notice = func(msg string) { fmt.Fprintf(cmd.ErrOrStderr(), "cc: %s\n", msg) }
 
 	c, err := compiler.NewCompiler(capabilities.Chain())
 	if err != nil {
