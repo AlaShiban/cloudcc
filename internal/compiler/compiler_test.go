@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 	"github.com/spf13/afero"
 )
 

@@ -41,7 +41,7 @@ func TestEnvVar(t *testing.T) {
 		"pet-api":     "PET_API",
 		"log.level":   "LOG_LEVEL",
 		// No guard character for a leading digit: the result is always a
-		// segment of a CC_-prefixed name, and the Python shims spell it the
+		// segment of a CLOUDCC_-prefixed name, and the Python shims spell it the
 		// same way.
 		"9lives": "9LIVES",
 	}

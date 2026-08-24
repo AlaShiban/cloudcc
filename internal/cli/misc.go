@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cloudcompiler/cc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -17,10 +17,10 @@ var Version = "dev"
 func newVersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the cc version",
+		Short: "Print the cloudcc version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintf(cmd.OutOrStdout(), "cc %s\n", Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "cloudcc %s\n", Version)
 			return nil
 		},
 	}
@@ -30,7 +30,7 @@ const initTemplate = `# CloudCompiler configuration.
 #
 # Every type-selection decision the compiler makes is driven from this file.
 # Anything you leave out is filled in from the provider defaults, and the
-# fully-resolved result is written to %s/cc.yaml after each compile.
+# fully-resolved result is written to %s/cloudcc.yaml after each compile.
 
 app: %s
 provider: aws
@@ -62,7 +62,7 @@ func newInitCommand() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "init [path]",
-		Short: "Scaffold a cc.yaml",
+		Short: "Scaffold a cloudcc.yaml",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
@@ -87,12 +87,12 @@ func newInitCommand() *cobra.Command {
 			if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
 				return exitError{ExitCompile, err}
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "cc: wrote %s\n", target)
+			fmt.Fprintf(cmd.ErrOrStderr(), "cloudcc: wrote %s\n", target)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&app, "app", "", "application name (defaults to the directory name)")
-	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing cc.yaml")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing cloudcc.yaml")
 	return cmd
 }
 

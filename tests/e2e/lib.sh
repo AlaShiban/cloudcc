@@ -14,7 +14,7 @@ export AWS_REGION="${AWS_REGION:-us-east-1}"
 export AWS_DEFAULT_REGION="$AWS_REGION"
 
 # Pulumi runs against a local filesystem backend so the tests need no account.
-export PULUMI_CONFIG_PASSPHRASE="${PULUMI_CONFIG_PASSPHRASE:-cc-test}"
+export PULUMI_CONFIG_PASSPHRASE="${PULUMI_CONFIG_PASSPHRASE:-cloudcc-test}"
 export PULUMI_SKIP_UPDATE_CHECK=true
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -22,7 +22,7 @@ export REPO_ROOT
 
 # The AWS services the harness points at the emulator. Each becomes one
 # aws:endpoints[0].<service> setting.
-CC_E2E_SERVICES=(dynamodb s3 sns lambda apigatewayv2 apigateway secretsmanager iam sts cloudwatchlogs logs)
+CLOUDCC_E2E_SERVICES=(dynamodb s3 sns lambda apigatewayv2 apigateway secretsmanager iam sts cloudwatchlogs logs)
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warn\033[0m %s\n' "$*" >&2; }
@@ -82,7 +82,7 @@ pulumi_configure_emulator() {
   pulumi config set aws:skipRequestingAccountId true --stack "$stack" >/dev/null
   pulumi config set aws:s3UsePathStyle true --stack "$stack" >/dev/null
   local service
-  for service in "${CC_E2E_SERVICES[@]}"; do
+  for service in "${CLOUDCC_E2E_SERVICES[@]}"; do
     pulumi config set --plaintext --path "aws:endpoints[0].$service" "$MINISTACK_ENDPOINT" --stack "$stack" >/dev/null
   done
 }

@@ -20,7 +20,7 @@ every compile would drown in noise. Only *relative* imports that resolve to
 nothing are warned about: those are unambiguously a local mistake. A bare
 `import fastapi` is an ordinary third-party dependency, not a problem.
 
-**`compiled/cc.yaml` and `.cc-state.json` are written by the CLI, not a
+**`compiled/cloudcc.yaml` and `.cloudcc-state.json` are written by the CLI, not a
 plugin.** Both are records *of* the whole chain, so they are produced after it
 finishes rather than by a stage inside it.
 
@@ -46,7 +46,7 @@ add resources without adding behaviour. The routes are still recorded in the IR
 so the topology can show them.
 
 **Container images are pushed by a second script.** `bin/package.sh` builds
-them, `bin/push-images.sh` pushes them, and `cc deploy` runs the second one
+them, `bin/push-images.sh` pushes them, and `cloudcc deploy` runs the second one
 after `pulumi up` — because the registry it pushes to does not exist until
 then.
 

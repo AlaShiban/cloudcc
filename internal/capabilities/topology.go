@@ -3,8 +3,8 @@ package capabilities
 import (
 	"fmt"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/topology"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/topology"
 )
 
 // TopologyPlugin writes the architecture diagram alongside the generated

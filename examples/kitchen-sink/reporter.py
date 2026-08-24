@@ -1,14 +1,14 @@
 """A container-hosted unit: it subscribes to the topic and serves a summary."""
 
 from fastapi import FastAPI
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 from stores import catalogue, docs, events
 
-cc.execution_unit(id="reporter")
+cloudcc.execution_unit(id="reporter")
 
 app = FastAPI()
-cc.expose(app, id="reporter-web")
+cloudcc.expose(app, id="reporter-web")
 
 
 @app.get("/health")

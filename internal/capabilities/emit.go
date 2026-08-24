@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 	"github.com/spf13/afero"
 )
 

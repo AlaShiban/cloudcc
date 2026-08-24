@@ -1,17 +1,17 @@
 """A plain FastAPI app. The only CloudCompiler-specific lines are the import
 and the two hint calls, which the compiler reads statically and rewrites into
 real AWS clients in the compiled copy."""
-# Injected by cc: runtime clients for this program's declared capabilities.
-from _cc_runtime import expose as _cc_expose
-from _cc_runtime import kv as _cc_kv
+# Injected by cloudcc: runtime clients for this program's declared capabilities.
+from _cloudcc_runtime import expose as _cloudcc_expose
+from _cloudcc_runtime import kv as _cloudcc_kv
 
 
 from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-pets = _cc_kv.connect("petsByOwner")
-_cc_expose.register(app, id="pet-api")
+pets = _cloudcc_kv.connect("petsByOwner")
+_cloudcc_expose.register(app, id="pet-api")
 
 
 @app.get("/pets/{pet_id}")

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/sanitize"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
 // varNamer assigns each resource its generated TypeScript variable name.

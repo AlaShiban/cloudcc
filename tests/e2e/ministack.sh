@@ -13,10 +13,10 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 EXAMPLE="${1:-petstore}"
-WORK="${CC_E2E_WORKDIR:-$(mktemp -d "${TMPDIR:-/tmp}/cc-e2e-XXXXXX")}"
+WORK="${CLOUDCC_E2E_WORKDIR:-$(mktemp -d "${TMPDIR:-/tmp}/cloudcc-e2e-XXXXXX")}"
 OUT="$WORK/compiled"
 STACK="ministack"
-KEEP="${CC_E2E_KEEP:-0}"
+KEEP="${CLOUDCC_E2E_KEEP:-0}"
 
 cleanup() {
   local status=$?
@@ -42,11 +42,11 @@ log "workdir:  $WORK"
 
 # ---------------------------------------------------------------- compile
 
-log "building cc"
-( cd "$REPO_ROOT" && go build -o "$WORK/cc" ./cmd/cc )
+log "building cloudcc"
+( cd "$REPO_ROOT" && go build -o "$WORK/cloudcc" ./cmd/cloudcc )
 
 log "compiling examples/$EXAMPLE"
-"$WORK/cc" "$REPO_ROOT/examples/$EXAMPLE" -o "$OUT"
+"$WORK/cloudcc" "$REPO_ROOT/examples/$EXAMPLE" -o "$OUT"
 
 [ -f "$OUT/index.ts" ]      || fail "no index.ts was generated"
 [ -x "$OUT/bin/package.sh" ] || fail "bin/package.sh is missing or not executable"
@@ -82,7 +82,7 @@ pass "provisioned"
 
 # ------------------------------------------------------- L4: provisioning
 
-APP_NAME="$(grep -E '^app:' "$OUT/cc.yaml" | head -1 | awk '{print $2}')"
+APP_NAME="$(grep -E '^app:' "$OUT/cloudcc.yaml" | head -1 | awk '{print $2}')"
 
 if skip_unless_service dynamodb; then
   aws_local dynamodb list-tables | grep -q "petsByOwner" \
@@ -106,10 +106,10 @@ fi
 
 log "wiring the compiled application from stack outputs"
 eval "$(pulumi stack output --json --stack "$STACK" \
-        | jq -r 'to_entries[] | select(.key | startswith("CC_")) | "export \(.key)=\(.value|@sh)"')"
+        | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "export \(.key)=\(.value|@sh)"')"
 
-[ -n "${CC_KV_PETSBYOWNER_TABLE:-}" ] || fail "the stack did not export CC_KV_PETSBYOWNER_TABLE"
-log "table: $CC_KV_PETSBYOWNER_TABLE"
+[ -n "${CLOUDCC_KV_PETSBYOWNER_TABLE:-}" ] || fail "the stack did not export CLOUDCC_KV_PETSBYOWNER_TABLE"
+log "table: $CLOUDCC_KV_PETSBYOWNER_TABLE"
 
 UNIT_DIR="$OUT/build/main"
 [ -d "$UNIT_DIR" ] || UNIT_DIR="$OUT/main"
@@ -117,7 +117,7 @@ UNIT_DIR="$OUT/build/main"
 log "starting the compiled application against the emulator"
 (
   cd "$UNIT_DIR"
-  CC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
+  CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
   PYTHONPATH="$UNIT_DIR" \
   uv run --quiet --with fastapi --with uvicorn --with boto3 \
     python -m uvicorn app:app --host 127.0.0.1 --port 8099 --log-level warning
@@ -139,12 +139,12 @@ curl -sf http://127.0.0.1:8099/pets/1 | jq -e '.name == "rex"' >/dev/null \
 pass "L5 round-trip through the API"
 
 log "asserting the datastore state"
-COUNT="$(aws_local dynamodb scan --table-name "$CC_KV_PETSBYOWNER_TABLE" | jq -r '.Count')"
-[ "$COUNT" = "1" ] || fail "expected exactly one item in $CC_KV_PETSBYOWNER_TABLE, found $COUNT"
+COUNT="$(aws_local dynamodb scan --table-name "$CLOUDCC_KV_PETSBYOWNER_TABLE" | jq -r '.Count')"
+[ "$COUNT" = "1" ] || fail "expected exactly one item in $CLOUDCC_KV_PETSBYOWNER_TABLE, found $COUNT"
 pass "L5 the write reached DynamoDB"
 
 curl -sf -X DELETE http://127.0.0.1:8099/pets/1 >/dev/null || fail "DELETE /pets/1 failed"
-COUNT="$(aws_local dynamodb scan --table-name "$CC_KV_PETSBYOWNER_TABLE" | jq -r '.Count')"
+COUNT="$(aws_local dynamodb scan --table-name "$CLOUDCC_KV_PETSBYOWNER_TABLE" | jq -r '.Count')"
 [ "$COUNT" = "0" ] || fail "expected the item to be deleted, found $COUNT"
 pass "L5 the delete reached DynamoDB"
 

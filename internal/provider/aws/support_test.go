@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cloudcompiler/cc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/config"
 )
 
 func TestSupportLevels(t *testing.T) {

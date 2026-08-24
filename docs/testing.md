@@ -14,11 +14,11 @@
 ```bash
 go test ./...                              # L1 + L2
 ./tests/e2e/ministack.sh                   # L3 + L4 + L5, through raw pulumi
-./tests/e2e/deploy.sh                      # the same path through `cc deploy`
+./tests/e2e/deploy.sh                      # the same path through `cloudcc deploy`
 cd sdk/python && uv run --with pytest --with-editable . python -m pytest tests
 ```
 
-`CC_E2E_KEEP=1` leaves the work directory and the deployed stack in place for
+`CLOUDCC_E2E_KEEP=1` leaves the work directory and the deployed stack in place for
 inspection; the harness prints the command to tear it down.
 
 ## Probe, then assert

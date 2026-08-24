@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/sanitize"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
 // LambdaRuntime is the managed runtime generated functions use.

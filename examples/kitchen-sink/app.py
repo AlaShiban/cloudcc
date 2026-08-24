@@ -1,27 +1,27 @@
-"""Exercises every capability cc supports, in one program.
+"""Exercises every capability cloudcc supports, in one program.
 
 The api unit runs on Lambda behind an HTTP API; the reporter unit runs on
-Fargate behind an ALB. Both are plain Python -- the only cc-specific lines are
+Fargate behind an ALB. Both are plain Python -- the only cloudcc-specific lines are
 the import and the hint calls.
 """
 
 import json
 
 from fastapi import FastAPI, HTTPException
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 from stores import cache, catalogue, db, docs, events, signing_key
 
-cc.execution_unit(id="api")
+cloudcc.execution_unit(id="api")
 
 app = FastAPI()
-cc.expose(app, id="shop-api")
+cloudcc.expose(app, id="shop-api")
 
-log_level = cc.config_value("log_level", default="info")
-stripe_key = cc.config_value("stripe_key", secret=True)
+log_level = cloudcc.config_value("log_level", default="info")
+stripe_key = cloudcc.config_value("stripe_key", secret=True)
 
 # Claimed so the seed data travels with this unit even though nothing imports it.
-SEED = cc.embed_assets("./data/*.json")
+SEED = cloudcc.embed_assets("./data/*.json")
 
 
 @app.get("/health")

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudcompiler/cc/internal/diag"
-	"github.com/cloudcompiler/cc/internal/sdkdetect"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 )
 
 func rewrite(t *testing.T, src string) string {
@@ -47,25 +47,25 @@ func assertParses(t *testing.T, src string) {
 }
 
 func TestRewritePersistKV(t *testing.T) {
-	got := rewrite(t, "import cloudcompiler as cc\npets = cc.persist_kv(\"petsByOwner\")\n")
+	got := rewrite(t, "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n")
 
 	if strings.Contains(got, "cloudcompiler") {
 		t.Errorf("the SDK import should be removed:\n%s", got)
 	}
-	if !strings.Contains(got, `pets = _cc_kv.connect("petsByOwner")`) {
+	if !strings.Contains(got, `pets = _cloudcc_kv.connect("petsByOwner")`) {
 		t.Errorf("call was not rewritten:\n%s", got)
 	}
-	if !strings.Contains(got, "from _cc_runtime import kv as _cc_kv") {
+	if !strings.Contains(got, "from _cloudcc_runtime import kv as _cloudcc_kv") {
 		t.Errorf("shim import was not injected:\n%s", got)
 	}
 }
 
 func TestRewriteLeavesApplicationCodeAlone(t *testing.T) {
 	src := `from fastapi import FastAPI
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 app = FastAPI()
-pets = cc.persist_kv("petsByOwner")
+pets = cloudcc.persist_kv("petsByOwner")
 
 
 @app.get("/pets/{pet_id}")
@@ -87,24 +87,24 @@ def get_pet(pet_id: str):
 }
 
 func TestRewriteExpose(t *testing.T) {
-	got := rewrite(t, "from fastapi import FastAPI\nimport cloudcompiler as cc\napp = FastAPI()\ncc.expose(app, id=\"pet-api\")\n")
-	if !strings.Contains(got, `_cc_expose.register(app, id="pet-api")`) {
+	got := rewrite(t, "from fastapi import FastAPI\nimport cloudcompiler as cloudcc\napp = FastAPI()\ncloudcc.expose(app, id=\"pet-api\")\n")
+	if !strings.Contains(got, `_cloudcc_expose.register(app, id="pet-api")`) {
 		t.Errorf("expose was not rewritten:\n%s", got)
 	}
 }
 
 func TestRewriteConfigValue(t *testing.T) {
-	got := rewrite(t, "import cloudcompiler as cc\nlvl = cc.config_value(\"log_level\", default=\"info\")\n")
-	if !strings.Contains(got, `_cc_config.value("log_level", default="info")`) {
+	got := rewrite(t, "import cloudcompiler as cloudcc\nlvl = cloudcc.config_value(\"log_level\", default=\"info\")\n")
+	if !strings.Contains(got, `_cloudcc_config.value("log_level", default="info")`) {
 		t.Errorf("config_value was not rewritten:\n%s", got)
 	}
 }
 
 func TestCompileOnlyHintsAreErased(t *testing.T) {
-	got := rewrite(t, `import cloudcompiler as cc
+	got := rewrite(t, `import cloudcompiler as cloudcc
 
-cc.execution_unit(id="api")
-cc.static_unit("site", static_files="./public/**/*")
+cloudcc.execution_unit(id="api")
+cloudcc.static_unit("site", static_files="./public/**/*")
 `)
 	for _, gone := range []string{"execution_unit", "static_unit"} {
 		if strings.Contains(got, gone) {
@@ -115,13 +115,13 @@ cc.static_unit("site", static_files="./public/**/*")
 		t.Errorf("expected both hints to become None:\n%s", got)
 	}
 	// Nothing was imported for them, because they have no runtime behaviour.
-	if strings.Contains(got, "_cc_runtime") {
+	if strings.Contains(got, "_cloudcc_runtime") {
 		t.Errorf("compile-only hints should not pull in a shim:\n%s", got)
 	}
 }
 
 func TestEmbedAssetsKeepsItsPattern(t *testing.T) {
-	got := rewrite(t, "import cloudcompiler as cc\np = cc.embed_assets(\"./data/*.json\")\n")
+	got := rewrite(t, "import cloudcompiler as cloudcc\np = cloudcc.embed_assets(\"./data/*.json\")\n")
 	if !strings.Contains(got, `p = "./data/*.json"`) {
 		t.Errorf("embed_assets should collapse to its pattern:\n%s", got)
 	}
@@ -130,15 +130,15 @@ func TestEmbedAssetsKeepsItsPattern(t *testing.T) {
 func TestImportsGoAfterTheDocstring(t *testing.T) {
 	got := rewrite(t, `"""Module docstring."""
 
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
-pets = cc.persist_kv("a")
+pets = cloudcc.persist_kv("a")
 `)
 	if !strings.HasPrefix(got, `"""Module docstring."""`) {
 		t.Errorf("the docstring must stay first:\n%s", got)
 	}
 	docEnd := strings.Index(got, `"""`+"\n") // closing quotes of the docstring
-	importAt := strings.Index(got, "from _cc_runtime")
+	importAt := strings.Index(got, "from _cloudcc_runtime")
 	if importAt < docEnd {
 		t.Errorf("shim import was placed before the docstring:\n%s", got)
 	}
@@ -147,12 +147,12 @@ pets = cc.persist_kv("a")
 func TestFutureImportsStayFirst(t *testing.T) {
 	got := rewrite(t, `from __future__ import annotations
 
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
-pets = cc.persist_kv("a")
+pets = cloudcc.persist_kv("a")
 `)
 	future := strings.Index(got, "from __future__ import annotations")
-	shim := strings.Index(got, "from _cc_runtime")
+	shim := strings.Index(got, "from _cloudcc_runtime")
 	if future < 0 || shim < future {
 		t.Errorf("__future__ import must remain first:\n%s", got)
 	}
@@ -160,41 +160,41 @@ pets = cc.persist_kv("a")
 
 func TestFromImportFormIsRewritten(t *testing.T) {
 	got := rewrite(t, "from cloudcompiler import persist_kv\npets = persist_kv(\"a\")\n")
-	if !strings.Contains(got, `pets = _cc_kv.connect("a")`) || strings.Contains(got, "cloudcompiler") {
+	if !strings.Contains(got, `pets = _cloudcc_kv.connect("a")`) || strings.Contains(got, "cloudcompiler") {
 		t.Errorf("from-import form was not rewritten:\n%s", got)
 	}
 }
 
 func TestSeveralHintsInOneFile(t *testing.T) {
-	got := rewrite(t, `import cloudcompiler as cc
+	got := rewrite(t, `import cloudcompiler as cloudcc
 
-pets = cc.persist_kv("pets")
-blobs = cc.persist_fs("blobs")
-events = cc.pubsub_topic("events")
-level = cc.config_value("log_level")
+pets = cloudcc.persist_kv("pets")
+blobs = cloudcc.persist_fs("blobs")
+events = cloudcc.pubsub_topic("events")
+level = cloudcc.config_value("log_level")
 `)
 	for _, want := range []string{
-		`pets = _cc_kv.connect("pets")`,
-		`blobs = _cc_fs.connect("blobs")`,
-		`events = _cc_pubsub.connect("events")`,
-		`level = _cc_config.value("log_level")`,
+		`pets = _cloudcc_kv.connect("pets")`,
+		`blobs = _cloudcc_fs.connect("blobs")`,
+		`events = _cloudcc_pubsub.connect("events")`,
+		`level = _cloudcc_config.value("log_level")`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q:\n%s", want, got)
 		}
 	}
 	// Imports are emitted in sorted order, so the output is deterministic.
-	want := "from _cc_runtime import config as _cc_config\n" +
-		"from _cc_runtime import fs as _cc_fs\n" +
-		"from _cc_runtime import kv as _cc_kv\n" +
-		"from _cc_runtime import pubsub as _cc_pubsub\n"
+	want := "from _cloudcc_runtime import config as _cloudcc_config\n" +
+		"from _cloudcc_runtime import fs as _cloudcc_fs\n" +
+		"from _cloudcc_runtime import kv as _cloudcc_kv\n" +
+		"from _cloudcc_runtime import pubsub as _cloudcc_pubsub\n"
 	if !strings.Contains(got, want) {
 		t.Errorf("import block is not sorted:\n%s", got)
 	}
 }
 
 func TestRewriteIsDeterministic(t *testing.T) {
-	src := "import cloudcompiler as cc\na = cc.persist_kv(\"a\")\nb = cc.persist_fs(\"b\")\nc = cc.pubsub_topic(\"c\")\n"
+	src := "import cloudcompiler as cloudcc\na = cloudcc.persist_kv(\"a\")\nb = cloudcc.persist_fs(\"b\")\nc = cloudcc.pubsub_topic(\"c\")\n"
 	first := rewrite(t, src)
 	for i := 0; i < 10; i++ {
 		if got := rewrite(t, src); got != first {
@@ -223,16 +223,16 @@ func TestRuntimeFilesAreEmbedded(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"_cc_runtime/__init__.py",
-		"_cc_runtime/_client.py",
-		"_cc_runtime/kv.py",
-		"_cc_runtime/fs.py",
-		"_cc_runtime/secret.py",
-		"_cc_runtime/orm.py",
-		"_cc_runtime/redis_.py",
-		"_cc_runtime/pubsub.py",
-		"_cc_runtime/config.py",
-		"_cc_runtime/expose.py",
+		"_cloudcc_runtime/__init__.py",
+		"_cloudcc_runtime/_client.py",
+		"_cloudcc_runtime/kv.py",
+		"_cloudcc_runtime/fs.py",
+		"_cloudcc_runtime/secret.py",
+		"_cloudcc_runtime/orm.py",
+		"_cloudcc_runtime/redis_.py",
+		"_cloudcc_runtime/pubsub.py",
+		"_cloudcc_runtime/config.py",
+		"_cloudcc_runtime/expose.py",
 	} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("missing embedded file %s", want)
@@ -261,11 +261,11 @@ func TestOnlyTheShimsImportBoto3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(files["_cc_runtime/_client.py"]), "import boto3") {
+	if !strings.Contains(string(files["_cloudcc_runtime/_client.py"]), "import boto3") {
 		t.Error("_client.py should be where boto3 lives")
 	}
 	for name, content := range files {
-		if name == "_cc_runtime/_client.py" {
+		if name == "_cloudcc_runtime/_client.py" {
 			continue
 		}
 		if strings.Contains(string(content), "import boto3") {
@@ -286,7 +286,7 @@ func TestRenderLambdaEntry(t *testing.T) {
 		"from mangum import Mangum",
 		`Mangum(getattr(_module, "app")`,
 		"def handler(event, context):",
-		"_cc_pubsub.is_sns_event(event)",
+		"_cloudcc_pubsub.is_sns_event(event)",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing %q in:\n%s", want, src)
@@ -304,7 +304,7 @@ func TestRenderLambdaEntryWithoutAnASGIApp(t *testing.T) {
 	if strings.Contains(src, "Mangum") {
 		t.Errorf("a non-HTTP unit should not pull in Mangum:\n%s", src)
 	}
-	if !strings.Contains(src, "_cc_pubsub.dispatch(event)") {
+	if !strings.Contains(src, "_cloudcc_pubsub.dispatch(event)") {
 		t.Errorf("subscriber dispatch is missing:\n%s", src)
 	}
 }
@@ -386,10 +386,10 @@ func TestPackageScriptBuildsContainerUnits(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(got)
-	if !strings.Contains(src, `docker build --quiet --tag "cc-reporter:latest"`) {
+	if !strings.Contains(src, `docker build --quiet --tag "cloudcc-reporter:latest"`) {
 		t.Errorf("a containerised unit should be built as an image:\n%s", src)
 	}
-	if strings.Contains(src, "cc-api:latest") {
+	if strings.Contains(src, "cloudcc-api:latest") {
 		t.Errorf("a zip-packaged unit should not be built as an image:\n%s", src)
 	}
 	if !strings.Contains(src, "api.zip") {
@@ -406,7 +406,7 @@ func TestPushScriptTargetsTheExportedRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(got)
-	if !strings.Contains(src, `push "reporter" "CC_ECR_REPORTER_URL"`) {
+	if !strings.Contains(src, `push "reporter" "CLOUDCC_ECR_REPORTER_URL"`) {
 		t.Errorf("the push script should read the repository from the stack output:\n%s", src)
 	}
 	if strings.Contains(src, `push "api"`) {

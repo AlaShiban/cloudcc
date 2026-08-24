@@ -1,10 +1,10 @@
 """Every stateful capability, declared once and shared by both units."""
 
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
-catalogue = cc.persist_kv("catalogue")
-docs = cc.persist_fs("itemDocs")
-signing_key = cc.persist_secret("signingKey")
-db = cc.persist_orm("shopdb", models=["Item", "Order"])
-cache = cc.persist_redis("itemCache")
-events = cc.pubsub_topic("itemEvents")
+catalogue = cloudcc.persist_kv("catalogue")
+docs = cloudcc.persist_fs("itemDocs")
+signing_key = cloudcc.persist_secret("signingKey")
+db = cloudcc.persist_orm("shopdb", models=["Item", "Order"])
+cache = cloudcc.persist_redis("itemCache")
+events = cloudcc.pubsub_topic("itemEvents")

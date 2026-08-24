@@ -1,7 +1,7 @@
 // Package sdkdetect finds CloudCompiler SDK calls in Python source.
 //
 // The SDK replaces Klotho 1's comment annotations (D1): a call like
-// cc.persist_kv("petsByOwner") is a compile-time hint. Detection is
+// cloudcc.persist_kv("petsByOwner") is a compile-time hint. Detection is
 // import-alias aware and accepts literal arguments only, so every capability
 // is resolvable without executing a line of user code.
 package sdkdetect
@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/cloudcompiler/cc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/config"
 )
 
 // PackageName is the importable name of the SDK.

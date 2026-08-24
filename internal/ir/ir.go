@@ -16,8 +16,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/graph"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/graph"
 )
 
 // Key identifies a node. Kind is a capability name for intents
@@ -66,7 +66,7 @@ type Resource interface {
 	// Props are the resource arguments, before pulumi_params are merged.
 	Props() map[string]any
 	// EnvOutputs maps environment variable names to the value an execution
-	// unit should receive, e.g. CC_KV_PETSBYOWNER_TABLE -> this table's name.
+	// unit should receive, e.g. CLOUDCC_KV_PETSBYOWNER_TABLE -> this table's name.
 	//
 	// PLAN-DEVIATION: the brief types this as map[string]string (env name ->
 	// property name). A plain property name cannot express an RDS connection

@@ -146,7 +146,7 @@ func TestLoadMissingFileYieldsDefaults(t *testing.T) {
 
 func TestLoadLayersOverBuiltins(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "cc.yaml")
+	path := filepath.Join(dir, "cloudcc.yaml")
 	must(t, os.WriteFile(path, []byte(`
 app: petstore
 defaults:
@@ -178,7 +178,7 @@ persisted:
 
 func TestLoadRejectsUnknownFields(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "cc.yaml")
+	path := filepath.Join(dir, "cloudcc.yaml")
 	must(t, os.WriteFile(path, []byte("app: x\nnot_a_field: 1\n"), 0o644))
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected an error for an unknown field")
@@ -234,7 +234,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	path := filepath.Join(dir, "cc.yaml")
+	path := filepath.Join(dir, "cloudcc.yaml")
 	must(t, os.WriteFile(path, data, 0o644))
 
 	back, err := Load(path)

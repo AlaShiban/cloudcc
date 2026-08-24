@@ -1,16 +1,16 @@
-# CloudCompiler (`cc`)
+# CloudCompiler (`cloudcc`)
 
 Write a plain Python application. Add a few hints. Get infrastructure.
 
 ```python
 # app.py
 from fastapi import FastAPI, HTTPException
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 app = FastAPI()
 
-pets = cc.persist_kv("petsByOwner")     # -> DynamoDB
-cc.expose(app, id="pet-api")            # -> API Gateway v2 + Lambda
+pets = cloudcc.persist_kv("petsByOwner")     # -> DynamoDB
+cloudcc.expose(app, id="pet-api")            # -> API Gateway v2 + Lambda
 
 
 @app.get("/pets/{pet_id}")
@@ -22,11 +22,11 @@ def get_pet(pet_id: str):
 ```
 
 ```console
-$ cc ./app
-cc: compiled petstore into compiled
+$ cloudcc ./app
+cloudcc: compiled petstore into compiled
 ```
 
-`cc` reads those calls statically — it never imports or runs your program —
+`cloudcc` reads those calls statically — it never imports or runs your program —
 and writes a Pulumi TypeScript project next to a copy of your source with the
 hints rewritten into real AWS clients. Your own tree is never modified.
 
@@ -34,15 +34,15 @@ hints rewritten into real AWS clients. Your own tree is never modified.
 compiled/
 ├── index.ts              # the infrastructure, one const per resource
 ├── Pulumi.yaml           # project; Pulumi.<app>.yaml is created once and kept
-├── cc.yaml               # every decision this compile made, including defaults
+├── cloudcc.yaml               # every decision this compile made, including defaults
 ├── topology.mmd / .dot   # architecture diagram, rendered locally
 ├── bin/package.sh        # installs dependencies and zips each unit
 ├── main/                 # your code, rewritten
-│   ├── app.py            #   cc.persist_kv(...) -> _cc_kv.connect(...)
-│   ├── _cc_runtime/      #   the injected clients; the only place boto3 appears
-│   ├── cc_lambda_entry.py
+│   ├── app.py            #   cloudcc.persist_kv(...) -> _cloudcc_kv.connect(...)
+│   ├── _cloudcc_runtime/      #   the injected clients; the only place boto3 appears
+│   ├── cloudcc_lambda_entry.py
 │   └── requirements.txt  #   yours, plus what the shims need
-└── .cc-state.json        # fingerprint, so `cc deploy` can refuse stale output
+└── .cloudcc-state.json        # fingerprint, so `cloudcc deploy` can refuse stale output
 ```
 
 ## Install
@@ -53,8 +53,8 @@ brew install --cask docker        # or: brew install colima docker && colima sta
 uv python install 3.12
 
 git clone <this repo> && cd cloudcompiler
-go build -o cc ./cmd/cc
-./cc doctor                       # tells you what is missing and how to get it
+go build -o cloudcc ./cmd/cloudcc
+./cloudcc doctor                       # tells you what is missing and how to get it
 ```
 
 macOS and Linux only: the Python parser is tree-sitter through cgo.
@@ -62,27 +62,27 @@ macOS and Linux only: the Python parser is tree-sitter through cgo.
 ## Use
 
 ```console
-$ cc ./app                        # compile (the default command)
-$ cc ./app --dump-ir              # print the intermediate representation
-$ cc ./app --strict               # treat warnings as errors
-$ cc diagram ./app --format dot   # print the architecture
-$ cc deploy ./app                 # deploy to AWS
-$ cc deploy ./app --preview       # show what would change
-$ cc deploy ./app --destroy       # tear it down
-$ cc init                         # scaffold a cc.yaml
-$ cc doctor                       # check the toolchain
+$ cloudcc ./app                        # compile (the default command)
+$ cloudcc ./app --dump-ir              # print the intermediate representation
+$ cloudcc ./app --strict               # treat warnings as errors
+$ cloudcc diagram ./app --format dot   # print the architecture
+$ cloudcc deploy ./app                 # deploy to AWS
+$ cloudcc deploy ./app --preview       # show what would change
+$ cloudcc deploy ./app --destroy       # tear it down
+$ cloudcc init                         # scaffold a cloudcc.yaml
+$ cloudcc doctor                       # check the toolchain
 ```
 
 ### Try it without an AWS account
 
-`cc` deploys against a local AWS emulator with no extra configuration:
+`cloudcc` deploys against a local AWS emulator with no extra configuration:
 
 ```bash
 docker run -d -p 4566:4566 -v /var/run/docker.sock:/var/run/docker.sock \
   ministackorg/ministack
 
-cc ./examples/petstore -o /tmp/petstore
-cc deploy ./examples/petstore -o /tmp/petstore --stack ministack
+cloudcc ./examples/petstore -o /tmp/petstore
+cloudcc deploy ./examples/petstore -o /tmp/petstore --stack ministack
 ```
 
 `--stack ministack` points every service at `$MINISTACK_ENDPOINT` (default
@@ -90,51 +90,51 @@ cc deploy ./examples/petstore -o /tmp/petstore --stack ministack
 state inside the output directory. Nothing needs an account.
 
 The compiled application itself needs no change to run against it either —
-every injected client honours `CC_AWS_ENDPOINT_URL`:
+every injected client honours `CLOUDCC_AWS_ENDPOINT_URL`:
 
 ```bash
 cd /tmp/petstore
 eval "$(pulumi stack output --json \
-        | jq -r 'to_entries[]|select(.key|startswith("CC_"))|"export \(.key)=\(.value|@sh)"')"
+        | jq -r 'to_entries[]|select(.key|startswith("CLOUDCC_"))|"export \(.key)=\(.value|@sh)"')"
 
 cd main
-CC_AWS_ENDPOINT_URL=http://localhost:4566 \
+CLOUDCC_AWS_ENDPOINT_URL=http://localhost:4566 \
   uv run --with fastapi --with uvicorn --with boto3 uvicorn app:app
 ```
 
 ## The SDK
 
-Everything `cc` understands is a call in the `cloudcompiler` package:
+Everything `cloudcc` understands is a call in the `cloudcompiler` package:
 
 | Call | Compiles to |
 |---|---|
-| `cc.expose(app, id=...)` | API Gateway v2 (or an ALB) |
-| `cc.execution_unit(id=...)` | Lambda (or ECS Fargate) |
-| `cc.persist_kv(id)` | DynamoDB |
-| `cc.persist_fs(id)` | S3 |
-| `cc.persist_secret(id)` | Secrets Manager |
-| `cc.persist_orm(id)` | RDS Postgres |
-| `cc.persist_redis(id)` | ElastiCache (or MemoryDB) |
-| `cc.pubsub_topic(id)` | SNS + subscriptions |
-| `cc.static_unit(id, static_files=...)` | S3 website |
-| `cc.config_value(id, secret=...)` | environment variable, Pulumi stack secret when secret |
-| `cc.embed_assets(pattern)` | files bundled with the declaring unit |
+| `cloudcc.expose(app, id=...)` | API Gateway v2 (or an ALB) |
+| `cloudcc.execution_unit(id=...)` | Lambda (or ECS Fargate) |
+| `cloudcc.persist_kv(id)` | DynamoDB |
+| `cloudcc.persist_fs(id)` | S3 |
+| `cloudcc.persist_secret(id)` | Secrets Manager |
+| `cloudcc.persist_orm(id)` | RDS Postgres |
+| `cloudcc.persist_redis(id)` | ElastiCache (or MemoryDB) |
+| `cloudcc.pubsub_topic(id)` | SNS + subscriptions |
+| `cloudcc.static_unit(id, static_files=...)` | S3 website |
+| `cloudcc.config_value(id, secret=...)` | environment variable, Pulumi stack secret when secret |
+| `cloudcc.embed_assets(pattern)` | files bundled with the declaring unit |
 
 Two rules follow from the hints being read rather than run:
 
-**Arguments must be literals.** `cc.persist_kv(name)` is a compile error that
-points at the argument, because `cc` would have to run your program to know
+**Arguments must be literals.** `cloudcc.persist_kv(name)` is a compile error that
+points at the argument, because `cloudcc` would have to run your program to know
 what `name` is.
 
 **Your program still runs locally.** Outside the compiler the SDK returns small
 local emulations — a dict for a KV store, a directory for a bucket — so
 `uvicorn app:app` works on your laptop with no cloud account. The SDK never
-imports boto3; that only ever appears in the `_cc_runtime` package injected
+imports boto3; that only ever appears in the `_cloudcc_runtime` package injected
 into the compiled copy.
 
 ## Configuration
 
-`cc.yaml` decides every type. Nothing is inferred from the shape of your code.
+`cloudcc.yaml` decides every type. Nothing is inferred from the shape of your code.
 
 ```yaml
 app: petstore
@@ -160,8 +160,8 @@ persisted:
 
 Layering runs weakest to strongest: `defaults.<kind>`, then
 `defaults.<kind>.by_type.<type>`, then the explicit entry for that id. The
-fully-resolved result — every default `cc` filled in — is written to
-`compiled/cc.yaml` after each compile, so there is always a record of what was
+fully-resolved result — every default `cloudcc` filled in — is written to
+`compiled/cloudcc.yaml` after each compile, so there is always a record of what was
 decided.
 
 `pulumi_params` is the escape hatch: anything you put there is deep-merged into
@@ -169,15 +169,15 @@ the generated resource's arguments.
 
 ## Multiple execution units
 
-Mark entrypoints and `cc` splits the program along its import graph:
+Mark entrypoints and `cloudcc` splits the program along its import graph:
 
 ```python
 # api.py
-cc.execution_unit(id="api")
+cloudcc.execution_unit(id="api")
 from shared.store import pets          # -> both units share one table
 
 # worker.py
-cc.execution_unit(id="worker")
+cloudcc.execution_unit(id="worker")
 from shared.store import pets
 ```
 
@@ -195,7 +195,7 @@ watch mode, no Windows.
 
 Routes registered on a FastAPI `APIRouter` are not discovered. They are still
 served — the gateway forwards everything to your unit — but they will not show
-up in the topology, and `cc` says so.
+up in the topology, and `cloudcc` says so.
 
 ## Further reading
 

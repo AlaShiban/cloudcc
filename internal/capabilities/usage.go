@@ -3,8 +3,8 @@ package capabilities
 import (
 	"sort"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
 

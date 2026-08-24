@@ -57,7 +57,7 @@ func Identifier(s string) string {
 
 // EnvVar turns s into a SCREAMING_SNAKE environment variable *segment*.
 //
-// The result is always used inside a CC_-prefixed name, so it deliberately
+// The result is always used inside a CLOUDCC_-prefixed name, so it deliberately
 // does nothing about a leading digit: adding a guard character here would put
 // it out of step with the identical function in the injected Python shims,
 // which a parity test compares against.

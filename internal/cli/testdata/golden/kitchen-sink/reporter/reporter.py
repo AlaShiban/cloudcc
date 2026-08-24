@@ -1,6 +1,6 @@
 """A container-hosted unit: it subscribes to the topic and serves a summary."""
-# Injected by cc: runtime clients for this program's declared capabilities.
-from _cc_runtime import expose as _cc_expose
+# Injected by cloudcc: runtime clients for this program's declared capabilities.
+from _cloudcc_runtime import expose as _cloudcc_expose
 
 
 from fastapi import FastAPI
@@ -10,7 +10,7 @@ from stores import catalogue, docs, events
 None
 
 app = FastAPI()
-_cc_expose.register(app, id="reporter-web")
+_cloudcc_expose.register(app, id="reporter-web")
 
 
 @app.get("/health")

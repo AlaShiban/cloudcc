@@ -72,7 +72,7 @@ jobs:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
-      PULUMI_CONFIG_PASSPHRASE: cc-ci
+      PULUMI_CONFIG_PASSPHRASE: cloudcc-ci
       PULUMI_SKIP_UPDATE_CHECK: "true"
 
     steps:
@@ -96,13 +96,13 @@ jobs:
 
       - name: Toolchain check
         run: |
-          go build -o cc ./cmd/cc
-          ./cc doctor
+          go build -o cloudcc ./cmd/cloudcc
+          ./cloudcc doctor
 
       - name: Provisioning and functional tests
         run: ./tests/e2e/ministack.sh
 
-      - name: cc deploy end to end
+      - name: cloudcc deploy end to end
         run: ./tests/e2e/deploy.sh
 
       - name: Upload the work directory on failure
@@ -110,6 +110,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-output
-          path: /tmp/cc-e2e-*
+          path: /tmp/cloudcc-e2e-*
           if-no-files-found: ignore
           retention-days: 3

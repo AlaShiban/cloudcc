@@ -5,9 +5,9 @@ import (
 	"path"
 	"sort"
 
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/sanitize"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
 // execUnit expands one execution unit into compute plus the IAM role and log

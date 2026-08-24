@@ -3,13 +3,13 @@ package capabilities
 import (
 	"fmt"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/iac"
-	_ "github.com/cloudcompiler/cc/internal/iac/pulumi_ts" // registers the pulumi-ts backend
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/provider/aws"
-	"github.com/cloudcompiler/cc/internal/sanitize"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/iac"
+	_ "github.com/cloudcompiler/cloudcc/internal/iac/pulumi_ts" // registers the pulumi-ts backend
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/provider/aws"
+	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
 // ResolveAWSPlugin expands every intent into concrete AWS resources.

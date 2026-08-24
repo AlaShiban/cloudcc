@@ -1,4 +1,4 @@
-# Stack settings for petstore-multi. cc creates this file once and never overwrites it,
+# Stack settings for petstore-multi. cloudcc creates this file once and never overwrites it,
 # so anything you configure here survives recompiling.
 config:
   aws:region: us-east-1

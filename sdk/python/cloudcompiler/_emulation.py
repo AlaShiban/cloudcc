@@ -4,7 +4,7 @@ These exist for one reason: so that a program written against the SDK still
 runs with ``uvicorn app:app`` on a laptop, with no cloud account. They are
 deliberately small. A KV store is a dictionary; a bucket is a directory.
 
-Their method signatures are the contract that the injected ``_cc_runtime``
+Their method signatures are the contract that the injected ``_cloudcc_runtime``
 clients must match exactly -- a parity test in the compiler's test suite
 compares the two, because two implementations of one API drift otherwise.
 """
@@ -18,8 +18,8 @@ import threading
 from typing import Any, Callable, Iterable
 
 #: Where directory-backed emulations keep their state.
-LOCAL_ROOT_ENV = "CC_LOCAL_STATE_DIR"
-DEFAULT_LOCAL_ROOT = ".cc-local"
+LOCAL_ROOT_ENV = "CLOUDCC_LOCAL_STATE_DIR"
+DEFAULT_LOCAL_ROOT = ".cloudcc-local"
 
 
 def local_root() -> pathlib.Path:
@@ -127,12 +127,12 @@ class Secret:
     def get(self) -> str:
         """Return the secret's value.
 
-        Locally this reads ``CC_SECRET_<ID>`` from the environment so tests can
+        Locally this reads ``CLOUDCC_SECRET_<ID>`` from the environment so tests can
         provide one without a cloud account.
         """
         if self._value is not None:
             return self._value
-        env = "CC_SECRET_" + "".join(c.upper() if c.isalnum() else "_" for c in self.id)
+        env = "CLOUDCC_SECRET_" + "".join(c.upper() if c.isalnum() else "_" for c in self.id)
         return os.environ.get(env, "")
 
     def set(self, value: str) -> None:
@@ -242,7 +242,7 @@ class Gateway:
     def url(self) -> str:
         """The deployed URL, delivered by the compiler as an environment
         variable. Empty when running locally."""
-        env = "CC_GATEWAY_" + "".join(c.upper() if c.isalnum() else "_" for c in self.id) + "_URL"
+        env = "CLOUDCC_GATEWAY_" + "".join(c.upper() if c.isalnum() else "_" for c in self.id) + "_URL"
         return os.environ.get(env, "")
 
     def __repr__(self) -> str:

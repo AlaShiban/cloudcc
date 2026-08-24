@@ -3,11 +3,11 @@ package capabilities
 import (
 	"fmt"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/diag"
-	"github.com/cloudcompiler/cc/internal/sdkdetect"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 )
 
 // ConfigPlugin validates the loaded configuration. It is the root of the

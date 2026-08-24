@@ -1,4 +1,4 @@
-module github.com/cloudcompiler/cc
+module github.com/cloudcompiler/cloudcc
 
 go 1.26.5
 

@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 	"github.com/spf13/afero"
 )
 

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudcompiler/cc/internal/diag"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 )
 
 func detect(t *testing.T, src string) ([]Hint, *diag.Diagnostics) {
@@ -22,8 +22,8 @@ func detect(t *testing.T, src string) ([]Hint, *diag.Diagnostics) {
 
 func TestDetectModuleAlias(t *testing.T) {
 	hints, d := detect(t, `
-import cloudcompiler as cc
-pets = cc.persist_kv("petsByOwner")
+import cloudcompiler as cloudcc
+pets = cloudcc.persist_kv("petsByOwner")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -69,12 +69,12 @@ func TestDetectFromImportAliased(t *testing.T) {
 
 func TestUnrelatedCallsIgnored(t *testing.T) {
 	hints, d := detect(t, `
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 import other
 other.persist_kv("not-ours")
-cc.not_a_capability("x")
+cloudcc.not_a_capability("x")
 print("hello")
-pets = cc.persist_kv("ours")
+pets = cloudcc.persist_kv("ours")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -94,9 +94,9 @@ func TestNoSDKImportMeansNoHints(t *testing.T) {
 func TestExposeRecordsAppExpression(t *testing.T) {
 	hints, d := detect(t, `
 from fastapi import FastAPI
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 app = FastAPI()
-cc.expose(app, id="pet-api")
+cloudcc.expose(app, id="pet-api")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -114,9 +114,9 @@ cc.expose(app, id="pet-api")
 
 func TestConfigValueBoolAndDefault(t *testing.T) {
 	hints, d := detect(t, `
-import cloudcompiler as cc
-k = cc.config_value("api_key", default="none", secret=True)
-lvl = cc.config_value("log_level", "info")
+import cloudcompiler as cloudcc
+k = cloudcc.config_value("api_key", default="none", secret=True)
+lvl = cloudcc.config_value("log_level", "info")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -134,8 +134,8 @@ lvl = cc.config_value("log_level", "info")
 
 func TestPersistORMModelList(t *testing.T) {
 	hints, d := detect(t, `
-import cloudcompiler as cc
-db = cc.persist_orm("maindb", models=["Pet", "Owner"])
+import cloudcompiler as cloudcc
+db = cloudcc.persist_orm("maindb", models=["Pet", "Owner"])
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -147,8 +147,8 @@ db = cc.persist_orm("maindb", models=["Pet", "Owner"])
 
 func TestPersistORMAcceptsModelClassNames(t *testing.T) {
 	hints, d := detect(t, `
-import cloudcompiler as cc
-db = cc.persist_orm("maindb", models=[Pet, Owner])
+import cloudcompiler as cloudcc
+db = cloudcc.persist_orm("maindb", models=[Pet, Owner])
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -160,17 +160,17 @@ db = cc.persist_orm("maindb", models=[Pet, Owner])
 
 func TestNonLiteralArgumentIsAPreciseError(t *testing.T) {
 	_, d := detect(t, `
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 name = "petsByOwner"
-pets = cc.persist_kv(name)
+pets = cloudcc.persist_kv(name)
 `)
 	items := d.Items()
 	if len(items) != 1 {
 		t.Fatalf("got %d diagnostics, want 1: %v", len(items), items)
 	}
 	got := items[0].String()
-	// The offending argument starts at line 4, column 22.
-	if !strings.HasPrefix(got, "app.py:4:22: error: persist_kv:") {
+	// The offending argument starts at line 4, column 27.
+	if !strings.HasPrefix(got, "app.py:4:27: error: persist_kv:") {
 		t.Errorf("diagnostic = %q", got)
 	}
 	if !strings.Contains(got, "string literal") || !strings.Contains(got, "the variable name") {
@@ -179,7 +179,7 @@ pets = cc.persist_kv(name)
 }
 
 func TestFStringRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cc\nx = cc.persist_kv(f\"pets-{env}\")\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv(f\"pets-{env}\")\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "f-string") {
 		t.Fatalf("diagnostics = %v", items)
@@ -187,7 +187,7 @@ func TestFStringRejected(t *testing.T) {
 }
 
 func TestUnknownKeywordRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cc\nx = cc.persist_kv(id=\"a\", nope=1)\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv(id=\"a\", nope=1)\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "no parameter") {
 		t.Fatalf("diagnostics = %v", items)
@@ -195,7 +195,7 @@ func TestUnknownKeywordRejected(t *testing.T) {
 }
 
 func TestMissingRequiredArgRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cc\nx = cc.persist_kv()\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv()\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "requires the id argument") {
 		t.Fatalf("diagnostics = %v", items)
@@ -203,7 +203,7 @@ func TestMissingRequiredArgRejected(t *testing.T) {
 }
 
 func TestTooManyPositionalArgsRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cc\nx = cc.persist_kv(\"a\", \"b\")\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv(\"a\", \"b\")\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "at most 1") {
 		t.Fatalf("diagnostics = %v", items)
@@ -212,8 +212,8 @@ func TestTooManyPositionalArgsRejected(t *testing.T) {
 
 func TestStaticUnitArgs(t *testing.T) {
 	hints, d := detect(t, `
-import cloudcompiler as cc
-cc.static_unit("site", static_files="./public/**/*", shared_files="./public/shared/*")
+import cloudcompiler as cloudcc
+cloudcc.static_unit("site", static_files="./public/**/*", shared_files="./public/shared/*")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -226,9 +226,9 @@ cc.static_unit("site", static_files="./public/**/*", shared_files="./public/shar
 
 func TestEnclosingFunctionRecorded(t *testing.T) {
 	hints, _ := detect(t, `
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 def handler():
-    t = cc.pubsub_topic("events")
+    t = cloudcc.pubsub_topic("events")
 `)
 	if len(hints) != 1 || hints[0].Enclosing != "handler" {
 		t.Fatalf("hints = %+v", hints)
@@ -236,20 +236,20 @@ def handler():
 }
 
 func TestSpanCoversTheWholeCall(t *testing.T) {
-	src := "import cloudcompiler as cc\npets = cc.persist_kv(\"petsByOwner\")\n"
+	src := "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n"
 	hints, _ := detect(t, src)
 	h := hints[0]
-	if got, want := src[h.Span[0]:h.Span[1]], `cc.persist_kv("petsByOwner")`; got != want {
+	if got, want := src[h.Span[0]:h.Span[1]], `cloudcc.persist_kv("petsByOwner")`; got != want {
 		t.Errorf("span text = %q, want %q", got, want)
 	}
 }
 
 func TestHintsSortedByOffset(t *testing.T) {
 	hints, _ := detect(t, `
-import cloudcompiler as cc
-a = cc.persist_kv("a")
-b = cc.persist_fs("b")
-c = cc.pubsub_topic("c")
+import cloudcompiler as cloudcc
+a = cloudcc.persist_kv("a")
+b = cloudcc.persist_fs("b")
+c = cloudcc.pubsub_topic("c")
 `)
 	var ids []string
 	for _, h := range hints {
@@ -261,19 +261,19 @@ c = cc.pubsub_topic("c")
 }
 
 func TestEscapeSequencesDecoded(t *testing.T) {
-	hints, _ := detect(t, "import cloudcompiler as cc\ncc.static_unit(\"s\", static_files=\"./a\\tb/*\")\n")
+	hints, _ := detect(t, "import cloudcompiler as cloudcc\ncloudcc.static_unit(\"s\", static_files=\"./a\\tb/*\")\n")
 	if got := hints[0].Str("static_files"); got != "./a\tb/*" {
 		t.Errorf("static_files = %q", got)
 	}
 }
 
 func TestResolveImportsRecordsAlias(t *testing.T) {
-	f := &source.File{Path: "a.py", Content: []byte("import cloudcompiler as cc\n")}
+	f := &source.File{Path: "a.py", Content: []byte("import cloudcompiler as cloudcc\n")}
 	if err := f.ParsePython(); err != nil {
 		t.Fatal(err)
 	}
 	imp := ResolveImports(f)
-	if imp.Alias != "cc" || !imp.Modules["cc"] {
+	if imp.Alias != "cloudcc" || !imp.Modules["cloudcc"] {
 		t.Errorf("imports = %+v", imp)
 	}
 }

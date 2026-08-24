@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/diag"
-	"github.com/cloudcompiler/cc/internal/provider/aws"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/provider/aws"
 )
 
 // ValidatePlugin checks every resolved type against the provider's allow-list

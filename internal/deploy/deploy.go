@@ -1,10 +1,10 @@
 // Package deploy drives the emitted Pulumi project through the Automation
 // API.
 //
-// This is the only part of cc that touches the network, and it is deliberately
+// This is the only part of cloudcc that touches the network, and it is deliberately
 // isolated: nothing on the compile path imports it, which keeps both the
 // Automation API's weight and any possibility of a network call out of
-// `cc compile`. A structural test enforces that.
+// `cloudcc compile`. A structural test enforces that.
 package deploy
 
 import (
@@ -156,7 +156,7 @@ func ensureDependencies(ctx context.Context, opts Options) error {
 	if _, err := os.Stat(filepath.Join(opts.Dir, "node_modules", "@pulumi", "pulumi")); err == nil {
 		return nil
 	}
-	fmt.Fprintln(opts.Err, "cc: installing the generated project's dependencies")
+	fmt.Fprintln(opts.Err, "cloudcc: installing the generated project's dependencies")
 
 	cmd := exec.CommandContext(ctx, "pulumi", "install")
 	cmd.Dir = opts.Dir
@@ -213,9 +213,9 @@ func emulatorEnv(opts Options) map[string]string {
 		env["PULUMI_BACKEND_URL"] = "file://" + filepath.Join(opts.Dir, LocalStateDir)
 	}
 	if os.Getenv("PULUMI_CONFIG_PASSPHRASE") == "" && os.Getenv("PULUMI_CONFIG_PASSPHRASE_FILE") == "" {
-		env["PULUMI_CONFIG_PASSPHRASE"] = "cc-emulator"
+		env["PULUMI_CONFIG_PASSPHRASE"] = "cloudcc-emulator"
 	}
-	env["CC_AWS_ENDPOINT_URL"] = opts.EmulatorEndpoint
+	env["CLOUDCC_AWS_ENDPOINT_URL"] = opts.EmulatorEndpoint
 	return env
 }
 
@@ -273,7 +273,7 @@ func emulatorCredential(env string) string {
 	if v := os.Getenv(env); v != "" {
 		return v
 	}
-	return "cc-local"
+	return "cloudcc-local"
 }
 
 func hasScript(dir, rel string) bool {
@@ -286,7 +286,7 @@ func runScript(ctx context.Context, opts Options, rel, describe string) error {
 	if !hasScript(opts.Dir, rel) {
 		return fmt.Errorf("%s is missing from %s; recompile before deploying", rel, opts.Dir)
 	}
-	fmt.Fprintf(opts.Err, "cc: %s\n", describe)
+	fmt.Fprintf(opts.Err, "cloudcc: %s\n", describe)
 
 	cmd := exec.CommandContext(ctx, "bash", path)
 	cmd.Dir = opts.Dir
@@ -294,7 +294,7 @@ func runScript(ctx context.Context, opts Options, rel, describe string) error {
 	cmd.Stderr = opts.Err
 	cmd.Env = os.Environ()
 	if opts.EmulatorEndpoint != "" {
-		cmd.Env = append(cmd.Env, "CC_AWS_ENDPOINT_URL="+opts.EmulatorEndpoint)
+		cmd.Env = append(cmd.Env, "CLOUDCC_AWS_ENDPOINT_URL="+opts.EmulatorEndpoint)
 	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s failed: %w", rel, err)
@@ -313,7 +313,7 @@ func printOutputs(w io.Writer, outputs auto.OutputMap) {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		ci, cj := strings.HasPrefix(keys[i], "CC_"), strings.HasPrefix(keys[j], "CC_")
+		ci, cj := strings.HasPrefix(keys[i], "CLOUDCC_"), strings.HasPrefix(keys[j], "CLOUDCC_")
 		if ci != cj {
 			return ci
 		}
@@ -330,7 +330,7 @@ func printOutputs(w io.Writer, outputs auto.OutputMap) {
 		fmt.Fprintf(w, "  %-40s %v\n", k, render(value))
 	}
 	fmt.Fprintf(w, "\nTo run a compiled unit locally against these resources:\n"+
-		"  eval \"$(pulumi stack output --json | jq -r 'to_entries[]|select(.key|startswith(\"CC_\"))|\"export \\(.key)=\\(.value|@sh)\"')\"\n")
+		"  eval \"$(pulumi stack output --json | jq -r 'to_entries[]|select(.key|startswith(\"CLOUDCC_\"))|\"export \\(.key)=\\(.value|@sh)\"')\"\n")
 }
 
 func render(v any) string {

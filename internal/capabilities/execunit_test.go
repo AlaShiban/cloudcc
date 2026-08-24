@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 	"github.com/spf13/afero"
 )
 
@@ -102,10 +102,10 @@ func TestBrokenRelativeImportWarns(t *testing.T) {
 
 func TestMultipleUnitsShareAFile(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"api.py":             "import cloudcompiler as cc\ncc.execution_unit(id=\"api\")\nfrom shared.store import pets\n",
-		"worker.py":          "import cloudcompiler as cc\ncc.execution_unit(id=\"worker\")\nfrom shared.store import pets\n",
+		"api.py":             "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\nfrom shared.store import pets\n",
+		"worker.py":          "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\nfrom shared.store import pets\n",
 		"shared/__init__.py": "",
-		"shared/store.py":    "import cloudcompiler as cc\npets = cc.persist_kv(\"petsByOwner\")\n",
+		"shared/store.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n",
 	})
 	units := config.SortedKeys(ctx.UnitFiles)
 	if !reflect.DeepEqual(units, []string{"api", "worker"}) {
@@ -129,7 +129,7 @@ func TestMultipleUnitsShareAFile(t *testing.T) {
 
 func TestExecutionUnitInsideFunctionIsAnError(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "app.py", "import cloudcompiler as cc\ndef f():\n    cc.execution_unit(id=\"api\")\n")
+	write(t, root, "app.py", "import cloudcompiler as cloudcc\ndef f():\n    cloudcc.execution_unit(id=\"api\")\n")
 	ctx := compileExpectingDiags(t, root)
 	if !containsSubstr(diagStrings(ctx), "must be called at module level") {
 		t.Errorf("diagnostics = %v", diagStrings(ctx))
@@ -139,7 +139,7 @@ func TestExecutionUnitInsideFunctionIsAnError(t *testing.T) {
 func TestTwoUnitsCannotShareAnEntrypoint(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "app.py",
-		"import cloudcompiler as cc\ncc.execution_unit(id=\"a\")\ncc.execution_unit(id=\"b\")\n")
+		"import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"a\")\ncloudcc.execution_unit(id=\"b\")\n")
 	ctx := compileExpectingDiags(t, root)
 	if !containsSubstr(diagStrings(ctx), "already the entrypoint") {
 		t.Errorf("diagnostics = %v", diagStrings(ctx))
@@ -148,8 +148,8 @@ func TestTwoUnitsCannotShareAnEntrypoint(t *testing.T) {
 
 func TestNonPythonFilesTravelWithEveryUnit(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"api.py":           "import cloudcompiler as cc\ncc.execution_unit(id=\"api\")\n",
-		"worker.py":        "import cloudcompiler as cc\ncc.execution_unit(id=\"worker\")\n",
+		"api.py":           "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\n",
+		"worker.py":        "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\n",
 		"requirements.txt": "fastapi\n",
 		"templates/a.html": "<p></p>",
 	})
@@ -164,8 +164,8 @@ func TestNonPythonFilesTravelWithEveryUnit(t *testing.T) {
 
 func TestStaticUnitClaimsFilesBeforeClosure(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"app.py": "import cloudcompiler as cc\n" +
-			"cc.static_unit(\"site\", static_files=\"./public/**/*\")\n",
+		"app.py": "import cloudcompiler as cloudcc\n" +
+			"cloudcc.static_unit(\"site\", static_files=\"./public/**/*\")\n",
 		"public/index.html": "<html></html>",
 		"public/app.js":     "console.log(1)",
 		"data/keep.json":    "{}",
@@ -198,8 +198,8 @@ func TestStaticUnitClaimsFilesBeforeClosure(t *testing.T) {
 
 func TestSharedFilesStayAvailableToUnits(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"app.py": "import cloudcompiler as cc\n" +
-			"cc.static_unit(\"site\", static_files=\"./public/*.html\", shared_files=\"./public/shared.json\")\n",
+		"app.py": "import cloudcompiler as cloudcc\n" +
+			"cloudcc.static_unit(\"site\", static_files=\"./public/*.html\", shared_files=\"./public/shared.json\")\n",
 		"public/index.html":  "<html></html>",
 		"public/shared.json": "{}",
 	})
@@ -217,16 +217,16 @@ func TestSharedFilesStayAvailableToUnits(t *testing.T) {
 
 func TestUnitFilesWrittenToSeparateOutputDirectories(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"api.py":    "import cloudcompiler as cc\ncc.execution_unit(id=\"api\")\n",
-		"worker.py": "import cloudcompiler as cc\ncc.execution_unit(id=\"worker\")\n",
+		"api.py":    "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\n",
+		"worker.py": "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\n",
 	})
 
 	for path, wantSubstr := range map[string]string{
-		"api/api.py":             "None",
-		"worker/worker.py":       "None",
-		"api/_cc_runtime/kv.py":  "def connect(",
-		"api/cc_lambda_entry.py": "def handler(",
-		"api/requirements.txt":   "boto3",
+		"api/api.py":                  "None",
+		"worker/worker.py":            "None",
+		"api/_cloudcc_runtime/kv.py":  "def connect(",
+		"api/cloudcc_lambda_entry.py": "def handler(",
+		"api/requirements.txt":        "boto3",
 	} {
 		data, err := afero.ReadFile(ctx.Out, path)
 		if err != nil {
@@ -243,8 +243,8 @@ func TestUnitFilesWrittenToSeparateOutputDirectories(t *testing.T) {
 
 func TestStaticAssetsWrittenUnderTheirSiteRoot(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"app.py": "import cloudcompiler as cc\n" +
-			"cc.static_unit(\"site\", static_files=\"./public/**/*\")\n",
+		"app.py": "import cloudcompiler as cloudcc\n" +
+			"cloudcc.static_unit(\"site\", static_files=\"./public/**/*\")\n",
 		"public/index.html":  "<html></html>",
 		"public/css/app.css": "body{}",
 	})
@@ -258,7 +258,7 @@ func TestStaticAssetsWrittenUnderTheirSiteRoot(t *testing.T) {
 
 func TestSourceTreeIsNeverModified(t *testing.T) {
 	root := t.TempDir()
-	src := "import cloudcompiler as cc\npets = cc.persist_kv(\"petsByOwner\")\n"
+	src := "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n"
 	write(t, root, "app.py", src)
 
 	cfg := config.New()

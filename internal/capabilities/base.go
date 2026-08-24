@@ -5,7 +5,7 @@
 // created exclusively by internal/provider/aws (D7).
 package capabilities
 
-import "github.com/cloudcompiler/cc/internal/compiler"
+import "github.com/cloudcompiler/cloudcc/internal/compiler"
 
 // Plugin names. Declaring them as constants keeps the dependency declarations
 // below honest -- a typo becomes a build-time schedule error rather than a

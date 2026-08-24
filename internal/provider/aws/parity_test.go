@@ -23,7 +23,7 @@ func repoRoot(t *testing.T) string {
 
 func shimSource(t *testing.T, name string) string {
 	t.Helper()
-	path := filepath.Join(repoRoot(t), "internal", "runtime", "py", "templates", "_cc_runtime", name)
+	path := filepath.Join(repoRoot(t), "internal", "runtime", "py", "templates", "_cloudcc_runtime", name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -40,17 +40,17 @@ func TestShimsReadTheNamesTheCompilerWrites(t *testing.T) {
 		goName   string
 		pyFormat string
 	}{
-		{"kv.py", EnvKVTable("x"), "CC_KV_%s_TABLE"},
-		{"fs.py", EnvFSBucket("x"), "CC_FS_%s_BUCKET"},
-		{"secret.py", EnvSecretARN("x"), "CC_SECRET_%s_ARN"},
-		{"orm.py", EnvORMURL("x"), "CC_ORM_%s_URL"},
-		{"orm.py", EnvORMSecretARN("x"), "CC_ORM_%s_SECRET_ARN"},
-		{"redis_.py", EnvRedisEndpoint("x"), "CC_REDIS_%s_ENDPOINT"},
-		{"redis_.py", EnvRedisPort("x"), "CC_REDIS_%s_PORT"},
-		{"redis_.py", EnvRedisTLS("x"), "CC_REDIS_%s_TLS"},
-		{"pubsub.py", EnvTopicARN("x"), "CC_TOPIC_%s_ARN"},
-		{"config.py", EnvConfig("x"), "CC_CONFIG_%s"},
-		{"expose.py", EnvGatewayURL("x"), "CC_GATEWAY_%s_URL"},
+		{"kv.py", EnvKVTable("x"), "CLOUDCC_KV_%s_TABLE"},
+		{"fs.py", EnvFSBucket("x"), "CLOUDCC_FS_%s_BUCKET"},
+		{"secret.py", EnvSecretARN("x"), "CLOUDCC_SECRET_%s_ARN"},
+		{"orm.py", EnvORMURL("x"), "CLOUDCC_ORM_%s_URL"},
+		{"orm.py", EnvORMSecretARN("x"), "CLOUDCC_ORM_%s_SECRET_ARN"},
+		{"redis_.py", EnvRedisEndpoint("x"), "CLOUDCC_REDIS_%s_ENDPOINT"},
+		{"redis_.py", EnvRedisPort("x"), "CLOUDCC_REDIS_%s_PORT"},
+		{"redis_.py", EnvRedisTLS("x"), "CLOUDCC_REDIS_%s_TLS"},
+		{"pubsub.py", EnvTopicARN("x"), "CLOUDCC_TOPIC_%s_ARN"},
+		{"config.py", EnvConfig("x"), "CLOUDCC_CONFIG_%s"},
+		{"expose.py", EnvGatewayURL("x"), "CLOUDCC_GATEWAY_%s_URL"},
 	}
 	for _, c := range cases {
 		src := shimSource(t, c.shim)
@@ -103,7 +103,7 @@ for line in sys.stdin.read().splitlines():
 		t.Fatalf("expected %d results, got %d", len(ids), len(got))
 	}
 	for i, id := range ids {
-		want := strings.TrimSuffix(strings.TrimPrefix(EnvConfig(id), "CC_CONFIG_"), "")
+		want := strings.TrimSuffix(strings.TrimPrefix(EnvConfig(id), "CLOUDCC_CONFIG_"), "")
 		if got[i] != want {
 			t.Errorf("id %q: the shim spells it %q, the compiler spells it %q", id, got[i], want)
 		}

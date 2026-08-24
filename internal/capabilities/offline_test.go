@@ -13,26 +13,26 @@ import (
 //
 // internal/deploy is the one place networking is allowed, and it is
 // deliberately not on this path -- the compile path never imports it, which is
-// also what keeps the Automation API's weight out of `cc compile`.
+// also what keeps the Automation API's weight out of `cloudcc compile`.
 func TestTheCompilePathCannotReachTheNetwork(t *testing.T) {
-	// Only cc's own packages are checked. A library on the path may well pull
+	// Only cloudcc's own packages are checked. A library on the path may well pull
 	// in net/http transitively -- afero does, for its HTTP filesystem -- but
 	// that is code the compiler never calls. What matters is that no stage of
 	// the compile reaches for a network client itself.
 	out, err := exec.Command("go", "list", "-deps",
-		"github.com/cloudcompiler/cc/internal/capabilities").Output()
+		"github.com/cloudcompiler/cloudcc/internal/capabilities").Output()
 	if err != nil {
 		t.Fatalf("listing dependencies failed: %v", err)
 	}
 
 	var ours []string
 	for _, dep := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.HasPrefix(dep, "github.com/cloudcompiler/cc/") {
+		if strings.HasPrefix(dep, "github.com/cloudcompiler/cloudcc/") {
 			ours = append(ours, dep)
 		}
 	}
 	if len(ours) < 5 {
-		t.Fatalf("expected the compile path to span several cc packages, found %v", ours)
+		t.Fatalf("expected the compile path to span several cloudcc packages, found %v", ours)
 	}
 
 	banned := map[string]string{
@@ -58,16 +58,16 @@ func TestTheCompilePathCannotReachTheNetwork(t *testing.T) {
 // network, and nothing else may depend on it.
 func TestDeployIsIsolated(t *testing.T) {
 	for _, pkg := range []string{
-		"github.com/cloudcompiler/cc/internal/capabilities",
-		"github.com/cloudcompiler/cc/internal/compiler",
-		"github.com/cloudcompiler/cc/internal/provider/aws",
-		"github.com/cloudcompiler/cc/internal/iac/pulumi_ts",
+		"github.com/cloudcompiler/cloudcc/internal/capabilities",
+		"github.com/cloudcompiler/cloudcc/internal/compiler",
+		"github.com/cloudcompiler/cloudcc/internal/provider/aws",
+		"github.com/cloudcompiler/cloudcc/internal/iac/pulumi_ts",
 	} {
 		out, err := exec.Command("go", "list", "-deps", pkg).Output()
 		if err != nil {
 			t.Fatalf("listing dependencies of %s failed: %v", pkg, err)
 		}
-		if strings.Contains(string(out), "cloudcompiler/cc/internal/deploy") {
+		if strings.Contains(string(out), "cloudcompiler/cloudcc/internal/deploy") {
 			t.Errorf("%s depends on internal/deploy; deployment must stay isolated from compilation", pkg)
 		}
 	}

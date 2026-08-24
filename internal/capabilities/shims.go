@@ -3,12 +3,12 @@ package capabilities
 import (
 	"path"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
-	runtimepy "github.com/cloudcompiler/cc/internal/runtime/py"
-	"github.com/cloudcompiler/cc/internal/sdkdetect"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	runtimepy "github.com/cloudcompiler/cloudcc/internal/runtime/py"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 )
 
 // BinDir holds the generated helper scripts.
@@ -24,7 +24,7 @@ const PackageScript = BinDir + "/package.sh"
 const PushScript = BinDir + "/push-images.sh"
 
 // ShimsPlugin rewrites SDK hint calls in the output copy into real cloud
-// clients, injects the _cc_runtime package, generates the compute entrypoints,
+// clients, injects the _cloudcc_runtime package, generates the compute entrypoints,
 // and writes the copy out (D13).
 //
 // Rewriting happens on a copy of the user's source; the input tree is never
@@ -79,7 +79,7 @@ func (p *ShimsPlugin) rewriteSources(ctx *compiler.Context) error {
 	return nil
 }
 
-// injectRuntime writes the _cc_runtime package, the compute entrypoint and the
+// injectRuntime writes the _cloudcc_runtime package, the compute entrypoint and the
 // merged requirements into each unit's output directory.
 func (p *ShimsPlugin) injectRuntime(ctx *compiler.Context) error {
 	runtimeFiles, err := runtimepy.RuntimeFiles()
@@ -169,7 +169,7 @@ func (p *ShimsPlugin) requirements(ctx *compiler.Context, unitID string, unit *i
 }
 
 // writePackagingScript emits bin/package.sh. Pulumi does not install Python
-// dependencies, so something has to; `cc deploy` runs this before `up`.
+// dependencies, so something has to; `cloudcc deploy` runs this before `up`.
 func (p *ShimsPlugin) writePackagingScript(ctx *compiler.Context) error {
 	var units []runtimepy.PackageUnit
 	containers := false

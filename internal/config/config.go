@@ -1,4 +1,4 @@
-// Package config defines cc.yaml: the single, layered configuration file that
+// Package config defines cloudcc.yaml: the single, layered configuration file that
 // drives every type-selection decision the compiler makes (D5).
 //
 // Layering, from weakest to strongest:
@@ -7,7 +7,7 @@
 //	defaults.<kind>.by_type.<type>  -- provider default-by-type
 //	<section>.<id>                  -- explicit per-resource
 //
-// The fully-resolved result is written back out to compiled/cc.yaml so that
+// The fully-resolved result is written back out to compiled/cloudcc.yaml so that
 // every inferred decision is inspectable.
 package config
 
@@ -117,7 +117,7 @@ type KindDefault struct {
 	ByType         map[string]ResourceConfig `yaml:"by_type,omitempty"`
 }
 
-// App is the whole of cc.yaml.
+// App is the whole of cloudcc.yaml.
 type App struct {
 	App      string `yaml:"app"`
 	Provider string `yaml:"provider"`
@@ -142,7 +142,7 @@ var appNameRe = regexp.MustCompile(`^[\w\-.:/]+$`)
 func ValidateAppName(name string) error {
 	switch {
 	case name == "":
-		return fmt.Errorf("app name is required (set `app:` in cc.yaml or pass --app)")
+		return fmt.Errorf("app name is required (set `app:` in cloudcc.yaml or pass --app)")
 	case len(name) > 50:
 		return fmt.Errorf("app name %q is %d characters; maximum is 50", name, len(name))
 	case !appNameRe.MatchString(name):
@@ -220,7 +220,7 @@ func (a *App) Lookup(kind, id string) ResourceConfig {
 }
 
 // Record writes the fully-resolved configuration for a resource back into the
-// explicit section, so that compiled/cc.yaml documents every decision (D5).
+// explicit section, so that compiled/cloudcc.yaml documents every decision (D5).
 func (a *App) Record(kind, id string, rc ResourceConfig) {
 	a.setSection(kind, id, rc)
 }

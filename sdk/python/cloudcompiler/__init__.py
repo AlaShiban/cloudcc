@@ -6,8 +6,8 @@ them, in a copy of your source, into real cloud clients.
 
 Two rules follow from that:
 
-* Arguments must be literals. ``cc.persist_kv("pets")`` is fine;
-  ``cc.persist_kv(name)`` is a compile error with a precise source location,
+* Arguments must be literals. ``cloudcc.persist_kv("pets")`` is fine;
+  ``cloudcc.persist_kv(name)`` is a compile error with a precise source location,
   because the compiler would have to run your program to know the value.
 * Calls belong at module level, where the compiler can see the shape of the
   program. ``execution_unit`` in particular must be a module-level call.
@@ -19,7 +19,7 @@ account and no credentials. The emulations are deliberately minimal; they
 exist so the program runs, not so it behaves identically to AWS.
 
 This package never imports boto3. Cloud access only ever appears in the
-``_cc_runtime`` package the compiler injects into the compiled copy.
+``_cloudcc_runtime`` package the compiler injects into the compiled copy.
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def execution_unit(id: str, type: str | None = None) -> None:
     module. A program with no ``execution_unit`` call at all is compiled as a
     single unit named ``main``.
 
-    ``type`` is a weak hint ("lambda", "ecs"); ``cc.yaml`` overrides it.
+    ``type`` is a weak hint ("lambda", "ecs"); ``cloudcc.yaml`` overrides it.
     """
     return None
 
@@ -163,4 +163,4 @@ def _config_env_name(id: str) -> str:
     Kept here rather than inlined so the compiler, the shims and the SDK all
     agree on one spelling.
     """
-    return "CC_CONFIG_" + "".join(c.upper() if c.isalnum() else "_" for c in id)
+    return "CLOUDCC_CONFIG_" + "".join(c.upper() if c.isalnum() else "_" for c in id)

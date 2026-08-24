@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// compiled builds a directory that looks like cc's output, with the given
+// compiled builds a directory that looks like cloudcc's output, with the given
 // fingerprint recorded.
 func compiled(t *testing.T, fingerprint string) string {
 	t.Helper()
@@ -79,7 +79,7 @@ func TestForceOverridesStaleness(t *testing.T) {
 
 func TestPreflightRefusesAMissingDirectory(t *testing.T) {
 	_, err := Preflight(PreflightInput{Dir: filepath.Join(t.TempDir(), "absent")})
-	if err == nil || !strings.Contains(err.Error(), "cc compile") {
+	if err == nil || !strings.Contains(err.Error(), "cloudcc compile") {
 		t.Fatalf("the refusal should tell the user to compile: %v", err)
 	}
 }
@@ -155,10 +155,10 @@ func TestEmulatorEnvIsolatesState(t *testing.T) {
 		t.Errorf("an emulator deploy should keep state locally, got %q", got)
 	}
 	if env["PULUMI_CONFIG_PASSPHRASE"] == "" {
-		t.Error("the local backend needs a passphrase, which cc should supply for an emulator stack")
+		t.Error("the local backend needs a passphrase, which cloudcc should supply for an emulator stack")
 	}
-	if env["CC_AWS_ENDPOINT_URL"] != "http://localhost:4566" {
-		t.Errorf("the packaging scripts need the endpoint: %q", env["CC_AWS_ENDPOINT_URL"])
+	if env["CLOUDCC_AWS_ENDPOINT_URL"] != "http://localhost:4566" {
+		t.Errorf("the packaging scripts need the endpoint: %q", env["CLOUDCC_AWS_ENDPOINT_URL"])
 	}
 }
 

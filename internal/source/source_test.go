@@ -158,7 +158,7 @@ func TestModulePaths(t *testing.T) {
 }
 
 func TestQueryFindsCalls(t *testing.T) {
-	f := &File{Path: "a.py", Content: []byte("import cloudcompiler as cc\npets = cc.persist_kv(\"petsByOwner\")\n")}
+	f := &File{Path: "a.py", Content: []byte("import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n")}
 	if err := f.ParsePython(); err != nil {
 		t.Fatal(err)
 	}
@@ -171,8 +171,8 @@ func TestQueryFindsCalls(t *testing.T) {
 	f.Query(q, func(caps map[string]*ts.Node) {
 		fns = append(fns, f.Text(caps["fn"]))
 	})
-	if !reflect.DeepEqual(fns, []string{"cc.persist_kv"}) {
-		t.Errorf("query captured %v, want [cc.persist_kv]", fns)
+	if !reflect.DeepEqual(fns, []string{"cloudcc.persist_kv"}) {
+		t.Errorf("query captured %v, want [cloudcc.persist_kv]", fns)
 	}
 }
 

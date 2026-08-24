@@ -1,7 +1,7 @@
 """The HTTP-facing execution unit."""
-# Injected by cc: runtime clients for this program's declared capabilities.
-from _cc_runtime import config as _cc_config
-from _cc_runtime import expose as _cc_expose
+# Injected by cloudcc: runtime clients for this program's declared capabilities.
+from _cloudcc_runtime import config as _cloudcc_config
+from _cloudcc_runtime import expose as _cloudcc_expose
 
 
 from fastapi import FastAPI, HTTPException
@@ -15,9 +15,9 @@ None
 None
 
 app = FastAPI()
-_cc_expose.register(app, id="pet-api")
+_cloudcc_expose.register(app, id="pet-api")
 
-log_level = _cc_config.value("log_level", default="info")
+log_level = _cloudcc_config.value("log_level", default="info")
 
 
 @app.get("/pets/{pet_id}")

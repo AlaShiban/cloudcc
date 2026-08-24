@@ -12,17 +12,17 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudcompiler/cc/internal/sdkdetect"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
 
 // RuntimePackage is the injected package's name.
-const RuntimePackage = "_cc_runtime"
+const RuntimePackage = "_cloudcc_runtime"
 
 // shimTarget describes what one SDK function is rewritten into.
 type shimTarget struct {
-	// Module is the _cc_runtime submodule, "" when the call is erased.
+	// Module is the _cloudcc_runtime submodule, "" when the call is erased.
 	Module string
 	// Alias is the local name the module is imported as.
 	Alias string
@@ -38,14 +38,14 @@ type shimTarget struct {
 // hints -- execution_unit, static_unit -- are erased, because they describe
 // the build rather than anything that happens at runtime.
 var shims = map[string]shimTarget{
-	sdkdetect.FnPersistKV:     {Module: "kv", Alias: "_cc_kv", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPersistFS:     {Module: "fs", Alias: "_cc_fs", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPersistSecret: {Module: "secret", Alias: "_cc_secret", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPersistORM:    {Module: "orm", Alias: "_cc_orm", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPersistRedis:  {Module: "redis_", Alias: "_cc_redis", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPubSubTopic:   {Module: "pubsub", Alias: "_cc_pubsub", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnConfigValue:   {Module: "config", Alias: "_cc_config", Call: "value", Args: []string{"id", "default"}},
-	sdkdetect.FnExpose:        {Module: "expose", Alias: "_cc_expose", Call: "register", Args: []string{"app", "id", "target"}},
+	sdkdetect.FnPersistKV:     {Module: "kv", Alias: "_cloudcc_kv", Call: "connect", Args: []string{"id"}},
+	sdkdetect.FnPersistFS:     {Module: "fs", Alias: "_cloudcc_fs", Call: "connect", Args: []string{"id"}},
+	sdkdetect.FnPersistSecret: {Module: "secret", Alias: "_cloudcc_secret", Call: "connect", Args: []string{"id"}},
+	sdkdetect.FnPersistORM:    {Module: "orm", Alias: "_cloudcc_orm", Call: "connect", Args: []string{"id"}},
+	sdkdetect.FnPersistRedis:  {Module: "redis_", Alias: "_cloudcc_redis", Call: "connect", Args: []string{"id"}},
+	sdkdetect.FnPubSubTopic:   {Module: "pubsub", Alias: "_cloudcc_pubsub", Call: "connect", Args: []string{"id"}},
+	sdkdetect.FnConfigValue:   {Module: "config", Alias: "_cloudcc_config", Call: "value", Args: []string{"id", "default"}},
+	sdkdetect.FnExpose:        {Module: "expose", Alias: "_cloudcc_expose", Call: "register", Args: []string{"app", "id", "target"}},
 	sdkdetect.FnExecutionUnit: {Erase: "None"},
 	sdkdetect.FnStaticUnit:    {Erase: "None"},
 	sdkdetect.FnEmbedAssets:   {Erase: "pattern"},
@@ -190,7 +190,7 @@ func insertImports(content []byte, needed map[string]string) []byte {
 	sort.Strings(aliases)
 
 	var block strings.Builder
-	block.WriteString("# Injected by cc: runtime clients for this program's declared capabilities.\n")
+	block.WriteString("# Injected by cloudcc: runtime clients for this program's declared capabilities.\n")
 	for _, alias := range aliases {
 		fmt.Fprintf(&block, "from %s import %s as %s\n", RuntimePackage, needed[alias], alias)
 	}

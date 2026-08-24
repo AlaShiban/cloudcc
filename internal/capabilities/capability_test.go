@@ -4,9 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 )
 
 func edgeStrings(ctx *compiler.Context) []string {
@@ -19,10 +19,10 @@ func edgeStrings(ctx *compiler.Context) []string {
 
 func TestPersistIntentIsSharedBetweenUnits(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"api.py":             "import cloudcompiler as cc\ncc.execution_unit(id=\"api\")\nfrom shared.store import pets\n",
-		"worker.py":          "import cloudcompiler as cc\ncc.execution_unit(id=\"worker\")\nfrom shared.store import pets\n",
+		"api.py":             "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\nfrom shared.store import pets\n",
+		"worker.py":          "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\nfrom shared.store import pets\n",
 		"shared/__init__.py": "",
-		"shared/store.py":    "import cloudcompiler as cc\npets = cc.persist_kv(\"petsByOwner\")\n",
+		"shared/store.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n",
 	})
 
 	stores := ctx.Graph.IntentsOfKind(config.KindPersistKV)
@@ -55,13 +55,13 @@ func TestPersistIntentIsSharedBetweenUnits(t *testing.T) {
 
 func TestPersistTypeComesFromConfigNotCodeShape(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"app.py": "import cloudcompiler as cc\ncache = cc.persist_redis(\"sessions\")\n",
+		"app.py": "import cloudcompiler as cloudcc\ncache = cloudcc.persist_redis(\"sessions\")\n",
 	})
 	store := ctx.Graph.IntentsOfKind(config.KindPersistRedis)[0]
 	if got := store.Config().Type; got != "elasticache" {
 		t.Errorf("type = %q, want the configured default elasticache", got)
 	}
-	// The decision is recorded so compiled/cc.yaml documents it.
+	// The decision is recorded so compiled/cloudcc.yaml documents it.
 	if got := ctx.Config.Persisted["sessions"].Type; got != "elasticache" {
 		t.Errorf("recorded type = %q", got)
 	}
@@ -69,9 +69,9 @@ func TestPersistTypeComesFromConfigNotCodeShape(t *testing.T) {
 
 func TestSameIDUnderTwoPersistKindsIsAnError(t *testing.T) {
 	ctx := harnessAllowingDiags(t, map[string]string{
-		"app.py": "import cloudcompiler as cc\n" +
-			"a = cc.persist_kv(\"thing\")\n" +
-			"b = cc.persist_fs(\"thing\")\n",
+		"app.py": "import cloudcompiler as cloudcc\n" +
+			"a = cloudcc.persist_kv(\"thing\")\n" +
+			"b = cloudcc.persist_fs(\"thing\")\n",
 	})
 	if !containsSubstr(diagStrings(ctx), "each id names one store") {
 		t.Errorf("diagnostics = %v", diagStrings(ctx))
@@ -81,10 +81,10 @@ func TestSameIDUnderTwoPersistKindsIsAnError(t *testing.T) {
 func TestExposeDiscoversRoutes(t *testing.T) {
 	ctx := harness(t, map[string]string{
 		"app.py": `from fastapi import FastAPI
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 app = FastAPI()
-cc.expose(app, id="pet-api")
+cloudcc.expose(app, id="pet-api")
 
 @app.get("/pets/{pet_id}")
 def get_pet(pet_id: str):
@@ -128,11 +128,11 @@ def health():
 func TestExposeIgnoresDecoratorsOnOtherObjects(t *testing.T) {
 	ctx := harness(t, map[string]string{
 		"app.py": `from fastapi import FastAPI
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 app = FastAPI()
 other = FastAPI()
-cc.expose(app, id="a")
+cloudcc.expose(app, id="a")
 
 @other.get("/not-ours")
 def x():
@@ -152,11 +152,11 @@ def y():
 func TestExposeWarnsAboutAPIRouter(t *testing.T) {
 	ctx := harness(t, map[string]string{
 		"app.py": `from fastapi import FastAPI, APIRouter
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 app = FastAPI()
 router = APIRouter()
-cc.expose(app, id="a")
+cloudcc.expose(app, id="a")
 
 @app.get("/ours")
 def y():
@@ -170,11 +170,11 @@ def y():
 
 func TestExposeAcrossTwoUnitsIsAnError(t *testing.T) {
 	ctx := harnessAllowingDiags(t, map[string]string{
-		"api.py":             "import cloudcompiler as cc\ncc.execution_unit(id=\"api\")\nimport shared.web\n",
-		"worker.py":          "import cloudcompiler as cc\ncc.execution_unit(id=\"worker\")\nimport shared.web\n",
+		"api.py":             "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\nimport shared.web\n",
+		"worker.py":          "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\nimport shared.web\n",
 		"shared/__init__.py": "",
-		"shared/web.py": "from fastapi import FastAPI\nimport cloudcompiler as cc\n" +
-			"app = FastAPI()\ncc.expose(app, id=\"api\")\n",
+		"shared/web.py": "from fastapi import FastAPI\nimport cloudcompiler as cloudcc\n" +
+			"app = FastAPI()\ncloudcc.expose(app, id=\"api\")\n",
 	})
 	if !containsSubstr(diagStrings(ctx), "must belong to exactly one") {
 		t.Errorf("diagnostics = %v", diagStrings(ctx))
@@ -183,12 +183,12 @@ func TestExposeAcrossTwoUnitsIsAnError(t *testing.T) {
 
 func TestPubSubDistinguishesPublishersFromSubscribers(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"api.py": "import cloudcompiler as cc\ncc.execution_unit(id=\"api\")\n" +
+		"api.py": "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\n" +
 			"from shared.bus import events\ndef go():\n    events.publish({\"a\": 1})\n",
-		"worker.py": "import cloudcompiler as cc\ncc.execution_unit(id=\"worker\")\n" +
+		"worker.py": "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\n" +
 			"from shared.bus import events\ndef on(m):\n    return m\nevents.subscribe(on)\n",
 		"shared/__init__.py": "",
-		"shared/bus.py":      "import cloudcompiler as cc\nevents = cc.pubsub_topic(\"petEvents\")\n",
+		"shared/bus.py":      "import cloudcompiler as cloudcc\nevents = cloudcc.pubsub_topic(\"petEvents\")\n",
 	})
 	edges := edgeStrings(ctx)
 	for _, want := range []string{
@@ -209,9 +209,9 @@ func TestPubSubDistinguishesPublishersFromSubscribers(t *testing.T) {
 
 func TestConfigValueBecomesAnIntentWithUsesEdges(t *testing.T) {
 	ctx := harness(t, map[string]string{
-		"app.py": "import cloudcompiler as cc\n" +
-			"level = cc.config_value(\"log_level\", default=\"info\")\n" +
-			"key = cc.config_value(\"api_key\", secret=True)\n",
+		"app.py": "import cloudcompiler as cloudcc\n" +
+			"level = cloudcc.config_value(\"log_level\", default=\"info\")\n" +
+			"key = cloudcc.config_value(\"api_key\", secret=True)\n",
 	})
 	vars := ctx.Graph.IntentsOfKind(config.KindConfig)
 	if len(vars) != 2 {
@@ -237,9 +237,9 @@ func TestConfigValueBecomesAnIntentWithUsesEdges(t *testing.T) {
 
 func TestConflictingSecrecyIsAnError(t *testing.T) {
 	ctx := harnessAllowingDiags(t, map[string]string{
-		"app.py": "import cloudcompiler as cc\n" +
-			"a = cc.config_value(\"k\", secret=True)\n" +
-			"b = cc.config_value(\"k\")\n",
+		"app.py": "import cloudcompiler as cloudcc\n" +
+			"a = cloudcc.config_value(\"k\", secret=True)\n" +
+			"b = cloudcc.config_value(\"k\")\n",
 	})
 	if !containsSubstr(diagStrings(ctx), "both as a secret and as a plain value") {
 		t.Errorf("diagnostics = %v", diagStrings(ctx))
@@ -250,7 +250,7 @@ func TestOnlyCapabilityPluginsCreateIntents(t *testing.T) {
 	// The two IR layers stay separate until the provider resolver runs (D7):
 	// nothing in this package may add a concrete resource.
 	root := t.TempDir()
-	write(t, root, "app.py", "import cloudcompiler as cc\npets = cc.persist_kv(\"a\")\n")
+	write(t, root, "app.py", "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"a\")\n")
 	ctx := compileWith(t, root, IntentChain())
 	if got := len(ctx.Graph.Resources()); got != 0 {
 		t.Errorf("capability plugins created %d concrete resources; only resolve:aws may", got)

@@ -4,14 +4,14 @@ The same persist_kv id is referenced from one module that both units import,
 so the two units end up wired to a single DynamoDB table with their own
 environment bindings.
 """
-# Injected by cc: runtime clients for this program's declared capabilities.
-from _cc_runtime import kv as _cc_kv
-from _cc_runtime import pubsub as _cc_pubsub
+# Injected by cloudcc: runtime clients for this program's declared capabilities.
+from _cloudcc_runtime import kv as _cloudcc_kv
+from _cloudcc_runtime import pubsub as _cloudcc_pubsub
 
 
 
-pets = _cc_kv.connect("petsByOwner")
-events = _cc_pubsub.connect("petEvents")
+pets = _cloudcc_kv.connect("petsByOwner")
+events = _cloudcc_pubsub.connect("petEvents")
 
 
 def summarize(pet: dict) -> str:

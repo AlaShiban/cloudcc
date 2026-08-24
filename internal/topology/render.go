@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/cloudcompiler/cc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 	"github.com/spf13/afero"
 )
 

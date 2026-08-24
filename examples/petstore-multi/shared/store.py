@@ -5,10 +5,10 @@ so the two units end up wired to a single DynamoDB table with their own
 environment bindings.
 """
 
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
-pets = cc.persist_kv("petsByOwner")
-events = cc.pubsub_topic("petEvents")
+pets = cloudcc.persist_kv("petsByOwner")
+events = cloudcc.pubsub_topic("petEvents")
 
 
 def summarize(pet: dict) -> str:

@@ -1,8 +1,8 @@
 package aws
 
 import (
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/sanitize"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
 // ClusterID is the shared ECS cluster every containerised unit runs in.
@@ -14,7 +14,7 @@ const ContainerPort = 8080
 
 // ecsService expands one execution unit into a Fargate service.
 //
-// The container image itself is not built here: cc emits a Dockerfile (or
+// The container image itself is not built here: cloudcc emits a Dockerfile (or
 // respects the user's) and an ECR repository, and bin/package.sh builds and
 // pushes when Docker is available. Making Pulumi build images would pull in
 // another provider for something the packaging script already owns.

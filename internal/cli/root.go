@@ -29,24 +29,24 @@ func usageErr(format string, args ...any) error {
 
 func compileErr(err error) error { return exitError{ExitCompile, err} }
 
-// NewRootCommand builds the command tree. `cc <path>` compiles, so compile is
+// NewRootCommand builds the command tree. `cloudcc <path>` compiles, so compile is
 // both a named subcommand and the default action.
 func NewRootCommand() *cobra.Command {
 	compile := newCompileCommand()
 
 	root := &cobra.Command{
-		Use:   "cc [path]",
+		Use:   "cloudcc [path]",
 		Short: "CloudCompiler: compile a Python app into cloud infrastructure",
 		Long: "CloudCompiler reads a plain Python application that uses the cloudcompiler\n" +
 			"SDK for hints, and emits a runnable Pulumi project alongside a copy of the\n" +
 			"application wired to real cloud services.\n\n" +
-			"Running `cc ./app` is the same as running `cc compile ./app`.",
+			"Running `cloudcc ./app` is the same as running `cloudcc compile ./app`.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.ArbitraryArgs,
 		RunE:          compile.RunE,
 	}
-	// The default action shares compile's flags so `cc ./app -o out` works.
+	// The default action shares compile's flags so `cloudcc ./app -o out` works.
 	root.Flags().AddFlagSet(compile.Flags())
 
 	root.AddCommand(compile)
@@ -78,7 +78,7 @@ func execute(root *cobra.Command) int {
 		code = ee.code
 		err = ee.err
 	}
-	fmt.Fprintf(root.ErrOrStderr(), "cc: %v\n", err)
+	fmt.Fprintf(root.ErrOrStderr(), "cloudcc: %v\n", err)
 	return code
 }
 

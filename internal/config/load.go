@@ -10,9 +10,9 @@ import (
 )
 
 // DefaultFileName is the conventional name of the configuration file.
-const DefaultFileName = "cc.yaml"
+const DefaultFileName = "cloudcc.yaml"
 
-// DefaultOutDir is used when neither cc.yaml nor -o specifies one.
+// DefaultOutDir is used when neither cloudcc.yaml nor -o specifies one.
 const DefaultOutDir = "compiled"
 
 // ProviderAWS is the only provider implemented in v1 (D9).
@@ -47,8 +47,8 @@ func New() *App {
 	}
 }
 
-// Load reads cc.yaml from path. A missing file is not an error: the caller
-// gets an App with builtin defaults, so `cc compile ./app --app foo` works with
+// Load reads cloudcc.yaml from path. A missing file is not an error: the caller
+// gets an App with builtin defaults, so `cloudcc compile ./app --app foo` works with
 // no configuration file at all.
 func Load(path string) (*App, error) {
 	app := New()
@@ -72,7 +72,7 @@ func Load(path string) (*App, error) {
 }
 
 // FindFile locates the configuration file: the explicit path if given,
-// otherwise cc.yaml in srcRoot, otherwise cc.yaml in the working directory.
+// otherwise cloudcc.yaml in srcRoot, otherwise cloudcc.yaml in the working directory.
 func FindFile(explicit, srcRoot string) string {
 	if explicit != "" {
 		return explicit

@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/diag"
-	"github.com/cloudcompiler/cc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 )
 
 // DefaultUnitID is the single unit every program gets when it declares none.
@@ -15,7 +15,7 @@ const DefaultUnitID = "main"
 
 // ExecUnitsPlugin splits the program into execution units.
 //
-// Each cc.execution_unit(id=...) call marks its module as an entrypoint. A
+// Each cloudcc.execution_unit(id=...) call marks its module as an entrypoint. A
 // unit's files are the transitive local-import closure of its entrypoints; a
 // file reached from two entrypoints belongs to both units and is copied into
 // each bundle. With no hints at all the whole program is one unit, "main".
@@ -48,7 +48,7 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 		}
 		entrypoints[id] = insertUnique(entrypoints[id], h.File)
 
-		// A type given at the call site is the weakest layer; cc.yaml wins.
+		// A type given at the call site is the weakest layer; cloudcc.yaml wins.
 		if typ := h.Str("type"); typ != "" {
 			existing := ctx.Config.ExecutionUnits[id]
 			if existing.Type == "" {
@@ -87,7 +87,7 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 		// manifests -- travels with every unit, because deciding which unit
 		// reads a data file is not something static analysis can do.
 		files = union(files, p.sharedAssets(ctx))
-		// Files claimed by cc.embed_assets travel with the units that bundle
+		// Files claimed by cloudcc.embed_assets travel with the units that bundle
 		// the module which claimed them.
 		for _, declaring := range config.SortedKeys(ctx.Embedded) {
 			if containsPath(files, declaring) {
@@ -146,7 +146,7 @@ func (p *ExecUnitsPlugin) defaultEntrypoint(ctx *compiler.Context) string {
 
 // sharedAssets returns every non-Python file that no capability has claimed.
 //
-// A file claimed by cc.embed_assets is deliberately excluded: claiming it is
+// A file claimed by cloudcc.embed_assets is deliberately excluded: claiming it is
 // how a program says which unit owns it, so shipping it to every unit as well
 // would make the hint pointless.
 func (p *ExecUnitsPlugin) sharedAssets(ctx *compiler.Context) []string {

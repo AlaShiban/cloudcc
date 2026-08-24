@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/cloudcompiler/cc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/config"
 )
 
 // Level says how well the provider supports a configured type.

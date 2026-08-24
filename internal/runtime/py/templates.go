@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/cloudcompiler/cc/internal/sanitize"
+	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
 //go:embed all:templates
@@ -21,7 +21,7 @@ var templateFS embed.FS
 const PythonVersion = "3.12"
 
 // LambdaEntryModule is the generated entrypoint module for a Lambda unit.
-const LambdaEntryModule = "cc_lambda_entry"
+const LambdaEntryModule = "cloudcc_lambda_entry"
 
 // LambdaHandler is the handler string the generated Lambda function uses.
 const LambdaHandler = LambdaEntryModule + ".handler"
@@ -30,7 +30,7 @@ const LambdaHandler = LambdaEntryModule + ".handler"
 // not supplied one (D13).
 const DockerfileName = "Dockerfile"
 
-// RuntimeFiles returns the injected _cc_runtime package as path -> content,
+// RuntimeFiles returns the injected _cloudcc_runtime package as path -> content,
 // with paths relative to a unit's bundle root.
 func RuntimeFiles() (map[string][]byte, error) {
 	out := map[string][]byte{}
@@ -67,7 +67,7 @@ type UnitTemplateData struct {
 
 // RenderLambdaEntry produces the generated Lambda entrypoint for a unit.
 func RenderLambdaEntry(data UnitTemplateData) ([]byte, error) {
-	return render("templates/cc_lambda_entry.py.tmpl", data)
+	return render("templates/cloudcc_lambda_entry.py.tmpl", data)
 }
 
 // RenderDockerfile produces the generated container build file for a unit.
@@ -104,7 +104,7 @@ func RenderPackageScript(units []PackageUnit) ([]byte, error) {
 //
 // Container images cannot be pushed before `pulumi up`, because the registry
 // they go to does not exist until then. Splitting the two scripts is what lets
-// `cc deploy` sequence them correctly: package, up, push.
+// `cloudcc deploy` sequence them correctly: package, up, push.
 func RenderPushScript(units []PackageUnit) ([]byte, error) {
 	sorted := append([]PackageUnit(nil), units...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
@@ -118,7 +118,7 @@ func RenderPushScript(units []PackageUnit) ([]byte, error) {
 // aws.EnvECRRepo; a naming test pins the two together.
 var templateFuncs = template.FuncMap{
 	"ecrOutput": func(unit string) string {
-		return "CC_ECR_" + sanitize.EnvVar(unit) + "_URL"
+		return "CLOUDCC_ECR_" + sanitize.EnvVar(unit) + "_URL"
 	},
 }
 

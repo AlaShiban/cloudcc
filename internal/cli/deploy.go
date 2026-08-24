@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/deploy"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/deploy"
 	"github.com/spf13/cobra"
 )
 
@@ -28,12 +28,12 @@ func newDeployCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deploy [path]",
 		Short: "Deploy the compiled project",
-		Long: "Deploys the project cc generated, via the Pulumi Automation API.\n\n" +
-			"Before touching anything, cc recompiles the source in memory and compares\n" +
+		Long: "Deploys the project cloudcc generated, via the Pulumi Automation API.\n\n" +
+			"Before touching anything, cloudcc recompiles the source in memory and compares\n" +
 			"its fingerprint with the one recorded in the output. Deploying output that\n" +
 			"no longer matches your source is refused unless you pass --force.\n\n" +
 			"Use --stack " + deploy.MinistackStack + " to deploy against a local AWS emulator instead of\n" +
-			"real AWS; cc configures the endpoints for you.",
+			"real AWS; cloudcc configures the endpoints for you.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if preview && destroy {
@@ -75,7 +75,7 @@ func newDeployCommand() *cobra.Command {
 			if action != deploy.ActionDestroy {
 				fingerprint, err = currentFingerprint(cmd, sourcePath, configPath, appName, outDir)
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "cc: could not recompile to check the output is current: %v\n", err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "cloudcc: could not recompile to check the output is current: %v\n", err)
 				}
 			}
 
@@ -86,13 +86,13 @@ func newDeployCommand() *cobra.Command {
 				Force:              force,
 			})
 			for _, w := range warnings {
-				fmt.Fprintf(cmd.ErrOrStderr(), "cc: %s\n", w)
+				fmt.Fprintf(cmd.ErrOrStderr(), "cloudcc: %s\n", w)
 			}
 			if perr != nil {
 				return exitError{ExitCompile, perr}
 			}
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "cc: %s %s\n", action, deploy.DescribeStack(stackName, emulator))
+			fmt.Fprintf(cmd.ErrOrStderr(), "cloudcc: %s %s\n", action, deploy.DescribeStack(stackName, emulator))
 
 			return runDeploy(cmd, deploy.Options{
 				Dir:              absOut,
@@ -116,8 +116,8 @@ func newDeployCommand() *cobra.Command {
 	f.BoolVar(&force, "force", false, "deploy even if the output does not match the source")
 	f.BoolVar(&skipPkg, "skip-packaging", false, "do not run the generated packaging scripts")
 	f.StringVarP(&outDir, "out", "o", "", "compiled output directory (default \"compiled\")")
-	f.StringVarP(&configPath, "config", "c", "", "path to cc.yaml")
-	f.StringVar(&appName, "app", "", "application name (overrides cc.yaml)")
+	f.StringVarP(&configPath, "config", "c", "", "path to cloudcc.yaml")
+	f.StringVar(&appName, "app", "", "application name (overrides cloudcc.yaml)")
 	f.StringVar(&region, "region", "us-east-1", "AWS region")
 	return cmd
 }

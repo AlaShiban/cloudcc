@@ -4,11 +4,11 @@ import (
 	"sort"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/sdkdetect"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 )
 
-// EmbedAssetsPlugin makes files matched by cc.embed_assets travel with the
+// EmbedAssetsPlugin makes files matched by cloudcc.embed_assets travel with the
 // execution unit that referenced them.
 //
 // Without it, a data file that no module imports is unreachable and gets

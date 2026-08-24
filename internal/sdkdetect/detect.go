@@ -6,15 +6,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudcompiler/cc/internal/diag"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
 
 // Imports records how a file refers to the SDK.
 type Imports struct {
 	// Modules are the local names bound to the package itself, so that
-	// `cc.persist_kv(...)` resolves. `import cloudcompiler as cc` adds "cc".
+	// `cloudcc.persist_kv(...)` resolves. `import cloudcompiler as cloudcc` adds "cloudcc".
 	Modules map[string]bool
 	// Direct maps a local name to the SDK function it refers to.
 	// `from cloudcompiler import persist_kv as pkv` adds pkv -> persist_kv.
@@ -40,7 +40,7 @@ func ResolveImports(f *source.File) Imports {
 	walk = func(n *ts.Node) {
 		switch n.Kind() {
 		case "import_statement":
-			// import cloudcompiler [as cc][, other]
+			// import cloudcompiler [as cloudcc][, other]
 			for i := uint(0); i < n.NamedChildCount(); i++ {
 				child := n.NamedChild(i)
 				switch child.Kind() {

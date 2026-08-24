@@ -1,4 +1,4 @@
-# Working on cc
+# Working on cloudcc
 
 ## Setting up
 
@@ -7,10 +7,10 @@ brew install go pulumi node jq graphviz awscli uv
 brew install --cask docker        # or: brew install colima docker && colima start
 uv python install 3.12
 
-go build -o cc ./cmd/cc && ./cc doctor
+go build -o cloudcc ./cmd/cloudcc && ./cloudcc doctor
 ```
 
-`cc doctor` is the check: it names every tool it wants, says what each is for,
+`cloudcc doctor` is the check: it names every tool it wants, says what each is for,
 and prints the exact `brew` command for anything missing. Required tools make
 it exit non-zero; optional ones are reported and shrugged off.
 
@@ -39,7 +39,7 @@ MINISTACK_ENDPOINT=http://localhost:4567 ./tests/e2e/ministack.sh
 ## Architecture
 
 ```
-source/ + cc.yaml
+source/ + cloudcc.yaml
       |
       v
 config -> input -> detect -> static-units -> embed-assets -> exec-units
@@ -115,7 +115,7 @@ name.
 3. Add an intent type to `internal/ir/intents.go` and a plugin under
    `internal/capabilities` that creates it, plus a row in
    `internal/capabilities/chain.go`.
-4. Add a runtime client under `internal/runtime/py/templates/_cc_runtime/`
+4. Add a runtime client under `internal/runtime/py/templates/_cloudcc_runtime/`
    whose public methods match the SDK emulation exactly, and a rewrite rule in
    `internal/runtime/py/rewrite.go`.
 5. Map it in `internal/provider/aws`, and add it to `typeSupport`.
@@ -149,7 +149,7 @@ element uses an apply: `Prop: "cacheNodes.apply(n => n[0].address)"`.
 
 `internal/deploy` is the only package allowed to touch the network, and nothing
 on the compile path imports it. That keeps the Automation API's considerable
-weight out of `cc compile` and makes "compilation is offline" checkable rather
+weight out of `cloudcc compile` and makes "compilation is offline" checkable rather
 than aspirational — `TestTheCompilePathCannotReachTheNetwork` and
 `TestDeployIsIsolated` in `internal/capabilities/offline_test.go` enforce both
 halves.

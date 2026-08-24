@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 )
 
-// StaticUnitsPlugin turns cc.static_unit hints into StaticSite intents and
+// StaticUnitsPlugin turns cloudcc.static_unit hints into StaticSite intents and
 // claims the files they match.
 //
 // This runs before exec-units on purpose: claiming has to happen while the
@@ -81,7 +81,7 @@ func (p *StaticUnitsPlugin) Transform(ctx *compiler.Context) error {
 }
 
 // withGlobs folds the resolved globs back into the recorded configuration so
-// compiled/cc.yaml documents what was actually used.
+// compiled/cloudcc.yaml documents what was actually used.
 func withGlobs(cfg config.ResourceConfig, site *ir.StaticSite) config.ResourceConfig {
 	cfg.StaticFiles = site.StaticFiles
 	cfg.SharedFiles = site.SharedFiles

@@ -1,20 +1,20 @@
 """The HTTP-facing execution unit."""
 
 from fastapi import FastAPI, HTTPException
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 from shared.store import pets, events, summarize
 
-cc.execution_unit(id="api")
+cloudcc.execution_unit(id="api")
 
 # Claimed before execution-unit closure runs, so these assets never end up
 # inside a Lambda bundle.
-cc.static_unit("petstore-site", static_files="./public/**/*", index_document="index.html")
+cloudcc.static_unit("petstore-site", static_files="./public/**/*", index_document="index.html")
 
 app = FastAPI()
-cc.expose(app, id="pet-api")
+cloudcc.expose(app, id="pet-api")
 
-log_level = cc.config_value("log_level", default="info")
+log_level = cloudcc.config_value("log_level", default="info")
 
 
 @app.get("/pets/{pet_id}")

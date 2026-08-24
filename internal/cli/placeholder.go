@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/cloudcompiler/cc/internal/topology"
+	"github.com/cloudcompiler/cloudcc/internal/topology"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +28,7 @@ func newDiagramCommand() *cobra.Command {
 			}
 			switch toStdout {
 			case "":
-				fmt.Fprintf(cmd.ErrOrStderr(), "cc: wrote %s and %s to %s\n",
+				fmt.Fprintf(cmd.ErrOrStderr(), "cloudcc: wrote %s and %s to %s\n",
 					topology.MermaidFile, topology.DOTFile, result.Ctx.Config.OutDir)
 			case "mermaid":
 				cmd.OutOrStdout().Write(topology.Mermaid(result.Ctx.Graph, topology.Options{
@@ -45,8 +45,8 @@ func newDiagramCommand() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&opts.app, "app", "", "application name (overrides cc.yaml)")
-	f.StringVarP(&opts.configPath, "config", "c", "", "path to cc.yaml")
+	f.StringVar(&opts.app, "app", "", "application name (overrides cloudcc.yaml)")
+	f.StringVarP(&opts.configPath, "config", "c", "", "path to cloudcc.yaml")
 	f.StringVarP(&opts.outDir, "out", "o", "", "output directory (default \"compiled\")")
 	f.StringVar(&toStdout, "format", "", "also print the diagram to stdout: mermaid or dot")
 	return cmd

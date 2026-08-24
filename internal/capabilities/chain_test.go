@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
 )
 
 // TestChainSchedule pins the order the scheduler derives.

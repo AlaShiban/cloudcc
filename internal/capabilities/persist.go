@@ -1,10 +1,10 @@
 package capabilities
 
 import (
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/sdkdetect"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 )
 
 // persistKinds are the capability kinds this plugin handles.
@@ -20,7 +20,7 @@ var persistKinds = []string{
 // from every execution unit that can reach the declaration.
 //
 // One id means one store. Two units that both import the module declaring
-// cc.persist_kv("petsByOwner") share a single table and each get their own
+// cloudcc.persist_kv("petsByOwner") share a single table and each get their own
 // environment binding -- the multi-unit case Klotho 1 never exercised.
 type PersistPlugin struct{ base }
 

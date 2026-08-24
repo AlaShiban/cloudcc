@@ -10,7 +10,7 @@ import (
 )
 
 // StateFile records what the last compile produced.
-const StateFile = ".cc-state.json"
+const StateFile = ".cloudcc-state.json"
 
 // State is the fingerprint record written next to the generated project.
 type State struct {
@@ -71,13 +71,13 @@ func Preflight(in PreflightInput) ([]string, error) {
 	if err != nil || !info.IsDir() {
 		return nil, &PreflightError{
 			Reason: fmt.Sprintf("no compiled output at %s", in.Dir),
-			Fix:    "run `cc compile <path>` first",
+			Fix:    "run `cloudcc compile <path>` first",
 		}
 	}
 	if _, err := os.Stat(filepath.Join(in.Dir, "index.ts")); err != nil {
 		return nil, &PreflightError{
 			Reason: fmt.Sprintf("%s does not look like a compiled project (no index.ts)", in.Dir),
-			Fix:    "run `cc compile <path>` first, or pass -o to point at the right directory",
+			Fix:    "run `cloudcc compile <path>` first, or pass -o to point at the right directory",
 		}
 	}
 	if _, err := exec.LookPath("pulumi"); err != nil {
@@ -95,7 +95,7 @@ func Preflight(in PreflightInput) ([]string, error) {
 	case os.IsNotExist(err):
 		if !in.Force {
 			return warnings, &PreflightError{
-				Reason: fmt.Sprintf("%s has no %s, so cc cannot tell whether it matches your source", in.Dir, StateFile),
+				Reason: fmt.Sprintf("%s has no %s, so cloudcc cannot tell whether it matches your source", in.Dir, StateFile),
 				Fix:    "recompile, or pass --force to deploy it anyway",
 			}
 		}

@@ -1,4 +1,4 @@
-"""The SDK stubs and the injected _cc_runtime clients are two implementations
+"""The SDK stubs and the injected _cloudcc_runtime clients are two implementations
 of one API. They will drift unless something compares them.
 
 This test imports both sides and asserts, method by method, that every public
@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 from cloudcompiler import _emulation
 
 # The runtime shims live in the compiler's template tree; the SDK package does
@@ -24,7 +24,7 @@ SHIM_DIR = (
     / "runtime"
     / "py"
     / "templates"
-    / "_cc_runtime"
+    / "_cloudcc_runtime"
 )
 
 #: emulation class -> (shim module, shim class). Both sides are named the same
@@ -79,14 +79,14 @@ def test_public_api_matches(cls, module, shim_class):
 
     missing = sorted(set(local) - set(shim))
     assert not missing, (
-        f"{cls.__name__} offers {missing} but _cc_runtime/{module}.py's "
+        f"{cls.__name__} offers {missing} but _cloudcc_runtime/{module}.py's "
         f"{shim_class} does not; a program that works locally would fail once "
         f"compiled"
     )
 
     extra = sorted(set(shim) - set(local))
     assert not extra, (
-        f"_cc_runtime/{module}.py's {shim_class} offers {extra} but the SDK "
+        f"_cloudcc_runtime/{module}.py's {shim_class} offers {extra} but the SDK "
         f"stub does not; the IDE would not suggest it"
     )
 
@@ -111,13 +111,13 @@ def test_every_shim_has_a_connect_entrypoint(module):
     expected = {"kv": "connect", "fs": "connect", "secret": "connect",
                 "orm": "connect", "redis_": "connect", "pubsub": "connect",
                 "expose": "register"}[module]
-    assert expected in names, f"_cc_runtime/{module}.py has no {expected}()"
+    assert expected in names, f"_cloudcc_runtime/{module}.py has no {expected}()"
 
 
 def test_the_sdk_surface_is_the_documented_one():
     """Every function named in __all__ exists and is callable."""
-    for name in cc.__all__:
-        assert hasattr(cc, name), f"{name} is exported but missing"
+    for name in cloudcc.__all__:
+        assert hasattr(cloudcc, name), f"{name} is exported but missing"
 
 
 def test_no_shim_imports_boto3_outside_the_client_module():

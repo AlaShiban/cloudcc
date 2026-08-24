@@ -38,7 +38,7 @@ type tool struct {
 }
 
 var toolchain = []tool{
-	{name: "go", binary: "go", required: false, brew: "brew install go", why: "only needed to build cc from source"},
+	{name: "go", binary: "go", required: false, brew: "brew install go", why: "only needed to build cloudcc from source"},
 	{name: "pulumi", binary: "pulumi", required: true, brew: "brew install pulumi", why: "runs the generated infrastructure project"},
 	{name: "uv", binary: "uv", required: true, brew: "brew install uv", why: "installs Python dependencies when packaging execution units"},
 	{name: "node", binary: "node", required: false, brew: "brew install node", why: "type-checks the generated TypeScript"},

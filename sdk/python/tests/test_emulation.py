@@ -2,29 +2,29 @@
 
 These tests pin the behaviour that programs actually depend on, and -- just as
 importantly -- pin the method signatures, which the compiler's parity test
-compares against the injected _cc_runtime clients.
+compares against the injected _cloudcc_runtime clients.
 """
 
 import os
 
 import pytest
 
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 
 @pytest.fixture(autouse=True)
 def isolated_state(tmp_path, monkeypatch):
-    monkeypatch.setenv("CC_LOCAL_STATE_DIR", str(tmp_path / "state"))
-    cc.reset_local_state()
+    monkeypatch.setenv("CLOUDCC_LOCAL_STATE_DIR", str(tmp_path / "state"))
+    cloudcc.reset_local_state()
     yield
-    cc.reset_local_state()
+    cloudcc.reset_local_state()
 
 
 def test_the_sdk_never_imports_boto3():
     """Cloud access belongs in the injected shims, never in the hint SDK."""
     import sys
 
-    source = (cc.__file__, cc._emulation.__file__)
+    source = (cloudcc.__file__, cloudcc._emulation.__file__)
     for path in source:
         with open(path) as fh:
             assert "boto3" not in fh.read().replace("never imports boto3", "")
@@ -32,7 +32,7 @@ def test_the_sdk_never_imports_boto3():
 
 
 def test_persist_kv_round_trip():
-    pets = cc.persist_kv("petsByOwner")
+    pets = cloudcc.persist_kv("petsByOwner")
     assert pets.get("1") is None
 
     pets.put("1", {"name": "rex"})
@@ -45,7 +45,7 @@ def test_persist_kv_round_trip():
 
 
 def test_persist_kv_returns_a_copy():
-    pets = cc.persist_kv("petsByOwner")
+    pets = cloudcc.persist_kv("petsByOwner")
     pets.put("1", {"name": "rex"})
     got = pets.get("1")
     got["name"] = "mutated"
@@ -53,12 +53,12 @@ def test_persist_kv_returns_a_copy():
 
 
 def test_the_same_id_gives_the_same_store():
-    assert cc.persist_kv("shared") is cc.persist_kv("shared")
-    assert cc.persist_kv("a") is not cc.persist_kv("b")
+    assert cloudcc.persist_kv("shared") is cloudcc.persist_kv("shared")
+    assert cloudcc.persist_kv("a") is not cloudcc.persist_kv("b")
 
 
 def test_persist_fs_round_trip():
-    blobs = cc.persist_fs("petAudit")
+    blobs = cloudcc.persist_fs("petAudit")
     assert blobs.list() == []
     assert not blobs.exists("a.txt")
 
@@ -77,18 +77,18 @@ def test_persist_fs_round_trip():
 
 
 def test_persist_secret_reads_the_environment(monkeypatch):
-    secret = cc.persist_secret("api-key")
+    secret = cloudcc.persist_secret("api-key")
     assert secret.get() == ""
 
-    monkeypatch.setenv("CC_SECRET_API_KEY", "s3cr3t")
-    assert cc.persist_secret("api-key").get() == "s3cr3t"
+    monkeypatch.setenv("CLOUDCC_SECRET_API_KEY", "s3cr3t")
+    assert cloudcc.persist_secret("api-key").get() == "s3cr3t"
 
     secret.set("overridden")
     assert secret.get() == "overridden"
 
 
 def test_persist_redis_operations():
-    cache = cc.persist_redis("sessions")
+    cache = cloudcc.persist_redis("sessions")
     assert cache.get("k") is None
 
     cache.set("k", "v")
@@ -105,14 +105,14 @@ def test_persist_redis_operations():
 
 
 def test_persist_orm_gives_a_local_url():
-    db = cc.persist_orm("maindb", models=["Pet"])
+    db = cloudcc.persist_orm("maindb", models=["Pet"])
     url = db.url()
     assert url.startswith("sqlite:///")
     assert url.endswith("maindb.db")
 
 
 def test_pubsub_fans_out_in_process():
-    topic = cc.pubsub_topic("petEvents")
+    topic = cloudcc.pubsub_topic("petEvents")
     seen = []
 
     @topic.subscribe
@@ -127,7 +127,7 @@ def test_pubsub_fans_out_in_process():
 
 
 def test_subscribe_returns_the_function_so_it_works_as_a_decorator():
-    topic = cc.pubsub_topic("t")
+    topic = cloudcc.pubsub_topic("t")
 
     @topic.subscribe
     def handler(message):
@@ -137,44 +137,44 @@ def test_subscribe_returns_the_function_so_it_works_as_a_decorator():
 
 
 def test_config_value_reads_its_environment_variable(monkeypatch):
-    assert cc.config_value("log_level", default="info") == "info"
-    monkeypatch.setenv("CC_CONFIG_LOG_LEVEL", "debug")
-    assert cc.config_value("log_level", default="info") == "debug"
+    assert cloudcc.config_value("log_level", default="info") == "info"
+    monkeypatch.setenv("CLOUDCC_CONFIG_LOG_LEVEL", "debug")
+    assert cloudcc.config_value("log_level", default="info") == "debug"
 
 
 def test_config_value_secret_flag_is_compile_time_only(monkeypatch):
-    monkeypatch.setenv("CC_CONFIG_API_KEY", "abc")
-    assert cc.config_value("api_key", secret=True) == "abc"
+    monkeypatch.setenv("CLOUDCC_CONFIG_API_KEY", "abc")
+    assert cloudcc.config_value("api_key", secret=True) == "abc"
 
 
 def test_expose_returns_an_inert_handle(monkeypatch):
     app = object()
-    gateway = cc.expose(app, id="pet-api")
+    gateway = cloudcc.expose(app, id="pet-api")
     assert gateway.id == "pet-api"
     assert gateway.target == "public"
     assert gateway.app is app
     assert gateway.url() == ""
 
-    monkeypatch.setenv("CC_GATEWAY_PET_API_URL", "https://example.test")
+    monkeypatch.setenv("CLOUDCC_GATEWAY_PET_API_URL", "https://example.test")
     assert gateway.url() == "https://example.test"
 
 
 def test_hint_only_functions_return_quietly():
-    assert cc.execution_unit(id="api") is None
-    assert cc.execution_unit(id="api", type="ecs") is None
-    assert cc.static_unit("site", static_files="./public/**/*") is None
-    assert cc.embed_assets("./data/*.json") == "./data/*.json"
+    assert cloudcc.execution_unit(id="api") is None
+    assert cloudcc.execution_unit(id="api", type="ecs") is None
+    assert cloudcc.static_unit("site", static_files="./public/**/*") is None
+    assert cloudcc.embed_assets("./data/*.json") == "./data/*.json"
 
 
 def test_reset_local_state_clears_directories(tmp_path):
-    blobs = cc.persist_fs("b")
+    blobs = cloudcc.persist_fs("b")
     blobs.write("a.txt", b"x")
     assert blobs.exists("a.txt")
 
-    cc.reset_local_state()
-    assert not cc.persist_fs("b").exists("a.txt")
+    cloudcc.reset_local_state()
+    assert not cloudcc.persist_fs("b").exists("a.txt")
 
 
 def test_local_root_honours_the_environment(monkeypatch, tmp_path):
-    monkeypatch.setenv("CC_LOCAL_STATE_DIR", str(tmp_path / "elsewhere"))
-    assert cc.local_root() == tmp_path / "elsewhere"
+    monkeypatch.setenv("CLOUDCC_LOCAL_STATE_DIR", str(tmp_path / "elsewhere"))
+    assert cloudcc.local_root() == tmp_path / "elsewhere"

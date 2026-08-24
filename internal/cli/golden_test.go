@@ -159,7 +159,7 @@ func TestMultiUnitSharesOneStore(t *testing.T) {
 	}
 	for _, unit := range []string{"api", "worker"} {
 		envBlock := blockAfter(index, "const "+unit+"Env")
-		if !strings.Contains(envBlock, "CC_KV_PETSBYOWNER_TABLE") {
+		if !strings.Contains(envBlock, "CLOUDCC_KV_PETSBYOWNER_TABLE") {
 			t.Errorf("unit %q is not wired to the shared table:\n%s", unit, envBlock)
 		}
 	}
@@ -355,14 +355,14 @@ func TestSecretsNeverAppearInGeneratedSource(t *testing.T) {
 	out := compileExample(t, "kitchen-sink", t.TempDir())
 	index := readFile(t, filepath.Join(out, "index.ts"))
 
-	if !strings.Contains(index, `ccConfig.requireSecret("stripe_key")`) {
+	if !strings.Contains(index, `cloudccConfig.requireSecret("stripe_key")`) {
 		t.Errorf("a secret config value should be read from the encrypted stack config:\n%s", index)
 	}
 	// The plain value is inlined; the secret one is not.
-	if !strings.Contains(index, `CC_CONFIG_LOG_LEVEL: "info"`) {
+	if !strings.Contains(index, `CLOUDCC_CONFIG_LOG_LEVEL: "info"`) {
 		t.Errorf("a plain config value should be inlined:\n%s", index)
 	}
-	if strings.Contains(index, `CC_CONFIG_STRIPE_KEY: "`) {
+	if strings.Contains(index, `CLOUDCC_CONFIG_STRIPE_KEY: "`) {
 		t.Errorf("a secret config value was inlined as plaintext:\n%s", index)
 	}
 }
@@ -383,7 +383,7 @@ func TestEmbeddedAssetsTravelWithTheDeclaringUnitOnly(t *testing.T) {
 func TestComputeTypeDecidesThePackaging(t *testing.T) {
 	out := compileExample(t, "kitchen-sink", t.TempDir())
 
-	if _, err := os.Stat(filepath.Join(out, "api", "cc_lambda_entry.py")); err != nil {
+	if _, err := os.Stat(filepath.Join(out, "api", "cloudcc_lambda_entry.py")); err != nil {
 		t.Errorf("the Lambda unit has no entrypoint: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(out, "api", "Dockerfile")); err == nil {
@@ -392,7 +392,7 @@ func TestComputeTypeDecidesThePackaging(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(out, "reporter", "Dockerfile")); err != nil {
 		t.Errorf("the ECS unit has no Dockerfile: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "reporter", "cc_lambda_entry.py")); err == nil {
+	if _, err := os.Stat(filepath.Join(out, "reporter", "cloudcc_lambda_entry.py")); err == nil {
 		t.Error("an ECS unit should not get a Lambda entrypoint")
 	}
 

@@ -3,12 +3,12 @@ and the two hint calls, which the compiler reads statically and rewrites into
 real AWS clients in the compiled copy."""
 
 from fastapi import FastAPI, HTTPException
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 app = FastAPI()
 
-pets = cc.persist_kv("petsByOwner")
-cc.expose(app, id="pet-api")
+pets = cloudcc.persist_kv("petsByOwner")
+cloudcc.expose(app, id="pet-api")
 
 
 @app.get("/pets/{pet_id}")

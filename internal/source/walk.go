@@ -11,19 +11,19 @@ import (
 
 // SkipDirs are directory names never descended into.
 var SkipDirs = map[string]bool{
-	".git":          true,
-	".hg":           true,
-	".svn":          true,
-	".venv":         true,
-	"venv":          true,
-	"node_modules":  true,
-	"__pycache__":   true,
-	".pytest_cache": true,
-	".mypy_cache":   true,
-	".ruff_cache":   true,
-	"vendor":        true,
-	".pulumi":       true,
-	".cc-cache":     true,
+	".git":           true,
+	".hg":            true,
+	".svn":           true,
+	".venv":          true,
+	"venv":           true,
+	"node_modules":   true,
+	"__pycache__":    true,
+	".pytest_cache":  true,
+	".mypy_cache":    true,
+	".ruff_cache":    true,
+	"vendor":         true,
+	".pulumi":        true,
+	".cloudcc-cache": true,
 }
 
 // Options controls a walk.

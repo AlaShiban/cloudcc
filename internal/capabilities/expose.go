@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -24,7 +24,7 @@ var httpVerbs = map[string]string{
 	"trace":   "TRACE",
 }
 
-// ExposePlugin turns cc.expose hints into gateway intents and discovers the
+// ExposePlugin turns cloudcc.expose hints into gateway intents and discovers the
 // routes declared on the exposed application object.
 type ExposePlugin struct{ base }
 

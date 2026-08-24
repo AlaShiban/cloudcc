@@ -1,8 +1,8 @@
 package capabilities
 
 import (
-	"github.com/cloudcompiler/cc/internal/compiler"
-	"github.com/cloudcompiler/cc/internal/iac/pulumi_ts"
+	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/iac/pulumi_ts"
 )
 
 // IntentChain returns the stages that read source and build the intent layer.

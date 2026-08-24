@@ -11,12 +11,12 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/cloudcompiler/cc/internal/config"
-	"github.com/cloudcompiler/cc/internal/diag"
-	"github.com/cloudcompiler/cc/internal/graph"
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/sdkdetect"
-	"github.com/cloudcompiler/cc/internal/source"
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/graph"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
+	"github.com/cloudcompiler/cloudcc/internal/source"
 	"github.com/spf13/afero"
 )
 
@@ -33,7 +33,7 @@ type Plugin interface {
 // Context is the state every plugin reads and writes.
 type Context struct {
 	// Config is the layered configuration, updated in place as decisions are
-	// resolved so that the emitted cc.yaml records them (D5).
+	// resolved so that the emitted cloudcc.yaml records them (D5).
 	Config *config.App
 	// Files is the working copy of the input tree. Plugins mutate this set,
 	// never the user's directory (D13).
@@ -51,7 +51,7 @@ type Context struct {
 	// OutDir is the output directory path on the real filesystem, or "" when
 	// Out is in-memory.
 	OutDir string
-	// ConfigPath is the root-relative path of the cc.yaml that was loaded, when
+	// ConfigPath is the root-relative path of the cloudcc.yaml that was loaded, when
 	// it lives inside the source tree. It is excluded from unit bundles: the
 	// resolved copy at the output root is the one that matters.
 	ConfigPath string
@@ -73,7 +73,7 @@ type Context struct {
 	// instance.
 	Notice func(string)
 
-	// Embedded maps a declaring source file to the paths cc.embed_assets
+	// Embedded maps a declaring source file to the paths cloudcc.embed_assets
 	// claimed from it. Those files travel with whichever units bundle the
 	// declaring file, even though no import reaches them.
 	Embedded map[string][]string

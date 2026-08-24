@@ -1,7 +1,7 @@
 package ir
 
 import (
-	"github.com/cloudcompiler/cc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/config"
 )
 
 // base carries the fields every intent shares.
@@ -18,7 +18,7 @@ func (b *base) Config() config.ResourceConfig             { return b.Cfg }
 type ExecUnit struct {
 	base
 	// Entrypoints are the unit-root modules, relative to the source root and
-	// sorted. A unit usually has one; several cc.execution_unit calls sharing
+	// sorted. A unit usually has one; several cloudcc.execution_unit calls sharing
 	// an id give it several, and the closure is their union.
 	Entrypoints []string `json:"entrypoints"`
 	// Files is the sorted transitive local-import closure of Entrypoint,
@@ -36,7 +36,7 @@ type ExecUnit struct {
 	// Handler is the Lambda handler string, empty for non-Lambda units.
 	Handler string `json:"handler,omitempty"`
 	// DockerfileProvided reports that the user supplied their own Dockerfile,
-	// in which case cc generated none (D13).
+	// in which case cloudcc generated none (D13).
 	DockerfileProvided bool `json:"dockerfile_provided,omitempty"`
 }
 

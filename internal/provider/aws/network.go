@@ -1,8 +1,8 @@
 package aws
 
 import (
-	"github.com/cloudcompiler/cc/internal/ir"
-	"github.com/cloudcompiler/cc/internal/sanitize"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
 // VPCID is the id every network resource shares, since one application gets
@@ -71,7 +71,7 @@ func (r *Resolver) network() {
 	// internet, and datastores only ever see traffic from these subnets.
 	sg := ir.NewResource(KindSecurityGroup, VPCID, "aws.ec2.SecurityGroup", map[string]any{
 		"vpcId":       ir.Ref{Key: vpcKey, Prop: "id"},
-		"description": "Managed by cc: traffic between compiled units and their datastores",
+		"description": "Managed by cloudcc: traffic between compiled units and their datastores",
 		"ingress": []any{map[string]any{
 			"protocol":    "-1",
 			"fromPort":    0,

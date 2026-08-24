@@ -4,13 +4,13 @@ It shares shared/store.py with the api unit, which is what makes both units
 resolve to the same DynamoDB table and the same SNS topic.
 """
 
-import cloudcompiler as cc
+import cloudcompiler as cloudcc
 
 from shared.store import pets, events, summarize
 
-cc.execution_unit(id="worker")
+cloudcc.execution_unit(id="worker")
 
-audit = cc.persist_fs("petAudit")
+audit = cloudcc.persist_fs("petAudit")
 
 
 def on_pet_event(message: dict):

@@ -2,12 +2,12 @@
 # can also run directly; nothing is hidden behind make.
 
 GO ?= go
-BIN ?= cc
+BIN ?= cloudcc
 
 .PHONY: build test fmt vet check golden sdk-test e2e e2e-deploy doctor clean
 
-build:              ## Build the cc binary
-	$(GO) build -o $(BIN) ./cmd/cc
+build:              ## Build the cloudcc binary
+	$(GO) build -o $(BIN) ./cmd/cloudcc
 
 fmt:                ## Format Go sources
 	gofmt -w ./cmd ./internal
@@ -30,7 +30,7 @@ check: fmt vet test sdk-test  ## Everything that needs no network
 e2e:                ## Provisioning and functional tests against the emulator
 	./tests/e2e/ministack.sh
 
-e2e-deploy:         ## The same path through `cc deploy`
+e2e-deploy:         ## The same path through `cloudcc deploy`
 	./tests/e2e/deploy.sh
 
 doctor: build       ## Check the local toolchain
