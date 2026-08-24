@@ -26,6 +26,9 @@ func NewResolveAWSPlugin() *ResolveAWSPlugin {
 }
 
 func (p *ResolveAWSPlugin) Transform(ctx *compiler.Context) error {
+	if ctx.Failed() {
+		return nil
+	}
 	if ctx.Config.Provider != config.ProviderAWS {
 		return fmt.Errorf("provider %q has no resolver", ctx.Config.Provider)
 	}
@@ -53,6 +56,9 @@ func NewRenderPlugin(backend string) *RenderPlugin {
 }
 
 func (p *RenderPlugin) Transform(ctx *compiler.Context) error {
+	if ctx.Failed() {
+		return nil
+	}
 	backend, err := iac.Get(p.backend)
 	if err != nil {
 		return err

@@ -40,7 +40,10 @@ func TestEnvVar(t *testing.T) {
 		"petsByOwner": "PETSBYOWNER",
 		"pet-api":     "PET_API",
 		"log.level":   "LOG_LEVEL",
-		"9lives":      "V9LIVES",
+		// No guard character for a leading digit: the result is always a
+		// segment of a CC_-prefixed name, and the Python shims spell it the
+		// same way.
+		"9lives": "9LIVES",
 	}
 	for in, want := range cases {
 		if got := EnvVar(in); got != want {

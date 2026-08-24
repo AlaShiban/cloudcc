@@ -16,7 +16,9 @@ var update = flag.Bool("update", false, "rewrite the golden output trees")
 // examples are the applications compiled by the golden tests. petstore-multi
 // is the load-bearing one: two units sharing a KV store, a static site, and a
 // topic with a publisher and a subscriber.
-var examples = []string{"petstore", "petstore-multi"}
+// kitchen-sink is the coverage example: every capability, both compute types,
+// both gateway types, a VPC, secrets, and embedded assets.
+var examples = []string{"petstore", "petstore-multi", "kitchen-sink"}
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -305,4 +307,158 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(digits)
+}
+
+// TestKitchenSinkCoversEveryCapability pins the whole resolution table in one
+// place: if a capability stops resolving, or resolves to the wrong thing, this
+// is where it shows up.
+func TestKitchenSinkCoversEveryCapability(t *testing.T) {
+	out := compileExample(t, "kitchen-sink", t.TempDir())
+	index := readFile(t, filepath.Join(out, "index.ts"))
+
+	for capability, want := range map[string]string{
+		"persist_kv":     `new aws.dynamodb.Table("catalogue"`,
+		"persist_fs":     `new aws.s3.BucketV2("itemDocs"`,
+		"persist_secret": `new aws.secretsmanager.Secret("signingKey"`,
+		"persist_orm":    `new aws.rds.Instance("shopdb"`,
+		"persist_redis":  `new aws.elasticache.Cluster("itemCache"`,
+		"pubsub":         `new aws.sns.Topic("itemEvents"`,
+		"exec lambda":    `new aws.lambda.Function("api"`,
+		"exec ecs":       `new aws.ecs.Service("reporter"`,
+		"expose apigw":   `new aws.apigatewayv2.Api("shop-api"`,
+		"expose alb":     `new aws.lb.LoadBalancer("reporter-web"`,
+	} {
+		if !strings.Contains(index, want) {
+			t.Errorf("%s did not resolve: expected %s", capability, want)
+		}
+	}
+}
+
+// TestVPCAppearsOnlyWhenSomethingNeedsIt pins the rule that Lambda does not
+// drag a VPC in: the cost is real and the benefit is not.
+func TestVPCAppearsOnlyWhenSomethingNeedsIt(t *testing.T) {
+	lambdaOnly := readFile(t, filepath.Join(compileExample(t, "petstore", t.TempDir()), "index.ts"))
+	if strings.Contains(lambdaOnly, "aws.ec2.Vpc") {
+		t.Errorf("a Lambda-only application should not create a VPC:\n%s", lambdaOnly)
+	}
+
+	withVPC := readFile(t, filepath.Join(compileExample(t, "kitchen-sink", t.TempDir()), "index.ts"))
+	for _, want := range []string{"aws.ec2.Vpc", "aws.ec2.Subnet", "aws.ec2.SecurityGroup"} {
+		if !strings.Contains(withVPC, want) {
+			t.Errorf("an application with ECS, RDS and ElastiCache needs %s", want)
+		}
+	}
+}
+
+// TestSecretsNeverAppearInGeneratedSource pins D21.
+func TestSecretsNeverAppearInGeneratedSource(t *testing.T) {
+	out := compileExample(t, "kitchen-sink", t.TempDir())
+	index := readFile(t, filepath.Join(out, "index.ts"))
+
+	if !strings.Contains(index, `ccConfig.requireSecret("stripe_key")`) {
+		t.Errorf("a secret config value should be read from the encrypted stack config:\n%s", index)
+	}
+	// The plain value is inlined; the secret one is not.
+	if !strings.Contains(index, `CC_CONFIG_LOG_LEVEL: "info"`) {
+		t.Errorf("a plain config value should be inlined:\n%s", index)
+	}
+	if strings.Contains(index, `CC_CONFIG_STRIPE_KEY: "`) {
+		t.Errorf("a secret config value was inlined as plaintext:\n%s", index)
+	}
+}
+
+// TestEmbeddedAssetsTravelWithTheDeclaringUnitOnly pins embed_assets.
+func TestEmbeddedAssetsTravelWithTheDeclaringUnitOnly(t *testing.T) {
+	out := compileExample(t, "kitchen-sink", t.TempDir())
+	if _, err := os.Stat(filepath.Join(out, "api", "data", "seed.json")); err != nil {
+		t.Errorf("embed_assets did not bundle the seed data with the unit that claimed it: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "reporter", "data", "seed.json")); err == nil {
+		t.Error("embedded assets leaked into a unit that never claimed them")
+	}
+}
+
+// TestComputeTypeDecidesThePackaging pins the Lambda/ECS split: an entrypoint
+// for one, a Dockerfile for the other, and Mangum only where it is used.
+func TestComputeTypeDecidesThePackaging(t *testing.T) {
+	out := compileExample(t, "kitchen-sink", t.TempDir())
+
+	if _, err := os.Stat(filepath.Join(out, "api", "cc_lambda_entry.py")); err != nil {
+		t.Errorf("the Lambda unit has no entrypoint: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "api", "Dockerfile")); err == nil {
+		t.Error("a Lambda unit should not get a Dockerfile")
+	}
+	if _, err := os.Stat(filepath.Join(out, "reporter", "Dockerfile")); err != nil {
+		t.Errorf("the ECS unit has no Dockerfile: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "reporter", "cc_lambda_entry.py")); err == nil {
+		t.Error("an ECS unit should not get a Lambda entrypoint")
+	}
+
+	apiReqs := readFile(t, filepath.Join(out, "api", "requirements.txt"))
+	reporterReqs := readFile(t, filepath.Join(out, "reporter", "requirements.txt"))
+	if !strings.Contains(apiReqs, "mangum") {
+		t.Errorf("the Lambda unit needs the ASGI adapter:\n%s", apiReqs)
+	}
+	if strings.Contains(reporterReqs, "mangum") {
+		t.Errorf("a container unit runs uvicorn directly and does not need Mangum:\n%s", reporterReqs)
+	}
+	// Both use Redis, so both get the client.
+	for name, reqs := range map[string]string{"api": apiReqs, "reporter": reporterReqs} {
+		if !strings.Contains(reqs, "redis") {
+			t.Errorf("unit %q declares a cache but has no Redis client:\n%s", name, reqs)
+		}
+	}
+}
+
+// TestUserDockerfileWins pins D13's override.
+func TestUserDockerfileWins(t *testing.T) {
+	src := t.TempDir()
+	root := repoRoot(t)
+	copyTree(t, filepath.Join(root, "examples", "kitchen-sink"), src)
+	mine := "# my own image\nFROM python:3.12-alpine\nCMD [\"echo\", \"mine\"]\n"
+	if err := os.WriteFile(filepath.Join(src, "Dockerfile"), []byte(mine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := t.TempDir()
+	cmd := NewRootCommand()
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{src, "-o", outDir, "--app", "kitchen-sink"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("compile failed: %v\n%s", err, stderr.String())
+	}
+
+	got := readFile(t, filepath.Join(outDir, "reporter", "Dockerfile"))
+	if got != mine {
+		t.Errorf("a user-supplied Dockerfile must be used as written, got:\n%s", got)
+	}
+}
+
+func copyTree(t *testing.T, from, to string) {
+	t.Helper()
+	err := filepath.Walk(from, func(abs string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(from, abs)
+		if rerr != nil {
+			return rerr
+		}
+		target := filepath.Join(to, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, rerr := os.ReadFile(abs)
+		if rerr != nil {
+			return rerr
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }

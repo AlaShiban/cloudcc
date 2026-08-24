@@ -165,6 +165,8 @@ func (r *Resolver) database(p *ir.Persist) error {
 		"manageMasterUserPassword": true,
 		"skipFinalSnapshot":        true,
 		"publiclyAccessible":       false,
+		"dbSubnetGroupName":        ir.Ref{Key: r.subnetGroup("rds", "aws.rds.SubnetGroup"), Prop: "name"},
+		"vpcSecurityGroupIds":      []any{ir.Ref{Key: securityGroupKey(), Prop: "id"}},
 	}
 	key := ir.Key{Kind: KindRDS, ID: p.ID}
 	// AWS manages the master password, so the URL carries no credential: the
@@ -177,7 +179,7 @@ func (r *Resolver) database(p *ir.Persist) error {
 	)
 	r.resolve(p.Key(), KindRDS, p.ID, "aws.rds.Instance", props, ir.Env(
 		EnvORMURL(p.ID), ir.FromExpr(url),
-		EnvORMSecretARN(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "masterUserSecrets[0].secretArn"}),
+		EnvORMSecretARN(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "masterUserSecrets.apply(s => s[0].secretArn)"}),
 	), p.Config())
 	return nil
 }
@@ -186,31 +188,37 @@ func (r *Resolver) cache(p *ir.Persist) error {
 	name := sanitize.ElastiCacheCluster(r.App, p.ID)
 	if p.Config().Type == "memorydb" {
 		props := map[string]any{
-			"name":       name,
-			"nodeType":   "db.t4g.small",
-			"numShards":  1,
-			"aclName":    "open-access",
-			"tlsEnabled": true,
+			"name":             name,
+			"nodeType":         "db.t4g.small",
+			"numShards":        1,
+			"aclName":          "open-access",
+			"tlsEnabled":       true,
+			"subnetGroupName":  ir.Ref{Key: r.subnetGroup("memorydb", "aws.memorydb.SubnetGroup"), Prop: "name"},
+			"securityGroupIds": []any{ir.Ref{Key: securityGroupKey(), Prop: "id"}},
 		}
 		key := ir.Key{Kind: KindMemoryDB, ID: p.ID}
+		// A list output cannot be indexed directly in TypeScript, so the
+		// element is selected inside an apply.
 		r.resolve(p.Key(), KindMemoryDB, p.ID, "aws.memorydb.Cluster", props, ir.Env(
-			EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Raw(sanitize.Identifier(p.ID)+".clusterEndpoints[0].address")),
-			EnvRedisPort(p.ID), ir.FromExpr(ir.Raw("\"6379\"")),
+			EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "clusterEndpoints.apply(e => e[0].address)"}),
+			EnvRedisPort(p.ID), ir.FromExpr("6379"),
 			EnvRedisTLS(p.ID), ir.FromExpr("true"),
 		), p.Config())
-		_ = key
 		return nil
 	}
 	props := map[string]any{
-		"clusterId":     name,
-		"engine":        "redis",
-		"nodeType":      "cache.t4g.micro",
-		"numCacheNodes": 1,
-		"port":          6379,
+		"clusterId":        name,
+		"engine":           "redis",
+		"nodeType":         "cache.t4g.micro",
+		"numCacheNodes":    1,
+		"port":             6379,
+		"subnetGroupName":  ir.Ref{Key: r.subnetGroup("elasticache", "aws.elasticache.SubnetGroup"), Prop: "name"},
+		"securityGroupIds": []any{ir.Ref{Key: securityGroupKey(), Prop: "id"}},
 	}
+	key := ir.Key{Kind: KindElastiCache, ID: p.ID}
 	r.resolve(p.Key(), KindElastiCache, p.ID, "aws.elasticache.Cluster", props, ir.Env(
-		EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Raw(sanitize.Identifier(p.ID)+".cacheNodes[0].address")),
-		EnvRedisPort(p.ID), ir.FromExpr(ir.Raw("\"6379\"")),
+		EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "cacheNodes.apply(n => n[0].address)"}),
+		EnvRedisPort(p.ID), ir.FromExpr("6379"),
 		EnvRedisTLS(p.ID), ir.FromExpr("false"),
 	), p.Config())
 	return nil

@@ -15,6 +15,7 @@ const (
 	PluginInput       = "input"
 	PluginDetect      = "detect"
 	PluginStaticUnits = "static-units"
+	PluginEmbedAssets = "embed-assets"
 	PluginExecUnits   = "exec-units"
 	PluginExpose      = "expose"
 	PluginPersist     = "persist"

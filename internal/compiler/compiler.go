@@ -67,6 +67,11 @@ type Context struct {
 	// ClaimedFiles maps a source path to the static unit that claimed it, so
 	// the execution-unit closure can leave those files out of compute bundles.
 	ClaimedFiles map[string]string
+
+	// Embedded maps a declaring source file to the paths cc.embed_assets
+	// claimed from it. Those files travel with whichever units bundle the
+	// declaring file, even though no import reaches them.
+	Embedded map[string][]string
 }
 
 // NewContext returns a context ready for the plugin chain. Files starts empty;
@@ -82,8 +87,17 @@ func NewContext(cfg *config.App, srcRoot string, out afero.Fs) *Context {
 		SrcRoot:      srcRoot,
 		UnitFiles:    map[string][]string{},
 		ClaimedFiles: map[string]string{},
+		Embedded:     map[string][]string{},
 	}
 }
+
+// Failed reports whether an error-severity diagnostic has been recorded.
+//
+// Generating stages check this and return early. Diagnostics accumulate so the
+// user sees every problem at once (D20), but there is no point resolving or
+// rendering a program that is already known to be wrong -- and doing so only
+// produces a second, confusing error about a decision the first one explains.
+func (c *Context) Failed() bool { return c.Diags.HasErrors() }
 
 // Pos builds a diagnostic position for a byte offset in a source file.
 func (c *Context) Pos(path string, offset int) diag.Position {

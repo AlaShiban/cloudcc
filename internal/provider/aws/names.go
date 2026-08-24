@@ -23,6 +23,8 @@ func EnvGatewayURL(id string) string    { return "CC_GATEWAY_" + sanitize.EnvVar
 func EnvStaticBucket(id string) string  { return "CC_STATIC_" + sanitize.EnvVar(id) + "_BUCKET" }
 func EnvStaticURL(id string) string     { return "CC_STATIC_" + sanitize.EnvVar(id) + "_URL" }
 
+func EnvECRRepo(id string) string { return "CC_ECR_" + sanitize.EnvVar(id) + "_URL" }
+
 // EnvEndpointOverride is honoured by every shim so a compiled application can
 // be pointed at an AWS emulator with no code change (D15).
 const EnvEndpointOverride = "CC_AWS_ENDPOINT_URL"
@@ -55,4 +57,16 @@ const (
 	KindECRRepo        = "aws.ecr"
 	KindALB            = "aws.alb"
 	KindVPC            = "aws.vpc"
+	KindSubnet         = "aws.vpc.subnet"
+	KindSecurityGroup  = "aws.vpc.securitygroup"
+	KindInternetGW     = "aws.vpc.gateway"
+	KindRouteTable     = "aws.vpc.routetable"
+	KindRouteAssoc     = "aws.vpc.routeassoc"
+	KindAvailZones     = "aws.availabilityzones"
+	KindSubnetGroup    = "aws.subnetgroup"
+	KindALBTargetGroup = "aws.alb.targetgroup"
+	KindALBListener    = "aws.alb.listener"
+	KindECSExecRole    = "aws.ecs.execrole"
+	KindECSTaskRole    = "aws.ecs.taskrole"
+	KindECSTaskPolicy  = "aws.ecs.taskpolicy"
 )

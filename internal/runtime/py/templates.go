@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/cloudcompiler/cc/internal/sanitize"
 )
 
 //go:embed all:templates
@@ -76,6 +78,8 @@ func RenderDockerfile(data UnitTemplateData) ([]byte, error) {
 // PackageUnit is one entry in the packaging script.
 type PackageUnit struct {
 	ID string
+	// Container is true for units deployed as an image rather than a zip.
+	Container bool
 }
 
 // PackageData is what the packaging script is rendered against.
@@ -87,14 +91,35 @@ type PackageData struct {
 // RenderPackageScript produces bin/package.sh, which installs each unit's
 // dependencies and zips it. Pulumi does not pip-install for you, so this has to
 // run before `pulumi up`.
-func RenderPackageScript(units []string) ([]byte, error) {
-	sorted := append([]string(nil), units...)
-	sort.Strings(sorted)
-	data := PackageData{PythonVersion: PythonVersion}
-	for _, id := range sorted {
-		data.Units = append(data.Units, PackageUnit{ID: id})
-	}
-	return render("templates/package.sh.tmpl", data)
+func RenderPackageScript(units []PackageUnit) ([]byte, error) {
+	sorted := append([]PackageUnit(nil), units...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	return render("templates/package.sh.tmpl", PackageData{
+		PythonVersion: PythonVersion,
+		Units:         sorted,
+	})
+}
+
+// RenderPushScript produces bin/push-images.sh.
+//
+// Container images cannot be pushed before `pulumi up`, because the registry
+// they go to does not exist until then. Splitting the two scripts is what lets
+// `cc deploy` sequence them correctly: package, up, push.
+func RenderPushScript(units []PackageUnit) ([]byte, error) {
+	sorted := append([]PackageUnit(nil), units...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	return render("templates/push-images.sh.tmpl", PackageData{
+		PythonVersion: PythonVersion,
+		Units:         sorted,
+	})
+}
+
+// templateFuncs are shared by the generated scripts. ecrOutput must agree with
+// aws.EnvECRRepo; a naming test pins the two together.
+var templateFuncs = template.FuncMap{
+	"ecrOutput": func(unit string) string {
+		return "CC_ECR_" + sanitize.EnvVar(unit) + "_URL"
+	},
 }
 
 func render(name string, data any) ([]byte, error) {
@@ -102,7 +127,7 @@ func render(name string, data any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	tmpl, err := template.New(path.Base(name)).Parse(string(body))
+	tmpl, err := template.New(path.Base(name)).Funcs(templateFuncs).Parse(string(body))
 	if err != nil {
 		return nil, err
 	}

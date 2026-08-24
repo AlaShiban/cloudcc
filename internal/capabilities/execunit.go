@@ -27,7 +27,9 @@ type ExecUnitsPlugin struct{ base }
 // NewExecUnitsPlugin returns the exec-units stage. It depends on static-units
 // so that claimed assets are already out of the pool.
 func NewExecUnitsPlugin() *ExecUnitsPlugin {
-	return &ExecUnitsPlugin{base{name: PluginExecUnits, deps: []string{PluginDetect, PluginStaticUnits}}}
+	return &ExecUnitsPlugin{base{name: PluginExecUnits, deps: []string{
+		PluginDetect, PluginStaticUnits, PluginEmbedAssets,
+	}}}
 }
 
 func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
@@ -85,6 +87,13 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 		// manifests -- travels with every unit, because deciding which unit
 		// reads a data file is not something static analysis can do.
 		files = union(files, p.sharedAssets(ctx))
+		// Files claimed by cc.embed_assets travel with the units that bundle
+		// the module which claimed them.
+		for _, declaring := range config.SortedKeys(ctx.Embedded) {
+			if containsPath(files, declaring) {
+				files = union(files, ctx.Embedded[declaring])
+			}
+		}
 
 		for _, f := range files {
 			assigned[f] = true
@@ -135,11 +144,21 @@ func (p *ExecUnitsPlugin) defaultEntrypoint(ctx *compiler.Context) string {
 	return candidates[0]
 }
 
-// sharedAssets returns every unclaimed non-Python file.
+// sharedAssets returns every non-Python file that no capability has claimed.
+//
+// A file claimed by cc.embed_assets is deliberately excluded: claiming it is
+// how a program says which unit owns it, so shipping it to every unit as well
+// would make the hint pointless.
 func (p *ExecUnitsPlugin) sharedAssets(ctx *compiler.Context) []string {
+	embedded := map[string]bool{}
+	for _, paths := range ctx.Embedded {
+		for _, path := range paths {
+			embedded[path] = true
+		}
+	}
 	var out []string
 	for _, f := range ctx.Files.Files() {
-		if f.IsPython() {
+		if f.IsPython() || embedded[f.Path] {
 			continue
 		}
 		if _, claimed := ctx.ClaimedFiles[f.Path]; claimed {
@@ -197,6 +216,15 @@ func insertUnique(s []string, v string) []string {
 	s = append(s, v)
 	sort.Strings(s)
 	return s
+}
+
+func containsPath(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func compact(s []string) []string {

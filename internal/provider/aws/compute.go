@@ -17,7 +17,7 @@ func (r *Resolver) execUnit(u *ir.ExecUnit) error {
 	case "lambda":
 		return r.lambda(u)
 	case "ecs":
-		return r.ecsService(u)
+		return r.ecsServiceUnit(u)
 	}
 	return fmt.Errorf("no AWS mapping for execution unit type %q", u.Config().Type)
 }
@@ -88,10 +88,6 @@ func envVarsPlaceholder(unitID string) string {
 // EnvConstName is the generated TypeScript const holding a unit's environment.
 func EnvConstName(unitID string) string { return envVarsPlaceholder(unitID) }
 
-func (r *Resolver) ecsService(u *ir.ExecUnit) error {
-	return fmt.Errorf("execution unit %q: ECS is not yet wired up", u.ID)
-}
-
 // ---------------------------------------------------------------- gateway
 
 func (r *Resolver) expose(e *ir.Expose) error {
@@ -99,7 +95,7 @@ func (r *Resolver) expose(e *ir.Expose) error {
 	case "apigateway":
 		return r.apiGatewayV2(e)
 	case "alb":
-		return fmt.Errorf("expose %q: ALB is not yet wired up", e.ID)
+		return r.alb(e)
 	}
 	return fmt.Errorf("no AWS mapping for expose type %q", e.Config().Type)
 }
@@ -305,7 +301,7 @@ func resourceScope(key ir.Key) []any {
 		// ListBucket is authorised on the bucket; object actions on its keys.
 		return []any{arn, ir.Lit(arn, "/*")}
 	case KindRDS:
-		return []any{ir.Ref{Key: key, Prop: "masterUserSecrets[0].secretArn"}}
+		return []any{ir.Ref{Key: key, Prop: "masterUserSecrets.apply(s => s[0].secretArn)"}}
 	}
 	return []any{arn}
 }

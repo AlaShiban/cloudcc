@@ -324,7 +324,7 @@ func TestRenderDockerfile(t *testing.T) {
 }
 
 func TestRenderPackageScript(t *testing.T) {
-	got, err := RenderPackageScript([]string{"worker", "api"})
+	got, err := RenderPackageScript([]PackageUnit{{ID: "worker"}, {ID: "api"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,6 +377,40 @@ func TestDistributionName(t *testing.T) {
 		if got := distributionName(in); got != want {
 			t.Errorf("distributionName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestPackageScriptBuildsContainerUnits(t *testing.T) {
+	got, err := RenderPackageScript([]PackageUnit{{ID: "api"}, {ID: "reporter", Container: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(got)
+	if !strings.Contains(src, `docker build --quiet --tag "cc-reporter:latest"`) {
+		t.Errorf("a containerised unit should be built as an image:\n%s", src)
+	}
+	if strings.Contains(src, "cc-api:latest") {
+		t.Errorf("a zip-packaged unit should not be built as an image:\n%s", src)
+	}
+	if !strings.Contains(src, "api.zip") {
+		t.Errorf("a zip-packaged unit is missing its artefact:\n%s", src)
+	}
+	if strings.Contains(src, "reporter.zip") {
+		t.Errorf("a containerised unit should not be zipped:\n%s", src)
+	}
+}
+
+func TestPushScriptTargetsTheExportedRepository(t *testing.T) {
+	got, err := RenderPushScript([]PackageUnit{{ID: "api"}, {ID: "reporter", Container: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(got)
+	if !strings.Contains(src, `push "reporter" "CC_ECR_REPORTER_URL"`) {
+		t.Errorf("the push script should read the repository from the stack output:\n%s", src)
+	}
+	if strings.Contains(src, `push "api"`) {
+		t.Errorf("a zip-packaged unit has no image to push:\n%s", src)
 	}
 }
 

@@ -11,6 +11,7 @@
 package aws
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/cloudcompiler/cc/internal/config"
@@ -102,6 +103,12 @@ func AllTypes(kind string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// errUnsupported builds the error used when a configuration is accepted by the
+// schema but cannot be resolved.
+func errUnsupported(format string, args ...any) error {
+	return fmt.Errorf(format, args...)
 }
 
 // NeedsVPC reports whether any of the resolved types requires a VPC. Lambda

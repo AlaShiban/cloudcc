@@ -14,6 +14,7 @@ func IntentChain() []compiler.Plugin {
 		NewInputPlugin(),
 		NewDetectPlugin(),
 		NewStaticUnitsPlugin(),
+		NewEmbedAssetsPlugin(),
 		NewExecUnitsPlugin(),
 		NewExposePlugin(),
 		NewPersistPlugin(),

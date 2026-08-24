@@ -18,6 +18,11 @@ const BinDir = "bin"
 // output root.
 const PackageScript = BinDir + "/package.sh"
 
+// PushScript pushes container images. It is generated only when at least one
+// unit is containerised, and must run after `pulumi up` has created the
+// registries.
+const PushScript = BinDir + "/push-images.sh"
+
 // ShimsPlugin rewrites SDK hint calls in the output copy into real cloud
 // clients, injects the _cc_runtime package, generates the compute entrypoints,
 // and writes the copy out (D13).
@@ -36,6 +41,9 @@ func NewShimsPlugin() *ShimsPlugin {
 }
 
 func (p *ShimsPlugin) Transform(ctx *compiler.Context) error {
+	if ctx.Failed() {
+		return nil
+	}
 	if err := p.rewriteSources(ctx); err != nil {
 		return err
 	}
@@ -163,14 +171,40 @@ func (p *ShimsPlugin) requirements(ctx *compiler.Context, unitID string, unit *i
 // writePackagingScript emits bin/package.sh. Pulumi does not install Python
 // dependencies, so something has to; `cc deploy` runs this before `up`.
 func (p *ShimsPlugin) writePackagingScript(ctx *compiler.Context) error {
-	script, err := runtimepy.RenderPackageScript(config.SortedKeys(ctx.UnitFiles))
+	var units []runtimepy.PackageUnit
+	containers := false
+	for _, id := range config.SortedKeys(ctx.UnitFiles) {
+		unit, ok := lookupUnit(ctx, id)
+		if !ok {
+			continue
+		}
+		isContainer := unit.Config().Type == "ecs"
+		containers = containers || isContainer
+		units = append(units, runtimepy.PackageUnit{ID: id, Container: isContainer})
+	}
+
+	script, err := runtimepy.RenderPackageScript(units)
 	if err != nil {
 		return err
 	}
 	if err := writeOut(ctx.Out, PackageScript, script); err != nil {
 		return err
 	}
-	return ctx.Out.Chmod(PackageScript, 0o755)
+	if err := ctx.Out.Chmod(PackageScript, 0o755); err != nil {
+		return err
+	}
+
+	if !containers {
+		return nil
+	}
+	push, err := runtimepy.RenderPushScript(units)
+	if err != nil {
+		return err
+	}
+	if err := writeOut(ctx.Out, PushScript, push); err != nil {
+		return err
+	}
+	return ctx.Out.Chmod(PushScript, 0o755)
 }
 
 // userDockerfile reports whether the unit's bundle already contains a

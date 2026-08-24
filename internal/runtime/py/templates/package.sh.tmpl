@@ -19,7 +19,17 @@ fi
 rm -rf "$build"
 mkdir -p "$build"
 
-{{range .Units}}
+{{range .Units}}{{if .Container}}
+echo "packaging execution unit {{.ID}} (container)"
+if command -v docker >/dev/null 2>&1; then
+  docker build --quiet --tag "cc-{{.ID}}:latest" "{{.ID}}" >/dev/null
+  echo "  built image cc-{{.ID}}:latest"
+  echo "  push it after \`pulumi up\` with bin/push-images.sh"
+else
+  echo "  docker is not installed; skipping the image build for {{.ID}}" >&2
+  echo "  install it with: brew install --cask docker" >&2
+fi
+{{else}}
 echo "packaging execution unit {{.ID}}"
 unit_build="$build/{{.ID}}"
 mkdir -p "$unit_build"
@@ -40,6 +50,6 @@ find "$unit_build" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$unit_build" -exec touch -t 198001010000 {} +
 ( cd "$unit_build" && find . -type f | LC_ALL=C sort | zip -q -X -@ "../{{.ID}}.zip" )
 echo "  wrote $build/{{.ID}}.zip"
-{{end}}
+{{end}}{{end}}
 
 echo "packaging complete"

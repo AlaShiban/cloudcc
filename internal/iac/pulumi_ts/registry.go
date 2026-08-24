@@ -26,6 +26,10 @@ type Template struct {
 	// URLProp, when set, names the property worth exporting as a stack output
 	// for that resource.
 	URLProp string
+	// Func, when set, makes this a data source: the generated statement calls
+	// Func(props) instead of constructing Class. Data sources have no Pulumi
+	// resource name, which is why they need their own row shape.
+	Func string
 }
 
 // templates is the whole registry. Adding a resource type is adding a row.
@@ -59,6 +63,13 @@ var templates = []Template{
 	{ID: "aws.ec2.Vpc", Class: "aws.ec2.Vpc", Import: "aws", VarSuffix: "Vpc"},
 	{ID: "aws.ec2.Subnet", Class: "aws.ec2.Subnet", Import: "aws", VarSuffix: "Subnet"},
 	{ID: "aws.ec2.SecurityGroup", Class: "aws.ec2.SecurityGroup", Import: "aws", VarSuffix: "SecurityGroup"},
+	{ID: "aws.ec2.InternetGateway", Class: "aws.ec2.InternetGateway", Import: "aws", VarSuffix: "Gateway"},
+	{ID: "aws.ec2.RouteTable", Class: "aws.ec2.RouteTable", Import: "aws", VarSuffix: "Routes"},
+	{ID: "aws.ec2.RouteTableAssociation", Class: "aws.ec2.RouteTableAssociation", Import: "aws", VarSuffix: "RouteAssoc"},
+	{ID: "aws.rds.SubnetGroup", Class: "aws.rds.SubnetGroup", Import: "aws", VarSuffix: "SubnetGroup"},
+	{ID: "aws.elasticache.SubnetGroup", Class: "aws.elasticache.SubnetGroup", Import: "aws", VarSuffix: "SubnetGroup"},
+	{ID: "aws.memorydb.SubnetGroup", Class: "aws.memorydb.SubnetGroup", Import: "aws", VarSuffix: "SubnetGroup"},
+	{ID: "aws.getAvailabilityZones", Func: "aws.getAvailabilityZonesOutput", Import: "aws", VarSuffix: "Zones"},
 }
 
 var byID = func() map[string]Template {

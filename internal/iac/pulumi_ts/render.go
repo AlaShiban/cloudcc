@@ -66,6 +66,10 @@ func renderIndex(req iac.Request) ([]byte, error) {
 	for _, name := range []string{"pulumi", "aws", "config"} {
 		namer.reserve(name)
 	}
+	// Pulumi names resources per type, so two resources of the same class may
+	// not share a logical name. Resolving that here, once, means no mapping has
+	// to remember it.
+	logical := logicalNames(req.Program, order)
 	// Names are assigned in dependency order so a resource can always refer to
 	// something declared above it.
 	for _, key := range order {
@@ -106,7 +110,7 @@ func renderIndex(req iac.Request) ([]byte, error) {
 				emittedEnv[key.ID] = true
 			}
 		}
-		rendered, err := renderResource(namer, res)
+		rendered, err := renderResource(namer, res, logical[key.String()])
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", key, err)
 		}
@@ -121,18 +125,51 @@ func renderIndex(req iac.Request) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-func renderResource(namer *varNamer, res ir.Resource) (string, error) {
+// logicalNames assigns each resource the name Pulumi will track it under:
+// its id, or the generated variable name when two resources of the same class
+// would otherwise collide.
+func logicalNames(p *ir.Program, order []ir.Key) map[string]string {
+	taken := map[string]bool{}
+	out := map[string]string{}
+	for _, key := range order {
+		res, ok := p.Resource(key)
+		if !ok {
+			continue
+		}
+		tmpl, err := Lookup(res.Template())
+		if err != nil {
+			continue
+		}
+		name := key.ID
+		for i := 2; taken[tmpl.Class+"|"+name]; i++ {
+			name = fmt.Sprintf("%s-%d", key.ID, i)
+		}
+		taken[tmpl.Class+"|"+name] = true
+		out[key.String()] = name
+	}
+	return out
+}
+
+func renderResource(namer *varNamer, res ir.Resource, logicalName string) (string, error) {
 	tmpl, err := Lookup(res.Template())
 	if err != nil {
 		return "", err
 	}
 	name, _ := namer.get(res.Key())
+	if logicalName == "" {
+		logicalName = res.Key().ID
+	}
 	props, err := namer.object(res.Props(), 0)
 	if err != nil {
 		return "", err
 	}
+	if tmpl.Func != "" {
+		// A data source is a call, not a construction, so it takes no Pulumi
+		// resource name.
+		return fmt.Sprintf("export const %s = %s(%s);\n\n", name, tmpl.Func, props), nil
+	}
 	return fmt.Sprintf("export const %s = new %s(%s, %s);\n\n",
-		name, tmpl.Class, quote(res.Key().ID), props), nil
+		name, tmpl.Class, quote(logicalName), props), nil
 }
 
 // unitEnvironments builds the environment object for each execution unit:

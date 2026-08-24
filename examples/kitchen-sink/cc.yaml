@@ -1,0 +1,18 @@
+app: kitchen-sink
+provider: aws
+
+execution_units:
+  api:
+    type: lambda
+  reporter:
+    type: ecs
+
+exposed:
+  shop-api:
+    type: apigateway
+  reporter-web:
+    type: alb
+
+persisted:
+  itemCache:
+    type: elasticache

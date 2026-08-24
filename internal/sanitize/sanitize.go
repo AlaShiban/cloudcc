@@ -55,7 +55,12 @@ func Identifier(s string) string {
 	return b.String()
 }
 
-// EnvVar turns s into a SCREAMING_SNAKE environment variable segment.
+// EnvVar turns s into a SCREAMING_SNAKE environment variable *segment*.
+//
+// The result is always used inside a CC_-prefixed name, so it deliberately
+// does nothing about a leading digit: adding a guard character here would put
+// it out of step with the identical function in the injected Python shims,
+// which a parity test compares against.
 func EnvVar(s string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -68,11 +73,7 @@ func EnvVar(s string) string {
 			b.WriteByte('_')
 		}
 	}
-	out := b.String()
-	if out == "" || out[0] >= '0' && out[0] <= '9' {
-		out = "V" + out
-	}
-	return out
+	return b.String()
 }
 
 // DynamoTable: 3-255 characters of [a-zA-Z0-9_.-].
