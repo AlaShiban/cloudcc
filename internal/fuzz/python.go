@@ -20,9 +20,9 @@ const (
 	styleAlias importStyle = iota
 	// stylePlain: import cloudcompiler
 	stylePlain
-	// styleFrom: from cloudcompiler import persist_kv
+	// styleFrom: from cloudcompiler import persist
 	styleFrom
-	// styleFromAliased: from cloudcompiler import persist_kv as kv_store
+	// styleFromAliased: from cloudcompiler import persist as store
 	styleFromAliased
 )
 
@@ -90,18 +90,8 @@ func (m *pyModule) localName(fn string) string {
 // look like something a person would actually write.
 func directAlias(fn string) string {
 	switch fn {
-	case "persist_kv":
-		return "kv_store"
-	case "persist_fs":
-		return "file_store"
-	case "persist_secret":
-		return "secret_store"
-	case "persist_orm":
-		return "database"
-	case "persist_redis":
-		return "cache_store"
-	case "pubsub_topic":
-		return "topic"
+	case "persist":
+		return "store"
 	case "config_value":
 		return "setting"
 	case "expose":
@@ -378,4 +368,65 @@ func boolToRune(b bool) rune {
 		return 1
 	}
 	return 0
+}
+
+// clientExpr renders the client a persist() call wraps, registering whatever
+// import it needs.
+//
+// This is the generator's most valuable surface now. The compiler no longer
+// reads a function name to learn what a store is -- it reads the type of the
+// expression handed to persist -- so every shape that expression can take is a
+// path through the detector. A dotted constructor, a bare one, an aliased
+// import and a connection URL in one of several spellings are all things a
+// person writes and all things that have to resolve to the same capability.
+func (m *pyModule) clientExpr(rng *rand.Rand, kind string) string {
+	switch kind {
+	case "persist_kv":
+		return m.hint("KVStore")
+
+	case "persist_secret":
+		return m.hint("Secret")
+
+	case "pubsub":
+		return m.hint("Topic")
+
+	case "persist_fs":
+		// pathlib is the whole story here: the SDK supplies no file class,
+		// because a compiled program gets a cloudpathlib S3Path, which is a
+		// Path in every way that matters.
+		if rng.Intn(2) == 0 {
+			m.importStd("from pathlib import Path")
+			return "Path(" + m.quote("./data") + ")"
+		}
+		m.importStd("import pathlib")
+		return "pathlib.Path(" + m.quote("./data") + ")"
+
+	case "persist_orm":
+		url := []string{
+			"postgresql://localhost/app",
+			"postgresql+psycopg://localhost/app",
+			"mysql+pymysql://localhost/app",
+			"mysql://localhost/app",
+		}[rng.Intn(4)]
+		if rng.Intn(2) == 0 {
+			m.importStd("from sqlalchemy import create_engine")
+			return "create_engine(" + m.quote(url) + ")"
+		}
+		m.importStd("import sqlalchemy")
+		return "sqlalchemy.create_engine(" + m.quote(url) + ")"
+
+	case "persist_redis":
+		switch rng.Intn(3) {
+		case 0:
+			m.importStd("from redis import Redis")
+			return "Redis()"
+		case 1:
+			m.importStd("import redis")
+			return "redis.Redis(host=" + m.quote("localhost") + ", port=6379)"
+		default:
+			m.importStd("from redis import StrictRedis")
+			return "StrictRedis()"
+		}
+	}
+	return m.hint("KVStore")
 }

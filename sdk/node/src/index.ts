@@ -5,48 +5,46 @@
  * statically -- it never imports or executes this package -- and rewrites
  * them, in a copy of your source, into real cloud clients.
  *
- * Two rules follow from that:
+ * The central idea is that you bring your own client and the compiler wraps it:
  *
- * - Arguments must be literals. `persistKv("pets")` is fine;
- *   `persistKv(name)` is a compile error with a precise source location,
- *   because the compiler would have to run your program to know the value.
+ * ```ts
+ * const cache = persist(new Redis(), { id: "itemCache" });
+ * const db    = persist(new Pool({ connectionString: "postgres://…" }), { id: "shopdb" });
+ * ```
+ *
+ * `persist` is type-preserving: it returns exactly what you gave it, so the
+ * type your editor sees is the type you keep. Uncompiled, it *is* the object
+ * you passed -- your program talks to a local Redis, a local Postgres.
+ * Compiled, the same expression becomes a client of the same type pointed at
+ * ElastiCache or RDS.
+ *
+ * That is the whole point of the design. There is no parallel API to learn and
+ * none for us to keep in step with yours: what you hold is always the
+ * library's own type.
+ *
+ * Two rules follow from the hints being read rather than run:
+ *
+ * - Arguments must be literals. `persist(client, { id: "pets" })` is fine;
+ *   `persist(client, { id: name })` is a compile error with a precise source
+ *   location, because the compiler would have to run your program to know the
+ *   value.
  * - Calls belong at module top level, where the compiler can see the shape of
  *   the program. `executionUnit` in particular must be a top-level call.
  *
- * At runtime, outside the compiler, these functions return small local
- * emulations -- a Map for a KV store, a directory for a bucket -- so
- * `node server.js` still runs on your laptop with no cloud account and no
- * credentials. The emulations are deliberately minimal; they exist so the
- * program runs, not so it behaves identically to AWS.
+ * Where the ecosystem has no standard client -- a key/value store, a pub/sub
+ * topic, a secret -- this package supplies a typed one, wrapped by the same
+ * verb as everything else.
  *
  * This package never imports the AWS SDK. Cloud access only ever appears in
  * the `_cloudcc_runtime` package the compiler injects into the compiled copy.
  */
 
-import {
-  Bucket,
-  Gateway,
-  Json,
-  KVStore,
-  OrmSession,
-  Redis,
-  Secret,
-  Topic,
-  caches,
-  databases,
-  fileStores,
-  kvStores,
-  secrets,
-  slug,
-  topics,
-} from "./emulation.js";
+import { Gateway, Json, slug } from "./emulation.js";
 
 export {
-  Bucket,
+  FileStore,
   Gateway,
   KVStore,
-  OrmSession,
-  Redis,
   Secret,
   Topic,
   localRoot,
@@ -80,35 +78,37 @@ export function expose(app: unknown, options: { id?: string; target?: string } =
   return new Gateway(options.id ?? "main", options.target ?? "public", app);
 }
 
-/** A key/value store. Compiles to DynamoDB. */
-export function persistKv(id: string): KVStore {
-  return memo(kvStores, id, () => new KVStore(id));
-}
-
-/** A file store. Compiles to S3. */
-export function persistFs(id: string): Bucket {
-  return memo(fileStores, id, () => new Bucket(id));
-}
-
-/** A secret. Compiles to Secrets Manager. */
-export function persistSecret(id: string): Secret {
-  return memo(secrets, id, () => new Secret(id));
-}
-
-/** A relational database. Compiles to RDS Postgres. */
-export function persistOrm(id: string, options: { models?: string[] } = {}): OrmSession {
+/**
+ * Make a client's data outlive the process.
+ *
+ * Pass the client you already use. The compiler reads its type to decide what
+ * to provision:
+ *
+ * | what you pass                      | what it becomes           |
+ * | ---------------------------------- | ------------------------- |
+ * | `new Redis(...)` (ioredis)         | ElastiCache (or MemoryDB) |
+ * | `createClient(...)` (node-redis)   | ElastiCache (or MemoryDB) |
+ * | `new Pool({ … })` (pg)             | RDS Postgres              |
+ * | `new Sequelize("mysql://…")`       | RDS MySQL                 |
+ * | `new KVStore()`                    | DynamoDB                  |
+ * | `new FileStore()`                  | S3                        |
+ * | `new Topic()`                      | SNS                       |
+ * | `new Secret()`                     | Secrets Manager           |
+ *
+ * The library you reached for supplies the default; cloudcc.yaml still chooses
+ * between variants of it, so asking for MemoryDB instead of ElastiCache is a
+ * configuration change rather than a code change.
+ *
+ * `id` names the resource and is required. It is deliberately not taken from
+ * the binding you assign to: renaming a local would otherwise replace a live
+ * resource, and losing a database to a rename is not a trade worth making for
+ * brevity.
+ *
+ * Returns `client`, unchanged.
+ */
+export function persist<T>(client: T, options: { id: string; models?: string[] }): T {
   void options;
-  return memo(databases, id, () => new OrmSession(id));
-}
-
-/** A Redis-compatible cache. Compiles to ElastiCache or MemoryDB. */
-export function persistRedis(id: string): Redis {
-  return memo(caches, id, () => new Redis(id));
-}
-
-/** A publish/subscribe topic. Compiles to SNS. */
-export function pubsubTopic(id: string): Topic {
-  return memo(topics, id, () => new Topic(id));
+  return client;
 }
 
 /**
@@ -143,16 +143,6 @@ export function staticUnit(
  */
 export function embedAssets(pattern: string): string {
   return pattern;
-}
-
-function memo<T>(store: Map<string, T>, id: string, make: () => T): T {
-  const existing = store.get(id);
-  if (existing !== undefined) {
-    return existing;
-  }
-  const created = make();
-  store.set(id, created);
-  return created;
 }
 
 export type { Json as JsonValue };

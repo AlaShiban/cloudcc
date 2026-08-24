@@ -1,4 +1,6 @@
 boto3>=1.34
+cloudpathlib[s3]>=0.20
 fastapi==0.115.6
 mangum>=0.17
 redis>=5.0
+SQLAlchemy>=2.0

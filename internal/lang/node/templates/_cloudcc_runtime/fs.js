@@ -5,11 +5,11 @@ import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2
 import { common, env, slug } from "./client.js";
 
 export function connect(id) {
-  const bucket = env(`CLOUDCC_FS_${slug(id)}_BUCKET`, "persistFs", id);
-  return new Bucket(id, bucket, new S3Client(common()));
+  const bucket = env(`CLOUDCC_FS_${slug(id)}_BUCKET`, "persist", id);
+  return new FileStore(id, bucket, new S3Client(common()));
 }
 
-export class Bucket {
+export class FileStore {
   constructor(id, bucket, client) {
     this.id = id;
     this._bucket = bucket;

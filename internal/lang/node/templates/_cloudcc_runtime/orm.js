@@ -6,7 +6,7 @@ import { common, env, slug } from "./client.js";
 
 export function connect(id) {
   const key = slug(id);
-  const url = env(`CLOUDCC_ORM_${key}_URL`, "persistOrm", id);
+  const url = env(`CLOUDCC_ORM_${key}_URL`, "persist", id);
   return new OrmSession(id, url, process.env[`CLOUDCC_ORM_${key}_SECRET_ARN`]);
 }
 

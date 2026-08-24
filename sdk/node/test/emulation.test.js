@@ -34,8 +34,22 @@ test("the SDK never imports an AWS client", () => {
   }
 });
 
-test("persistKv round-trips", async () => {
-  const pets = cloudcc.persistKv("petsByOwner");
+test("persist returns exactly what it was given", () => {
+  // The property the whole design rests on. persist is a compile-time hint;
+  // uncompiled it must be the identity function, or a program would behave
+  // differently depending on whether it had been compiled.
+  for (const client of [{}, [1, 2], "text", 42, new cloudcc.KVStore()]) {
+    assert.equal(cloudcc.persist(client, { id: "anything" }), client);
+  }
+});
+
+test("persist preserves the type it was handed", () => {
+  const store = new cloudcc.KVStore();
+  assert.ok(cloudcc.persist(store, { id: "kv" }) instanceof cloudcc.KVStore);
+});
+
+test("KVStore round-trips", async () => {
+  const pets = cloudcc.persist(new cloudcc.KVStore(), { id: "petsByOwner" });
   assert.equal(await pets.get("1"), null);
 
   await pets.put("1", { name: "rex" });
@@ -47,21 +61,33 @@ test("persistKv round-trips", async () => {
   assert.deepEqual(await pets.keys(), []);
 });
 
-test("persistKv returns a copy", async () => {
-  const pets = cloudcc.persistKv("petsByOwner");
+test("KVStore returns a copy", async () => {
+  const pets = cloudcc.persist(new cloudcc.KVStore(), { id: "petsByOwner" });
   await pets.put("1", { name: "rex" });
   const got = await pets.get("1");
   got.name = "mutated";
   assert.deepEqual(await pets.get("1"), { name: "rex" });
 });
 
-test("the same id gives the same store", () => {
-  assert.equal(cloudcc.persistKv("shared"), cloudcc.persistKv("shared"));
-  assert.notEqual(cloudcc.persistKv("a"), cloudcc.persistKv("b"));
+test("a KVStore really persists", async () => {
+  // A verb called persist handing back a Map that forgets on exit would be a
+  // poor joke, so the local store is file-backed.
+  const path = join(process.env.CLOUDCC_LOCAL_STATE_DIR, "explicit.json");
+  await new cloudcc.KVStore(path).put("1", { name: "rex" });
+  assert.deepEqual(await new cloudcc.KVStore(path).get("1"), { name: "rex" });
 });
 
-test("persistFs round-trips", async () => {
-  const blobs = cloudcc.persistFs("petAudit");
+test("two KVStores are independent", async () => {
+  const a = new cloudcc.KVStore();
+  const b = new cloudcc.KVStore();
+  await a.put("k", { v: 1 });
+  assert.equal(await b.get("k"), null);
+});
+
+test("FileStore round-trips", async () => {
+  // Node has no pathlib, so unlike the Python SDK this one is a class we
+  // supply -- and the injected shim has to match it method for method.
+  const blobs = cloudcc.persist(new cloudcc.FileStore(), { id: "petAudit" });
   assert.deepEqual(await blobs.list(), []);
   assert.equal(await blobs.exists("a.txt"), false);
 
@@ -78,44 +104,20 @@ test("persistFs round-trips", async () => {
   await assert.rejects(() => blobs.read("a.txt"));
 });
 
-test("persistSecret reads the environment", async () => {
-  const secret = cloudcc.persistSecret("api-key");
+test("Secret reads the environment", async () => {
+  const secret = cloudcc.persist(new cloudcc.Secret(), { id: "api-key" });
   assert.equal(await secret.get(), "");
 
-  process.env.CLOUDCC_SECRET_API_KEY = "s3cr3t";
-  assert.equal(await cloudcc.persistSecret("api-key").get(), "s3cr3t");
-  delete process.env.CLOUDCC_SECRET_API_KEY;
+  process.env.API_KEY = "s3cr3t";
+  assert.equal(await new cloudcc.Secret("API_KEY").get(), "s3cr3t");
+  delete process.env.API_KEY;
 
   await secret.set("overridden");
   assert.equal(await secret.get(), "overridden");
 });
 
-test("persistRedis operations", async () => {
-  const cache = cloudcc.persistRedis("sessions");
-  assert.equal(await cache.get("k"), null);
-
-  await cache.set("k", "v");
-  assert.equal(await cache.get("k"), "v");
-
-  await cache.set("k", "v2", 60);
-  assert.equal(await cache.get("k"), "v2");
-
-  assert.equal(await cache.incr("hits"), 1);
-  assert.equal(await cache.incr("hits", 4), 5);
-
-  await cache.delete("k");
-  assert.equal(await cache.get("k"), null);
-});
-
-test("persistOrm gives a local url", async () => {
-  const db = cloudcc.persistOrm("maindb", { models: ["Row"] });
-  const url = await db.url();
-  assert.ok(url.startsWith("sqlite://"), url);
-  assert.ok(url.endsWith("maindb.db"), url);
-});
-
-test("pubsub fans out in process", async () => {
-  const topic = cloudcc.pubsubTopic("petEvents");
+test("Topic fans out in process", async () => {
+  const topic = cloudcc.persist(new cloudcc.Topic(), { id: "petEvents" });
   const seen = [];
 
   topic.subscribe((m) => seen.push(["first", m.id]));
@@ -127,7 +129,7 @@ test("pubsub fans out in process", async () => {
 });
 
 test("subscribe returns the handler, so it reads as a wrapper", () => {
-  const topic = cloudcc.pubsubTopic("t");
+  const topic = cloudcc.persist(new cloudcc.Topic(), { id: "t" });
   const handler = topic.subscribe(() => "handled");
   assert.equal(handler({ id: "x" }), "handled");
 });
@@ -160,12 +162,12 @@ test("hint-only functions return quietly", () => {
 });
 
 test("resetLocalState clears directories", async () => {
-  const blobs = cloudcc.persistFs("b");
+  const blobs = new cloudcc.FileStore();
   await blobs.write("a.txt", Buffer.from("x"));
   assert.equal(await blobs.exists("a.txt"), true);
 
   cloudcc.resetLocalState();
-  assert.equal(await cloudcc.persistFs("b").exists("a.txt"), false);
+  assert.equal(await blobs.exists("a.txt"), false);
 });
 
 test("slug matches the compiler's spelling", () => {

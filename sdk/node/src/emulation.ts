@@ -1,98 +1,141 @@
 /**
- * Local emulations behind the SDK hints.
+ * The typed clients this package supplies.
  *
- * These exist for one reason: so that a program written against the SDK still
- * runs with `node server.js` on a laptop, with no cloud account. They are
- * deliberately small. A KV store is a Map; a bucket is a directory.
+ * Most capabilities have a standard client already -- `ioredis`, `pg`,
+ * `sequelize` -- and `persist` wraps those untouched. A few do not: a key/value
+ * store, a pub/sub topic, a secret and a plain file store have no library
+ * everyone reaches for. Those get a class here, so every capability is declared
+ * the same way.
  *
- * Their method signatures are the contract the injected `_cloudcc_runtime`
- * clients must match exactly, and a parity test compares the two -- because
- * two implementations of one API drift otherwise.
+ * These are real local implementations rather than mocks. A key/value store is
+ * a JSON file, because `persist` promising persistence and handing back a Map
+ * that vanishes on exit would be a poor joke.
  *
- * Every method that reaches a store is asynchronous, even though a Map lookup
+ * Every method that reaches a store is asynchronous, even though a file read
  * needs no await. That is deliberate: the injected client talks to AWS and
  * cannot be synchronous, so if these were synchronous, compiling a program
  * would silently change what it does -- `pets.get(id)` would go from returning
  * a value to returning a promise. Matching the shape here is what makes the
  * compile behaviour-preserving.
+ *
+ * Their method signatures are the contract the injected `_cloudcc_runtime`
+ * clients must match exactly, and a parity test compares the two.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, posix, relative, resolve } from "node:path";
 
-/** Where directory-backed emulations keep their state. */
+/** Where the supplied clients keep their state. */
 export const LOCAL_STATE_DIR_ENV = "CLOUDCC_LOCAL_STATE_DIR";
 const DEFAULT_LOCAL_ROOT = ".cloudcc-local";
 
-/** The directory local emulations write to. */
+/** The directory the supplied clients write to. */
 export function localRoot(): string {
   return process.env[LOCAL_STATE_DIR_ENV] ?? DEFAULT_LOCAL_ROOT;
 }
 
-const registries: Array<Map<string, unknown>> = [];
-
-function registry<T>(): Map<string, T> {
-  const m = new Map<string, T>();
-  registries.push(m as Map<string, unknown>);
-  return m;
-}
-
-/** Delete every local emulation's state. Intended for tests. */
+/** Delete every supplied client's local state. Intended for tests. */
 export function resetLocalState(): void {
   const root = localRoot();
   if (existsSync(root)) {
     rmSync(root, { recursive: true, force: true });
   }
-  for (const r of registries) {
-    r.clear();
-  }
+}
+
+/**
+ * Each instance gets its own corner of the state directory. The id belongs to
+ * `persist`, not to the constructor, so a client has to name itself somehow;
+ * a counter is enough, and unlike an object identity it is stable across runs.
+ */
+let instances = 0;
+function instanceKey(): string {
+  instances += 1;
+  return String(instances);
 }
 
 /** A JSON-shaped value, which is what these stores hold. */
 export type Json = Record<string, unknown>;
 
-/** A key/value store keyed by string, holding JSON-shaped values. */
+/**
+ * A key/value store keyed by string, holding JSON-shaped values. Compiles to
+ * DynamoDB.
+ *
+ * The id is supplied by `persist`, not by the constructor, so the object reads
+ * as a plain client until it is wrapped.
+ */
 export class KVStore {
-  readonly id: string;
-  readonly #items = new Map<string, string>();
+  readonly #path: string;
 
-  constructor(id: string) {
-    this.id = id;
+  constructor(path?: string) {
+    this.#path = path ?? join(localRoot(), "kv", `${instanceKey()}.json`);
+  }
+
+  #read(): Record<string, Json> {
+    if (!existsSync(this.#path)) {
+      return {};
+    }
+    const raw = readFileSync(this.#path, "utf8");
+    return raw === "" ? {} : (JSON.parse(raw) as Record<string, Json>);
+  }
+
+  #write(items: Record<string, Json>): void {
+    mkdirSync(dirname(this.#path), { recursive: true });
+    const sorted: Record<string, Json> = {};
+    for (const key of Object.keys(items).sort()) {
+      sorted[key] = items[key];
+    }
+    writeFileSync(this.#path, JSON.stringify(sorted));
   }
 
   /** Return the item at `key`, or null. */
   async get(key: string): Promise<Json | null> {
-    const raw = this.#items.get(String(key));
-    return raw === undefined ? null : (JSON.parse(raw) as Json);
+    return this.#read()[String(key)] ?? null;
   }
 
   /** Store `value` at `key`. */
   async put(key: string, value: Json): Promise<void> {
-    this.#items.set(String(key), JSON.stringify(value));
+    const items = this.#read();
+    items[String(key)] = value;
+    this.#write(items);
   }
 
   /** Remove `key` if present. */
   async delete(key: string): Promise<void> {
-    this.#items.delete(String(key));
+    const items = this.#read();
+    delete items[String(key)];
+    this.#write(items);
   }
 
   /** Every key currently stored, sorted. */
   async keys(): Promise<string[]> {
-    return [...this.#items.keys()].sort();
+    return Object.keys(this.#read()).sort();
   }
 }
 
-/** A file store backed by a local directory. */
-export class Bucket {
-  readonly id: string;
+/**
+ * A file store backed by a local directory. Compiles to S3.
+ *
+ * Pass a directory when the program already has one; otherwise it lives under
+ * the state directory.
+ */
+export class FileStore {
+  readonly #base: string;
 
-  constructor(id: string) {
-    this.id = id;
+  constructor(root?: string) {
+    this.#base = root ?? join(localRoot(), "fs", instanceKey());
   }
 
   #path(key: string): string {
-    const safe = String(key).replace(/^\/+/, "");
-    return join(localRoot(), "fs", this.id, safe);
+    return join(this.#base, String(key).replace(/^\/+/, ""));
   }
 
   /** Return the bytes stored at `key`, throwing when absent. */
@@ -123,10 +166,10 @@ export class Bucket {
 
   /** Every key under `prefix`, sorted. */
   async list(prefix = ""): Promise<string[]> {
-    const base = join(localRoot(), "fs", this.id);
-    if (!existsSync(base)) {
+    if (!existsSync(this.#base)) {
       return [];
     }
+    const base = resolve(this.#base);
     const out: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -138,29 +181,31 @@ export class Bucket {
         }
       }
     };
-    walk(resolve(base));
+    walk(base);
     return out.filter((k) => k.startsWith(prefix)).sort();
   }
 }
 
-/** A single secret value. */
+/**
+ * A single secret value. Compiles to Secrets Manager.
+ *
+ * Locally it reads the named environment variable, so a test can supply one
+ * without a cloud account.
+ */
 export class Secret {
-  readonly id: string;
+  readonly #env: string | null;
   #value: string | null = null;
 
-  constructor(id: string) {
-    this.id = id;
+  constructor(env?: string) {
+    this.#env = env ?? null;
   }
 
-  /**
-   * Return the secret's value. Locally this reads `CLOUDCC_SECRET_<ID>` from
-   * the environment, so a test can supply one without a cloud account.
-   */
+  /** Return the secret's value. */
   async get(): Promise<string> {
     if (this.#value !== null) {
       return this.#value;
     }
-    return process.env[`CLOUDCC_SECRET_${slug(this.id)}`] ?? "";
+    return (this.#env === null ? "" : process.env[this.#env]) ?? "";
   }
 
   /** Replace the secret's value. */
@@ -169,74 +214,17 @@ export class Secret {
   }
 }
 
-/**
- * A relational database handle.
- *
- * The emulation offers the connection URL rather than a client, so the same
- * call works with whichever driver the program already uses.
- */
-export class OrmSession {
-  readonly id: string;
-
-  constructor(id: string) {
-    this.id = id;
-  }
-
-  /** The database connection URL. */
-  async url(): Promise<string> {
-    const root = join(localRoot(), "orm");
-    mkdirSync(root, { recursive: true });
-    return `sqlite://${join(root, `${this.id}.db`)}`;
-  }
-}
-
-/** A Redis-compatible cache. */
-export class Redis {
-  readonly id: string;
-  readonly #items = new Map<string, string>();
-
-  constructor(id: string) {
-    this.id = id;
-  }
-
-  /** Return the value at `key`, or null. */
-  async get(key: string): Promise<string | null> {
-    return this.#items.get(String(key)) ?? null;
-  }
-
-  /**
-   * Store `value` at `key`, optionally expiring after `ex` seconds. The local
-   * emulation ignores `ex`: nothing here is long-lived enough for expiry to be
-   * observable.
-   */
-  async set(key: string, value: string, ex?: number): Promise<void> {
-    this.#items.set(String(key), String(value));
-  }
-
-  /** Remove `key` if present. */
-  async delete(key: string): Promise<void> {
-    this.#items.delete(String(key));
-  }
-
-  /** Increment `key` and return the new value. */
-  async incr(key: string, amount = 1): Promise<number> {
-    const next = Number(this.#items.get(String(key)) ?? "0") + amount;
-    this.#items.set(String(key), String(next));
-    return next;
-  }
-}
-
 /** A handler a topic delivers messages to. */
 export type Subscriber = (message: Json) => unknown;
 
-/** A publish/subscribe topic with in-process fan-out. */
+/**
+ * A publish/subscribe topic with in-process fan-out. Compiles to SNS.
+ *
+ * Locally a publisher and a subscriber in the same program behave as they will
+ * once they are separate Lambdas.
+ */
 export class Topic {
-  readonly id: string;
   readonly #subscribers: Subscriber[] = [];
-
-  constructor(id: string) {
-    this.id = id;
-  }
 
   /** Deliver `message` to every subscriber. */
   async publish(message: Json): Promise<void> {
@@ -290,10 +278,3 @@ export class Gateway {
 export function slug(id: string): string {
   return [...id].map((c) => (/[a-zA-Z0-9]/.test(c) ? c.toUpperCase() : "_")).join("");
 }
-
-export const kvStores = registry<KVStore>();
-export const fileStores = registry<Bucket>();
-export const secrets = registry<Secret>();
-export const databases = registry<OrmSession>();
-export const caches = registry<Redis>();
-export const topics = registry<Topic>();

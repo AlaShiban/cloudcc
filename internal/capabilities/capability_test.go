@@ -22,7 +22,7 @@ func TestPersistIntentIsSharedBetweenUnits(t *testing.T) {
 		"api.py":             "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\nfrom shared.store import pets\n",
 		"worker.py":          "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\nfrom shared.store import pets\n",
 		"shared/__init__.py": "",
-		"shared/store.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n",
+		"shared/store.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n",
 	})
 
 	stores := ctx.Graph.IntentsOfKind(config.KindPersistKV)
@@ -53,25 +53,37 @@ func TestPersistIntentIsSharedBetweenUnits(t *testing.T) {
 	}
 }
 
-func TestPersistTypeComesFromConfigNotCodeShape(t *testing.T) {
-	ctx := harness(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\ncache = cloudcc.persist_redis(\"sessions\")\n",
-	})
+// The client a program reached for is the weakest layer of configuration. It
+// supplies the default -- a Redis client asks for ElastiCache -- but an
+// explicit cloudcc.yaml entry still wins, so moving to MemoryDB stays a
+// configuration change rather than a code change.
+func TestClientTypeIsADefaultThatConfigOverrides(t *testing.T) {
+	src := "from redis import Redis\n\nimport cloudcompiler as cloudcc\n\ncache = cloudcc.persist(Redis(), id=\"sessions\")\n"
+
+	ctx := harness(t, map[string]string{"app.py": src})
 	store := ctx.Graph.IntentsOfKind(config.KindPersistRedis)[0]
 	if got := store.Config().Type; got != "elasticache" {
-		t.Errorf("type = %q, want the configured default elasticache", got)
+		t.Errorf("type = %q, want elasticache from the Redis client", got)
 	}
 	// The decision is recorded so compiled/cloudcc.yaml documents it.
 	if got := ctx.Config.Persisted["sessions"].Type; got != "elasticache" {
 		t.Errorf("recorded type = %q", got)
+	}
+
+	configured := harnessWithConfig(t,
+		map[string]string{"app.py": src},
+		"app: t\npersisted:\n  sessions:\n    type: memorydb\n")
+	store = configured.Graph.IntentsOfKind(config.KindPersistRedis)[0]
+	if got := store.Config().Type; got != "memorydb" {
+		t.Errorf("type = %q, want the explicitly configured memorydb", got)
 	}
 }
 
 func TestSameIDUnderTwoPersistKindsIsAnError(t *testing.T) {
 	ctx := harnessAllowingDiags(t, map[string]string{
 		"app.py": "import cloudcompiler as cloudcc\n" +
-			"a = cloudcc.persist_kv(\"thing\")\n" +
-			"b = cloudcc.persist_fs(\"thing\")\n",
+			"a = cloudcc.persist(cloudcc.KVStore(), id=\"thing\")\n" +
+			"b = cloudcc.persist(Path(\"./data\"), id=\"thing\")\n",
 	})
 	if !containsSubstr(diagStrings(ctx), "each id names one store") {
 		t.Errorf("diagnostics = %v", diagStrings(ctx))
@@ -188,7 +200,7 @@ func TestPubSubDistinguishesPublishersFromSubscribers(t *testing.T) {
 		"worker.py": "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\n" +
 			"from shared.bus import events\ndef on(m):\n    return m\nevents.subscribe(on)\n",
 		"shared/__init__.py": "",
-		"shared/bus.py":      "import cloudcompiler as cloudcc\nevents = cloudcc.pubsub_topic(\"petEvents\")\n",
+		"shared/bus.py":      "import cloudcompiler as cloudcc\nevents = cloudcc.persist(cloudcc.Topic(), id=\"petEvents\")\n",
 	})
 	edges := edgeStrings(ctx)
 	for _, want := range []string{
@@ -250,7 +262,7 @@ func TestOnlyCapabilityPluginsCreateIntents(t *testing.T) {
 	// The two IR layers stay separate until the provider resolver runs (D7):
 	// nothing in this package may add a concrete resource.
 	root := t.TempDir()
-	write(t, root, "app.py", "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"a\")\n")
+	write(t, root, "app.py", "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"a\")\n")
 	ctx := compileWith(t, root, IntentChain())
 	if got := len(ctx.Graph.Resources()); got != 0 {
 		t.Errorf("capability plugins created %d concrete resources; only resolve:aws may", got)

@@ -118,8 +118,8 @@ func unitFiles(u *ir.ExecUnit, opts lang.UnitOptions) (map[string][]byte, error)
 			deps[name] = version
 		}
 	}
-	if opts.UsesRedis {
-		for name, version := range shimDependencies["persist_redis"] {
+	for _, capability := range opts.Capabilities {
+		for name, version := range shimDependencies[capability] {
 			deps[name] = version
 		}
 	}

@@ -27,6 +27,12 @@ def _common():
     return kwargs
 
 
+def aws_kwargs():
+    """The keyword arguments a third-party client needs to reach the same
+    endpoint the shims do."""
+    return _common()
+
+
 def client(service):
     """A boto3 client for ``service``."""
     return boto3.client(service, **_common())

@@ -3,12 +3,12 @@
 // into real AWS clients in the compiled copy.
 
 import express from "express";
-import { expose, persistKv } from "@cloudcompiler/sdk";
+import { expose, persist, KVStore } from "@cloudcompiler/sdk";
 
 const app = express();
 app.use(express.json());
 
-const pets = persistKv("petsByOwner");
+const pets = persist(new KVStore(), { id: "petsByOwner" });
 expose(app, { id: "pet-api" });
 
 app.get("/health", (req, res) => {

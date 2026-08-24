@@ -5,7 +5,7 @@ from . import _client
 
 def connect(id):
     """Return a client for the secret declared as ``persist_secret(id)``."""
-    arn = _client.env("CLOUDCC_SECRET_%s_ARN" % _client.slug(id), "persist_secret", id)
+    arn = _client.env("CLOUDCC_SECRET_%s_ARN" % _client.slug(id), "persist", id)
     return Secret(id, arn, _client.client("secretsmanager"))
 
 

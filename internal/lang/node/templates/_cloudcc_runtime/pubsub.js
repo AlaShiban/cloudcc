@@ -11,7 +11,7 @@ import { common, env, slug } from "./client.js";
 const handlers = new Map();
 
 export function connect(id) {
-  const arn = env(`CLOUDCC_TOPIC_${slug(id)}_ARN`, "pubsubTopic", id);
+  const arn = env(`CLOUDCC_TOPIC_${slug(id)}_ARN`, "persist", id);
   return new Topic(id, arn, new SNSClient(common()));
 }
 

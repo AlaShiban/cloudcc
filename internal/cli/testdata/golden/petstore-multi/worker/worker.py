@@ -7,6 +7,8 @@ resolve to the same DynamoDB table and the same SNS topic.
 from _cloudcc_runtime import fs as _cloudcc_fs
 
 
+from pathlib import Path
+
 
 from shared.store import pets, events, summarize
 

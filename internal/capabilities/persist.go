@@ -44,6 +44,13 @@ func (p *PersistPlugin) Transform(ctx *compiler.Context) error {
 				store = existing.(*ir.Persist)
 			} else {
 				cfg := ctx.Config.Lookup(kind, id)
+				// The client a program reached for is the weakest layer of
+				// configuration: a Redis client asks for ElastiCache, but
+				// cloudcc.yaml still gets to say MemoryDB. An explicit entry
+				// for this id therefore wins; the client only fills a gap.
+				if h.ClientType != "" && !ctx.Config.HasExplicitType(kind, id) {
+					cfg.Type = h.ClientType
+				}
 				if err := store.Configure(cfg); err != nil {
 					return err
 				}
@@ -110,6 +117,9 @@ func (p *PubSubPlugin) Transform(ctx *compiler.Context) error {
 
 		if _, seen := ctx.Graph.Intent(topic.Key()); !seen {
 			cfg := ctx.Config.Lookup(config.KindPubSub, id)
+			if h.ClientType != "" && !ctx.Config.HasExplicitType(config.KindPubSub, id) {
+				cfg.Type = h.ClientType
+			}
 			if err := topic.Configure(cfg); err != nil {
 				return err
 			}

@@ -9,7 +9,7 @@ import { DynamoDBClient, DeleteItemCommand, GetItemCommand, PutItemCommand, Scan
 import { common, env, slug } from "./client.js";
 
 export function connect(id) {
-  const table = env(`CLOUDCC_KV_${slug(id)}_TABLE`, "persistKv", id);
+  const table = env(`CLOUDCC_KV_${slug(id)}_TABLE`, "persist", id);
   return new KVStore(id, table, new DynamoDBClient(common()));
 }
 

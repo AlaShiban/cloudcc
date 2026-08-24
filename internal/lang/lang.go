@@ -126,8 +126,10 @@ type UnitOptions struct {
 	Manifest []byte
 	// ManifestPath is where that manifest came from, for diagnostics.
 	ManifestPath string
-	// UsesRedis reports whether the unit needs a Redis client.
-	UsesRedis bool
+	// Capabilities are the capability kinds this unit uses, sorted. A
+	// frontend adds the client library for each, so a bundle carries the same
+	// client the source declared and nothing it does not.
+	Capabilities []string
 	// Container reports whether the unit is deployed as an image.
 	Container bool
 	// UserDockerfile reports that the user supplied their own build file, in

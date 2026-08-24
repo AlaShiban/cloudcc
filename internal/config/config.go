@@ -219,6 +219,16 @@ func (a *App) Lookup(kind, id string) ResourceConfig {
 	return out
 }
 
+// HasExplicitType reports whether the user named a type for this resource.
+//
+// It is what lets a client's own type act as a default without overriding a
+// choice the user made deliberately: the library fills a gap, cloudcc.yaml
+// settles an argument.
+func (a *App) HasExplicitType(kind, id string) bool {
+	entry, ok := a.section(kind)[id]
+	return ok && entry.Type != ""
+}
+
 // Record writes the fully-resolved configuration for a resource back into the
 // explicit section, so that compiled/cloudcc.yaml documents every decision (D5).
 func (a *App) Record(kind, id string, rc ResourceConfig) {

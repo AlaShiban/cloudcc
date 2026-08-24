@@ -1,22 +1,37 @@
 """CloudCompiler SDK: compile-time hints for a plain Python application.
 
-Every public function in this module is a *hint*. The compiler reads these
-calls statically -- it never imports or executes this package -- and rewrites
-them, in a copy of your source, into real cloud clients.
+Every public function here is a *hint*. The compiler reads these calls
+statically -- it never imports or executes this package -- and rewrites them,
+in a copy of your source, into clients pointed at real cloud resources.
 
-Two rules follow from that:
+The central idea is that you bring your own client and the compiler wraps it::
 
-* Arguments must be literals. ``cloudcc.persist_kv("pets")`` is fine;
-  ``cloudcc.persist_kv(name)`` is a compile error with a precise source location,
-  because the compiler would have to run your program to know the value.
+    cache = cloudcc.persist(Redis(host="localhost"), id="itemCache")
+    db    = cloudcc.persist(create_engine("postgresql://localhost/shop"), id="shopdb")
+    docs  = cloudcc.persist(Path("./itemDocs"), id="itemDocs")
+
+``persist`` is type-preserving: it returns exactly what you gave it, so the
+type your editor sees is the type you keep. Uncompiled, it *is* the object you
+passed -- your program talks to a local Redis, a local Postgres, a local
+directory. Compiled, the same expression becomes a client of the same type
+pointed at ElastiCache, RDS or S3.
+
+That is the whole point of the design. There is no parallel API to learn and
+none for us to keep in step with yours: what you hold is always the library's
+own type.
+
+Two rules follow from the hints being read rather than run:
+
+* Arguments must be literals. ``persist(client, id="pets")`` is fine;
+  ``persist(client, id=name)`` is a compile error with a precise source
+  location, because the compiler would have to run your program to know the
+  value.
 * Calls belong at module level, where the compiler can see the shape of the
   program. ``execution_unit`` in particular must be a module-level call.
 
-At runtime, outside the compiler, these functions return small local
-emulations -- an in-memory dictionary for a KV store, a directory for a
-bucket -- so ``uvicorn app:app`` still runs on your laptop with no cloud
-account and no credentials. The emulations are deliberately minimal; they
-exist so the program runs, not so it behaves identically to AWS.
+Where the ecosystem has no standard client -- a key/value store, a pub/sub
+topic, a secret -- this package supplies a typed one, wrapped by the same verb
+as everything else.
 
 This package never imports boto3. Cloud access only ever appears in the
 ``_cloudcc_runtime`` package the compiler injects into the compiled copy.
@@ -24,12 +39,11 @@ This package never imports boto3. Cloud access only ever appears in the
 
 from __future__ import annotations
 
+from typing import Any, TypeVar
+
 from ._emulation import (
-    Bucket,
     Gateway,
     KVStore,
-    OrmSession,
-    Redis,
     Secret,
     Topic,
     local_root,
@@ -37,37 +51,71 @@ from ._emulation import (
 )
 
 __all__ = [
-    "execution_unit",
+    "persist",
     "expose",
-    "persist_kv",
-    "persist_fs",
-    "persist_secret",
-    "persist_orm",
-    "persist_redis",
-    "pubsub_topic",
+    "execution_unit",
     "config_value",
     "static_unit",
     "embed_assets",
-    "Bucket",
-    "Gateway",
     "KVStore",
-    "OrmSession",
-    "Redis",
-    "Secret",
     "Topic",
+    "Secret",
+    "Gateway",
     "local_root",
     "reset_local_state",
     "__version__",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-_KV: dict[str, KVStore] = {}
-_FS: dict[str, Bucket] = {}
-_SECRETS: dict[str, Secret] = {}
-_ORM: dict[str, OrmSession] = {}
-_REDIS: dict[str, Redis] = {}
-_TOPICS: dict[str, Topic] = {}
+#: The type of whatever client is being persisted. ``persist`` returns it
+#: unchanged, so type information flows straight through the call.
+T = TypeVar("T")
+
+
+def persist(client: T, *, id: str, models: list | None = None) -> T:
+    """Make a client's data outlive the process.
+
+    Pass the client you already use. The compiler reads its type to decide
+    what to provision:
+
+    ==========================================  =========================
+    what you pass                               what it becomes
+    ==========================================  =========================
+    ``redis.Redis(...)``                        ElastiCache (or MemoryDB)
+    ``sqlalchemy.create_engine("postgresql…")`` RDS Postgres
+    ``sqlalchemy.create_engine("mysql…")``      RDS MySQL
+    ``pathlib.Path(...)``                       S3
+    ``cloudcc.KVStore()``                       DynamoDB
+    ``cloudcc.Topic()``                         SNS
+    ``cloudcc.Secret()``                        Secrets Manager
+    ==========================================  =========================
+
+    The library you reached for supplies the default; ``cloudcc.yaml`` still
+    chooses between variants of it, so asking for MemoryDB instead of
+    ElastiCache is a configuration change rather than a code change.
+
+    ``id`` names the resource and is required. It is deliberately not taken
+    from the variable you assign to: renaming a local would otherwise replace
+    a live resource, and losing a database to a rename is not a trade worth
+    making for brevity.
+
+    ``models`` is an optional hint for relational clients, listing the tables
+    the program expects.
+
+    Returns ``client``, unchanged.
+    """
+    return client
+
+
+def expose(app: Any, id: str = "main", target: str = "public") -> Gateway:
+    """Expose an application to the network.
+
+    ``app`` is the application object itself -- a FastAPI instance, a Flask
+    app, anything with routes. The compiler only needs to know *which
+    variable* holds it.
+    """
+    return Gateway(id=id, target=target, app=app)
 
 
 def execution_unit(id: str, type: str | None = None) -> None:
@@ -80,46 +128,6 @@ def execution_unit(id: str, type: str | None = None) -> None:
     ``type`` is a weak hint ("lambda", "ecs"); ``cloudcc.yaml`` overrides it.
     """
     return None
-
-
-def expose(app, id: str = "main", target: str = "public") -> Gateway:
-    """Expose an ASGI application to the network.
-
-    ``app`` is the application object itself -- the one argument that is an
-    expression rather than a literal, because the compiler only needs to know
-    *which variable* holds it.
-    """
-    return Gateway(id=id, target=target, app=app)
-
-
-def persist_kv(id: str) -> KVStore:
-    """A key/value store. Compiles to DynamoDB."""
-    return _KV.setdefault(id, KVStore(id))
-
-
-def persist_fs(id: str) -> Bucket:
-    """A file store. Compiles to S3."""
-    return _FS.setdefault(id, Bucket(id))
-
-
-def persist_secret(id: str) -> Secret:
-    """A secret. Compiles to Secrets Manager."""
-    return _SECRETS.setdefault(id, Secret(id))
-
-
-def persist_orm(id: str, models: list | None = None) -> OrmSession:
-    """A relational database. Compiles to RDS Postgres."""
-    return _ORM.setdefault(id, OrmSession(id))
-
-
-def persist_redis(id: str) -> Redis:
-    """A Redis-compatible cache. Compiles to ElastiCache or MemoryDB."""
-    return _REDIS.setdefault(id, Redis(id))
-
-
-def pubsub_topic(id: str) -> Topic:
-    """A publish/subscribe topic. Compiles to SNS."""
-    return _TOPICS.setdefault(id, Topic(id))
 
 
 def config_value(id: str, default: str = "", secret: bool = False) -> str:

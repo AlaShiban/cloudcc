@@ -23,14 +23,9 @@ const Package = "@cloudcompiler/sdk"
 // sdkFunction maps the SDK's JavaScript spelling to its canonical name. The
 // capability surface is one thing across languages; only the spelling differs.
 var sdkFunction = map[string]string{
+	"persist":       sdkdetect.FnPersist,
 	"executionUnit": sdkdetect.FnExecutionUnit,
 	"expose":        sdkdetect.FnExpose,
-	"persistKv":     sdkdetect.FnPersistKV,
-	"persistFs":     sdkdetect.FnPersistFS,
-	"persistSecret": sdkdetect.FnPersistSecret,
-	"persistOrm":    sdkdetect.FnPersistORM,
-	"persistRedis":  sdkdetect.FnPersistRedis,
-	"pubsubTopic":   sdkdetect.FnPubSubTopic,
 	"configValue":   sdkdetect.FnConfigValue,
 	"staticUnit":    sdkdetect.FnStaticUnit,
 	"embedAssets":   sdkdetect.FnEmbedAssets,
@@ -328,13 +323,18 @@ func buildHint(f *source.File, call *ts.Node, fn string) (sdkdetect.Hint, *hintE
 			continue
 		}
 
-		if positional >= len(sig.Params) {
+		// Everything the SDK declares in an options object is keyword-only,
+		// and readOptions above is what reaches it. Only the rest can appear
+		// here, so a call spelled positionally that the SDK would reject is
+		// rejected at compile time too.
+		allowed := sdkdetect.PositionalParams(fn)
+		if positional >= len(allowed) {
 			return h, &hintError{
-				fmt.Sprintf("%s() takes at most %d arguments", jsName[fn], len(sig.Params)),
+				fmt.Sprintf("%s() takes at most %d positional argument(s)", jsName[fn], len(allowed)),
 				int(arg.StartByte()),
 			}
 		}
-		p := sig.Params[positional]
+		p := allowed[positional]
 		positional++
 		v, err := evalArg(f, arg, p)
 		if err != nil {
@@ -355,7 +355,133 @@ func buildHint(f *source.File, call *ts.Node, fn string) (sdkdetect.Hint, *hintE
 			}
 		}
 	}
+
+	if sig.Capability == "" {
+		if err := resolveClient(f, call, &h); err != nil {
+			return h, err
+		}
+	}
 	return h, nil
+}
+
+// resolveClient reads the capability from the type of the client being
+// wrapped, which is what makes one verb enough.
+func resolveClient(f *source.File, call *ts.Node, h *sdkdetect.Hint) *hintError {
+	args := call.ChildByFieldName("arguments")
+	clientNode := positionalArg(args, 0)
+	if clientNode == nil {
+		return &hintError{"persist() requires a client to wrap", int(call.StartByte())}
+	}
+	h.Client = f.Text(clientNode)
+
+	constructor, ctorCall := constructorOf(f, clientNode)
+	if constructor == "" {
+		return &hintError{
+			fmt.Sprintf("persist() needs a client whose type says what to provision, not %s; "+
+				"pass one of %s", describe(f, clientNode),
+				strings.Join(sdkdetect.KnownClients("node"), ", ")),
+			int(clientNode.StartByte()),
+		}
+	}
+
+	client, ok := sdkdetect.LookupClient("node", constructor)
+	if !ok {
+		return &hintError{
+			fmt.Sprintf("persist() does not recognise %s(); it understands %s",
+				constructor, strings.Join(sdkdetect.KnownClients("node"), ", ")),
+			int(clientNode.StartByte()),
+		}
+	}
+
+	h.Capability = client.Capability
+	h.ClientType = client.Type
+	if client.Type == "" {
+		h.ClientType = sdkdetect.RelationalType(firstStringArg(f, ctorCall))
+	}
+	return nil
+}
+
+// positionalArg returns the nth positional argument of a call.
+func positionalArg(args *ts.Node, n int) *ts.Node {
+	if args == nil {
+		return nil
+	}
+	seen := 0
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		arg := args.NamedChild(i)
+		if arg.Kind() == "comment" || arg.Kind() == "object" {
+			continue
+		}
+		if seen == n {
+			return arg
+		}
+		seen++
+	}
+	return nil
+}
+
+// constructorOf returns the name at the head of a client expression.
+// `new Redis(...)`, `redis.createClient(...)` and `createClient()` all reduce
+// to the name that identifies the library.
+func constructorOf(f *source.File, n *ts.Node) (string, *ts.Node) {
+	switch n.Kind() {
+	case "new_expression":
+		if ctor := n.ChildByFieldName("constructor"); ctor != nil {
+			return trailingName(f, ctor), n
+		}
+	case "call_expression":
+		if fn := n.ChildByFieldName("function"); fn != nil {
+			return trailingName(f, fn), n
+		}
+	}
+	return "", nil
+}
+
+// trailingName is the last segment of a possibly-qualified name.
+func trailingName(f *source.File, n *ts.Node) string {
+	switch n.Kind() {
+	case "identifier":
+		return f.Text(n)
+	case "member_expression":
+		if prop := n.ChildByFieldName("property"); prop != nil {
+			return f.Text(prop)
+		}
+	}
+	return ""
+}
+
+// firstStringArg reads the first string literal a call was given, which for a
+// database client is its connection URL.
+func firstStringArg(f *source.File, call *ts.Node) string {
+	if call == nil {
+		return ""
+	}
+	args := call.ChildByFieldName("arguments")
+	if args == nil {
+		return ""
+	}
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		arg := args.NamedChild(i)
+		if arg.Kind() == "comment" {
+			continue
+		}
+		if s, ok := stringLiteral(f, arg); ok {
+			return s
+		}
+		// `new Pool({ connectionString: "postgres://..." })`
+		if arg.Kind() == "object" {
+			for j := uint(0); j < arg.NamedChildCount(); j++ {
+				pair := arg.NamedChild(j)
+				if pair.Kind() != "pair" {
+					continue
+				}
+				if s, ok := stringLiteral(f, pair.ChildByFieldName("value")); ok {
+					return s
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // readOptions reads a trailing options object.
@@ -444,7 +570,7 @@ func propertyNames(sig sdkdetect.Signature) []string {
 // means "explicitly null or undefined", which is treated as absent.
 func evalArg(f *source.File, n *ts.Node, p sdkdetect.Param) (any, *hintError) {
 	switch p.Kind {
-	case sdkdetect.ParamExpr:
+	case sdkdetect.ParamExpr, sdkdetect.ParamClient:
 		return f.Text(n), nil
 
 	case sdkdetect.ParamString:

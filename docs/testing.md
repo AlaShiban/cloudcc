@@ -101,16 +101,16 @@ starts skipping, that is a signal, not noise.
 
 | Capability | AWS target | Provisioning (L4) | Functional (L5) |
 |---|---|---|---|
-| `persist_kv` | DynamoDB | yes | yes, through the running app |
-| `persist_fs` | S3 | yes | yes, through the running app |
-| `persist_secret` | Secrets Manager | yes | yes, through the running app |
+| `persist(KVStore())` | DynamoDB | yes | yes, through the running app |
+| `persist(Path(...))` | S3 | yes | yes, through the running app |
+| `persist(Secret())` | Secrets Manager | yes | yes, through the running app |
 | `pubsub` | SNS + subscription | yes | publish reaches the subscriber |
 | `static_unit` | S3 website | yes | object fetch |
 | `expose` | API Gateway v2 | probe-dependent | via local uvicorn/Mangum instead |
 | `execution_unit` (lambda) | Lambda | probe-dependent | direct handler invoke |
 | `execution_unit` (ecs) | ECS Fargate | preview only | Dockerfile shape only |
-| `persist_orm` | RDS Postgres | preview only | optional, against a local Postgres |
-| `persist_redis` | ElastiCache | preview only | optional, against a local Redis |
+| `persist(create_engine(...))` | RDS Postgres | preview only | optional, against a local Postgres |
+| `persist(Redis())` | ElastiCache | preview only | optional, against a local Redis |
 
 "Preview only" means the resource is checked through `pulumi preview` rather
 than actually created: creating an RDS instance or a Fargate service in an

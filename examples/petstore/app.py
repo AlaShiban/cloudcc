@@ -7,7 +7,7 @@ import cloudcompiler as cloudcc
 
 app = FastAPI()
 
-pets = cloudcc.persist_kv("petsByOwner")
+pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
 cloudcc.expose(app, id="pet-api")
 
 

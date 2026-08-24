@@ -1,10 +1,18 @@
-"""The SDK stubs and the injected _cloudcc_runtime clients are two implementations
-of one API. They will drift unless something compares them.
+"""Where the SDK supplies a client, that client and the injected
+_cloudcc_runtime one are two implementations of a single API, and they will
+drift unless something compares them.
 
-This test imports both sides and asserts, method by method, that every public
-method on an SDK emulation exists on its runtime counterpart with the same
-signature. It is what makes IDE autocomplete against the SDK honest about what
-the compiled program will actually do.
+This test asserts, method by method, that every public method on an SDK class
+exists on its runtime counterpart with the same signature. It is what makes IDE
+autocomplete against the SDK honest about what the compiled program will do.
+
+Most capabilities are not in this list, and that is the point of the design
+rather than a gap in the test. A program that hands ``persist`` a
+``redis.Redis``, a SQLAlchemy engine or a ``pathlib.Path`` gets back an object
+of that same type once compiled -- a real Redis client, a real Engine, a
+cloudpathlib S3Path -- so there is no second implementation to keep in step.
+Only the three capabilities with no standard client need a class here, and only
+those three can drift.
 """
 
 import inspect
@@ -31,13 +39,15 @@ SHIM_DIR = (
 #: on purpose; the mapping is explicit anyway so a rename cannot pass silently.
 PAIRS = [
     (_emulation.KVStore, "kv", "KVStore"),
-    (_emulation.Bucket, "fs", "Bucket"),
     (_emulation.Secret, "secret", "Secret"),
-    (_emulation.OrmSession, "orm", "OrmSession"),
-    (_emulation.Redis, "redis_", "Redis"),
     (_emulation.Topic, "pubsub", "Topic"),
     (_emulation.Gateway, "expose", "Gateway"),
 ]
+
+#: Shims that return the library's own type rather than a class of ours. There
+#: is nothing to compare method-by-method; what matters is that they still
+#: offer connect(), which the entrypoint test below checks.
+TYPE_PRESERVING = ["fs", "orm", "redis_"]
 
 
 def load_shim(module_name):
@@ -97,7 +107,9 @@ def test_public_api_matches(cls, module, shim_class):
         )
 
 
-@pytest.mark.parametrize("module", sorted(p[1] for p in PAIRS))
+@pytest.mark.parametrize(
+    "module", sorted([p[1] for p in PAIRS] + TYPE_PRESERVING)
+)
 def test_every_shim_has_a_connect_entrypoint(module):
     import ast
 
@@ -108,9 +120,7 @@ def test_every_shim_has_a_connect_entrypoint(module):
         if isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
     }
     # expose and config are entered through differently-named functions.
-    expected = {"kv": "connect", "fs": "connect", "secret": "connect",
-                "orm": "connect", "redis_": "connect", "pubsub": "connect",
-                "expose": "register"}[module]
+    expected = "register" if module == "expose" else "connect"
     assert expected in names, f"_cloudcc_runtime/{module}.py has no {expected}()"
 
 

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 import cloudcompiler as cloudcc
 
 app = FastAPI()
-pets = cloudcc.persist_kv("petsByOwner")
+pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
 cloudcc.expose(app, id="pet-api")
 ```
 
@@ -17,4 +17,4 @@ outside the compiler the calls return small local emulations so `uvicorn
 app:app` keeps working on your laptop.
 
 Arguments must be literals — the compiler never executes your program, so
-`cloudcc.persist_kv(name)` is a compile error that points at the argument.
+`cloudcc.persist(client, id=name)` is a compile error that points at the argument.

@@ -4,6 +4,47 @@ The implementation brief settled most things. This records the places where it
 was silent, ambiguous, or where following it literally would have been wrong —
 so the next person does not have to re-derive the reasoning.
 
+## Changes made after the brief
+
+**One `persist` verb, and the wrapped client decides the capability.** The brief
+specified a verb per store — `persist_kv`, `persist_redis`, `persist_orm` and so
+on — each returning an SDK object. That made the SDK a second implementation of
+every client library, and the SDK/shim parity test existed only to slow the
+resulting drift. It could not fix it: a program calling `cache.expire(...)`
+would need us to have anticipated `expire`.
+
+The surface is now `persist(client, *, id)`, which returns exactly the client it
+was given:
+
+```python
+cache = cloudcc.persist(Redis(host="localhost"), id="itemCache")
+db    = cloudcc.persist(create_engine("postgresql://localhost/shop"), id="shopdb")
+```
+
+The type of the argument is what the compiler reads to decide the resource —
+`internal/sdkdetect/client.go` holds that table — and the injected shim returns
+a client of that same type pointed at AWS. The parity problem disappears rather
+than being managed, because there is only ever one implementation: the library's
+own.
+
+Three consequences worth naming:
+
+- **Ids are always explicit**, never inferred from the variable. Renaming a
+  local would otherwise replace a live resource.
+- **The client is the weakest layer of configuration.** A Redis client asks for
+  ElastiCache, but an explicit `cloudcc.yaml` entry still wins, so choosing
+  MemoryDB stays a configuration change. `App.HasExplicitType` is the guard.
+- **Python has no `FileStore` class; Node does.** `pathlib.Path` already is one
+  and `cloudpathlib.S3Path` mirrors it, so Python wraps the real thing. Node's
+  `fs` is a set of functions with no object to wrap, so there a class is
+  unavoidable — and it is one of the few that still needs the parity test. The
+  asymmetry reflects the ecosystems, not an oversight.
+
+This was caught by the parity test itself: a `FileStore` added to the Python SDK
+for symmetry had `read`/`write`/`list`, while the shim returned an `S3Path` that
+has none of them. It would have compiled and then failed at runtime on the first
+call — exactly the failure the redesign exists to prevent.
+
 ## Deviations from the brief
 
 **`EnvOutputs` returns bindings, not property names.** The brief types it as
