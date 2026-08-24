@@ -395,6 +395,7 @@ func resolveClient(f *source.File, call *ts.Node, h *sdkdetect.Hint) *hintError 
 
 	h.Capability = client.Capability
 	h.ClientType = client.Type
+	h.ClientLibrary = client.Library
 	if client.Type == "" {
 		h.ClientType = sdkdetect.RelationalType(firstStringArg(f, ctorCall))
 	}

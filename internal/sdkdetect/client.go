@@ -15,10 +15,34 @@ type Client struct {
 	// library serves several and something else has to choose -- a SQLAlchemy
 	// engine is Postgres or MySQL depending on its URL.
 	Type string
+	// Library identifies which client the program actually reached for, so the
+	// shim can hand back one of the same kind.
+	//
+	// Capability is not enough on its own. Two Redis libraries have different
+	// APIs, and a synchronous SQLAlchemy engine is not an asynchronous one:
+	// returning the wrong one compiles cleanly and then fails on the first
+	// call, which is the failure this whole design exists to prevent.
+	Library string
 	// Why is shown in a diagnostic when a client is almost but not quite
 	// recognised, so the message can say what was expected.
 	Why string
 }
+
+// Client library identifiers. These are passed to the injected shim, which
+// dispatches on them, so they are part of the contract between the compiler and
+// the runtime rather than free-form labels.
+const (
+	LibRedisPy      = "redis-py"
+	LibRedisPyAsync = "redis-py-async"
+	LibSQLAlchemy   = "sqlalchemy"
+	LibSQLAlchemyA  = "sqlalchemy-async"
+	LibPathlib      = "pathlib"
+
+	LibIORedis   = "ioredis"
+	LibNodeRedis = "node-redis"
+	LibPg        = "pg"
+	LibKnex      = "knex"
+)
 
 // pythonClients maps a Python constructor to the capability it declares.
 //
@@ -27,20 +51,21 @@ type Client struct {
 // table is only consulted inside a persist() call, where the argument is
 // already known to be a client.
 var pythonClients = map[string]Client{
-	"Redis":       {config.KindPersistRedis, "elasticache", "a Redis client"},
-	"StrictRedis": {config.KindPersistRedis, "elasticache", "a Redis client"},
-	"Valkey":      {config.KindPersistRedis, "elasticache", "a Valkey client"},
+	"Redis":       {config.KindPersistRedis, "elasticache", LibRedisPy, "a Redis client"},
+	"StrictRedis": {config.KindPersistRedis, "elasticache", LibRedisPy, "a Redis client"},
+	"Valkey":      {config.KindPersistRedis, "elasticache", LibRedisPy, "a Valkey client"},
 
-	"create_engine":       {config.KindPersistORM, "", "a SQLAlchemy engine"},
-	"create_async_engine": {config.KindPersistORM, "", "a SQLAlchemy engine"},
+	"create_engine":       {config.KindPersistORM, "", LibSQLAlchemy, "a SQLAlchemy engine"},
+	"create_async_engine": {config.KindPersistORM, "", LibSQLAlchemyA, "an async SQLAlchemy engine"},
 
-	"Path":      {config.KindPersistFS, "s3", "a filesystem path"},
-	"PosixPath": {config.KindPersistFS, "s3", "a filesystem path"},
+	"Path":      {config.KindPersistFS, "s3", LibPathlib, "a filesystem path"},
+	"PosixPath": {config.KindPersistFS, "s3", LibPathlib, "a filesystem path"},
 
 	// Supplied by this SDK, because the ecosystem has no standard for these.
-	"KVStore": {config.KindPersistKV, "dynamodb", "a key/value store"},
-	"Topic":   {config.KindPubSub, "sns", "a topic"},
-	"Secret":  {config.KindPersistSecret, "secretsmanager", "a secret"},
+	// They have no library: the shim's own class is the only implementation.
+	"KVStore": {config.KindPersistKV, "dynamodb", "", "a key/value store"},
+	"Topic":   {config.KindPubSub, "sns", "", "a topic"},
+	"Secret":  {config.KindPersistSecret, "secretsmanager", "", "a secret"},
 }
 
 // nodeClients is the same table for JavaScript and TypeScript.
@@ -51,18 +76,24 @@ var pythonClients = map[string]Client{
 // fs module is a set of functions with no object to wrap, so a file store here
 // has to be a class this package supplies.
 var nodeClients = map[string]Client{
-	"Redis":        {config.KindPersistRedis, "elasticache", "a Redis client"},
-	"createClient": {config.KindPersistRedis, "elasticache", "a Redis client"},
+	"Redis":        {config.KindPersistRedis, "elasticache", LibIORedis, "an ioredis client"},
+	"createClient": {config.KindPersistRedis, "elasticache", LibNodeRedis, "a node-redis client"},
 
-	"Pool":      {config.KindPersistORM, "", "a SQL connection pool"},
-	"Client":    {config.KindPersistORM, "", "a SQL client"},
-	"Sequelize": {config.KindPersistORM, "", "a Sequelize instance"},
-	"knex":      {config.KindPersistORM, "", "a Knex instance"},
+	"Pool":   {config.KindPersistORM, "", LibPg, "a pg connection pool"},
+	"Client": {config.KindPersistORM, "", LibPg, "a pg client"},
+	"knex":   {config.KindPersistORM, "", LibKnex, "a Knex instance"},
 
-	"KVStore":   {config.KindPersistKV, "dynamodb", "a key/value store"},
-	"Topic":     {config.KindPubSub, "sns", "a topic"},
-	"Secret":    {config.KindPersistSecret, "secretsmanager", "a secret"},
-	"FileStore": {config.KindPersistFS, "s3", "a file store"},
+	// Sequelize is deliberately absent. Its constructor takes the password up
+	// front, with no async provider and no async connection factory, so a shim
+	// could only return it from an async connect() -- which would make the
+	// compiled binding a Promise where the uncompiled one is a client. An
+	// unrecognised client is a compile error naming what is supported, which
+	// is a much better outcome than a bundle that fails on its first query.
+
+	"KVStore":   {config.KindPersistKV, "dynamodb", "", "a key/value store"},
+	"Topic":     {config.KindPubSub, "sns", "", "a topic"},
+	"Secret":    {config.KindPersistSecret, "secretsmanager", "", "a secret"},
+	"FileStore": {config.KindPersistFS, "s3", "", "a file store"},
 }
 
 // LookupClient resolves a constructor name for a language.

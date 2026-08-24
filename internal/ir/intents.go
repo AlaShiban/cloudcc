@@ -87,6 +87,11 @@ type Persist struct {
 	Kind string `json:"kind"`
 	// Models lists ORM model names, when known (persist_orm only).
 	Models []string `json:"models,omitempty"`
+	// Library is the client library the program declared -- "ioredis",
+	// "sqlalchemy-async" and so on. It decides which client the injected shim
+	// builds and which package the bundle carries. Empty for the capabilities
+	// this SDK supplies a class for, which have no library.
+	Library string `json:"library,omitempty"`
 }
 
 func (p *Persist) Key() Key           { return Key{Kind: p.Kind, ID: p.ID} }

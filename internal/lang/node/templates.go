@@ -44,8 +44,15 @@ var shimDependencies = map[string]map[string]string{
 		"@aws-sdk/client-sns":             "^3.700.0",
 		"@aws-sdk/client-secrets-manager": "^3.700.0",
 	},
-	"http":          {"serverless-http": "^3.2.0"},
-	"persist_redis": {"redis": "^4.7.0"},
+	"http": {"serverless-http": "^3.2.0"},
+
+	// Keyed by client library, not by capability: persist_redis alone does not
+	// say whether the program reached for ioredis or node-redis, and shipping
+	// the wrong one gives a bundle that fails on its first call.
+	"ioredis":    {"ioredis": "^5.4.0"},
+	"node-redis": {"redis": "^4.7.0"},
+	"pg":         {"pg": "^8.13.0"},
+	"knex":       {"knex": "^3.1.0", "pg": "^8.13.0", "mysql2": "^3.11.0"},
 }
 
 // runtimeFiles returns the injected runtime package.
@@ -118,8 +125,8 @@ func unitFiles(u *ir.ExecUnit, opts lang.UnitOptions) (map[string][]byte, error)
 			deps[name] = version
 		}
 	}
-	for _, capability := range opts.Capabilities {
-		for name, version := range shimDependencies[capability] {
+	for _, library := range opts.Libraries {
+		for name, version := range shimDependencies[library] {
 			deps[name] = version
 		}
 	}

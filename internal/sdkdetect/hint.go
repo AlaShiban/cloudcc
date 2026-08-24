@@ -160,6 +160,17 @@ type Hint struct {
 	// the library a program reached for supplies the default, and cloudcc.yaml
 	// still chooses between variants of it.
 	ClientType string
+	// ClientLibrary identifies which client library was wrapped -- "ioredis",
+	// "sqlalchemy-async" and so on. The shim dispatches on it so it can hand
+	// back a client of the same kind, and the bundle carries that library.
+	//
+	// The capability alone is not enough: two Redis libraries have different
+	// APIs, and a synchronous SQLAlchemy engine is not an asynchronous one.
+	// Returning the wrong one compiles cleanly and fails on the first call.
+	//
+	// Empty for the capabilities this SDK supplies a class for, where the
+	// shim's own class is the only implementation there is.
+	ClientLibrary string
 	// Client is the source text of the wrapped client expression, kept so the
 	// rewriter knows what it is replacing.
 	Client string

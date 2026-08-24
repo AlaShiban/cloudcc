@@ -33,7 +33,7 @@ func (p *PersistPlugin) Transform(ctx *compiler.Context) error {
 	for _, kind := range persistKinds {
 		for _, h := range ctx.HintsFor(kind) {
 			id := h.ID()
-			store := &ir.Persist{Kind: kind, Models: h.StrList("models")}
+			store := &ir.Persist{Kind: kind, Models: h.StrList("models"), Library: h.ClientLibrary}
 			store.ID = id
 
 			existing, seen := ctx.Graph.Intent(store.Key())

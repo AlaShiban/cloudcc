@@ -27,6 +27,33 @@ a client of that same type pointed at AWS. The parity problem disappears rather
 than being managed, because there is only ever one implementation: the library's
 own.
 
+**The client library, not just the capability, decides what is built.** The
+capability alone is not enough information. Two Redis libraries have different
+APIs; a synchronous SQLAlchemy engine is not an asynchronous one; `pg` and Knex
+share nothing. `sdkdetect.Client.Library` records which one the program reached
+for, it travels on the intent, and the shim dispatches on it:
+
+- Python keeps one module per capability and branches inside it, because its
+  imports are lazy and only the taken branch ever executes. `create_async_engine`
+  gets an `AsyncEngine` back, with the driver swapped to an async one.
+- Node has one module per *library*, each importing exactly one package. That
+  is what lets the bundler pull in ioredis or node-redis but never both, and it
+  keeps `connect` synchronous — a single static import needs no await.
+
+**`connect` is synchronous everywhere it returns a client.** Uncompiled,
+`persist(new Redis(), …)` hands back a client immediately. An async `connect`
+would make the same expression a client before compiling and a Promise after,
+so `cache.get(k)` would stop working. Every supported library connects lazily,
+and the managed database password is passed as an async *provider* — `pg` and
+Knex both accept one — rather than being awaited up front. A Node test asserts
+no shim declares `connect` async.
+
+Sequelize is deliberately unsupported for exactly this reason: it takes the
+password in its constructor with no async provider and no async connection
+factory, so a shim could only return it from an async `connect`. An
+unrecognised client is a compile error naming what *is* supported, which beats
+a bundle that fails on its first query.
+
 Three consequences worth naming:
 
 - **Ids are always explicit**, never inferred from the variable. Renaming a

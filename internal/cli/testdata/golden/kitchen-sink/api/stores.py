@@ -23,6 +23,6 @@ from sqlalchemy import create_engine
 catalogue = _cloudcc_kv.connect("catalogue")
 docs = _cloudcc_fs.connect("itemDocs")
 signing_key = _cloudcc_secret.connect("signingKey")
-db = _cloudcc_orm.connect("shopdb")
+db = _cloudcc_orm.connect("shopdb", library="sqlalchemy")
 cache = _cloudcc_redis.connect("itemCache")
 events = _cloudcc_pubsub.connect("itemEvents")
