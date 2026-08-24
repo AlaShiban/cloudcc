@@ -72,11 +72,14 @@ jobs:
       ministack:
         image: ministackorg/ministack
         ports: ["4566:4566"]
+        # No --health-cmd: the healthcheck runs inside the container, which has
+        # no curl, so the emulator was being marked unhealthy while serving
+        # perfectly well. The job waits from the runner side instead.
+        #
+        # The Docker socket is what lets the emulator back Lambda, RDS and ECS
+        # with real processes rather than mocks.
         options: >-
-          --health-cmd "curl -sf http://localhost:4566 || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 12
+          -v /var/run/docker.sock:/var/run/docker.sock
 
     env:
       MINISTACK_ENDPOINT: http://localhost:4566
@@ -104,6 +107,9 @@ jobs:
 
       - name: Install graphviz
         run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Wait for the emulator
+        run: ./hack/wait-for.sh "$MINISTACK_ENDPOINT" 120
 
       - name: Toolchain check
         run: |
