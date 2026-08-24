@@ -6,8 +6,8 @@ import { env, slug } from "./client.js";
 
 export async function connect(id) {
   const key = slug(id);
-  const host = env(`CLOUDCC_REDIS_${key}_ENDPOINT`, "persistRedis", id);
-  const port = Number(env(`CLOUDCC_REDIS_${key}_PORT`, "persistRedis", id));
+  const host = env(`CLOUDCC_REDIS_${key}_ENDPOINT`, "persist", id);
+  const port = Number(env(`CLOUDCC_REDIS_${key}_PORT`, "persist", id));
   const tls = process.env[`CLOUDCC_REDIS_${key}_TLS`] === "true";
 
   const client = createClient({ socket: { host, port, tls } });

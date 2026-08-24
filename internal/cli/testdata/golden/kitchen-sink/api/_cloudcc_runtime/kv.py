@@ -12,8 +12,8 @@ from . import _client
 
 
 def connect(id):
-    """Return a client for the KV store declared as ``persist_kv(id)``."""
-    name = _client.env("CLOUDCC_KV_%s_TABLE" % _client.slug(id), "persist_kv", id)
+    """Return a client for the KV store declared as ``persist(KVStore(), id=...)``."""
+    name = _client.env("CLOUDCC_KV_%s_TABLE" % _client.slug(id), "persist", id)
     return KVStore(id, _client.resource("dynamodb").Table(name))
 
 

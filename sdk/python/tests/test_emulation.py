@@ -5,7 +5,7 @@ importantly -- pin the method signatures, which the compiler's parity test
 compares against the injected _cloudcc_runtime clients.
 """
 
-import os
+import pathlib
 
 import pytest
 
@@ -31,8 +31,27 @@ def test_the_sdk_never_imports_boto3():
     assert "boto3" not in sys.modules or True  # importing us must not pull it in
 
 
-def test_persist_kv_round_trip():
-    pets = cloudcc.persist_kv("petsByOwner")
+def test_persist_returns_exactly_what_it_was_given():
+    """The property the whole design rests on.
+
+    ``persist`` is a compile-time hint. Uncompiled it must be the identity
+    function, or a program would behave differently depending on whether it had
+    been compiled -- which is the one thing this project cannot afford.
+    """
+    for client in [object(), {"a": 1}, [1, 2], "text", 42, pathlib.Path("./x")]:
+        assert cloudcc.persist(client, id="anything") is client
+
+
+def test_persist_preserves_the_type_it_was_handed():
+    path = pathlib.Path("./docs")
+    assert isinstance(cloudcc.persist(path, id="docs"), pathlib.Path)
+
+    store = cloudcc.KVStore()
+    assert type(cloudcc.persist(store, id="kv")) is cloudcc.KVStore
+
+
+def test_kv_store_round_trip():
+    pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
     assert pets.get("1") is None
 
     pets.put("1", {"name": "rex"})
@@ -44,75 +63,42 @@ def test_persist_kv_round_trip():
     assert pets.keys() == []
 
 
-def test_persist_kv_returns_a_copy():
-    pets = cloudcc.persist_kv("petsByOwner")
+def test_kv_store_returns_a_copy():
+    pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
     pets.put("1", {"name": "rex"})
     got = pets.get("1")
     got["name"] = "mutated"
     assert pets.get("1") == {"name": "rex"}
 
 
-def test_the_same_id_gives_the_same_store():
-    assert cloudcc.persist_kv("shared") is cloudcc.persist_kv("shared")
-    assert cloudcc.persist_kv("a") is not cloudcc.persist_kv("b")
+def test_kv_store_really_persists(tmp_path):
+    """A verb called ``persist`` handing back something that forgets on exit
+    would be a poor joke, so the local store is file-backed."""
+    path = tmp_path / "store.json"
+    cloudcc.KVStore(str(path)).put("1", {"name": "rex"})
+    assert cloudcc.KVStore(str(path)).get("1") == {"name": "rex"}
 
 
-def test_persist_fs_round_trip():
-    blobs = cloudcc.persist_fs("petAudit")
-    assert blobs.list() == []
-    assert not blobs.exists("a.txt")
-
-    blobs.write("a.txt", b"hello")
-    blobs.write("nested/b.txt", b"there")
-
-    assert blobs.read("a.txt") == b"hello"
-    assert blobs.exists("a.txt")
-    assert blobs.list() == ["a.txt", "nested/b.txt"]
-    assert blobs.list("nested/") == ["nested/b.txt"]
-
-    blobs.delete("a.txt")
-    assert not blobs.exists("a.txt")
-    with pytest.raises(FileNotFoundError):
-        blobs.read("a.txt")
+def test_two_kv_stores_are_independent():
+    a = cloudcc.KVStore()
+    b = cloudcc.KVStore()
+    a.put("k", {"v": 1})
+    assert b.get("k") is None
 
 
-def test_persist_secret_reads_the_environment(monkeypatch):
-    secret = cloudcc.persist_secret("api-key")
+def test_secret_reads_the_environment(monkeypatch):
+    secret = cloudcc.persist(cloudcc.Secret(), id="api-key")
     assert secret.get() == ""
 
-    monkeypatch.setenv("CLOUDCC_SECRET_API_KEY", "s3cr3t")
-    assert cloudcc.persist_secret("api-key").get() == "s3cr3t"
+    monkeypatch.setenv("API_KEY", "s3cr3t")
+    assert cloudcc.Secret("API_KEY").get() == "s3cr3t"
 
     secret.set("overridden")
     assert secret.get() == "overridden"
 
 
-def test_persist_redis_operations():
-    cache = cloudcc.persist_redis("sessions")
-    assert cache.get("k") is None
-
-    cache.set("k", "v")
-    assert cache.get("k") == "v"
-
-    cache.set("k", "v2", ex=60)
-    assert cache.get("k") == "v2"
-
-    assert cache.incr("hits") == 1
-    assert cache.incr("hits", 4) == 5
-
-    cache.delete("k")
-    assert cache.get("k") is None
-
-
-def test_persist_orm_gives_a_local_url():
-    db = cloudcc.persist_orm("maindb", models=["Pet"])
-    url = db.url()
-    assert url.startswith("sqlite:///")
-    assert url.endswith("maindb.db")
-
-
-def test_pubsub_fans_out_in_process():
-    topic = cloudcc.pubsub_topic("petEvents")
+def test_topic_fans_out_in_process():
+    topic = cloudcc.persist(cloudcc.Topic(), id="petEvents")
     seen = []
 
     @topic.subscribe
@@ -127,7 +113,7 @@ def test_pubsub_fans_out_in_process():
 
 
 def test_subscribe_returns_the_function_so_it_works_as_a_decorator():
-    topic = cloudcc.pubsub_topic("t")
+    topic = cloudcc.persist(cloudcc.Topic(), id="t")
 
     @topic.subscribe
     def handler(message):
@@ -166,13 +152,13 @@ def test_hint_only_functions_return_quietly():
     assert cloudcc.embed_assets("./data/*.json") == "./data/*.json"
 
 
-def test_reset_local_state_clears_directories(tmp_path):
-    blobs = cloudcc.persist_fs("b")
-    blobs.write("a.txt", b"x")
-    assert blobs.exists("a.txt")
+def test_reset_local_state_clears_directories():
+    store = cloudcc.KVStore()
+    store.put("a", {"v": 1})
+    assert store.keys() == ["a"]
 
     cloudcc.reset_local_state()
-    assert not cloudcc.persist_fs("b").exists("a.txt")
+    assert store.keys() == []
 
 
 def test_local_root_honours_the_environment(monkeypatch, tmp_path):

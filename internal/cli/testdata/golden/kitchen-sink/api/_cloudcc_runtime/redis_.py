@@ -1,4 +1,10 @@
-"""Cache backed by ElastiCache or MemoryDB, over the Redis protocol."""
+"""Cache backed by ElastiCache or MemoryDB.
+
+``connect`` returns a real ``redis.Redis``. The program declared one by
+constructing one, and what it gets back is the same type pointed at the
+provisioned cluster -- so every method, every option and every type stub the
+library ships still applies. There is no wrapper here to drift from it.
+"""
 
 import os
 
@@ -6,37 +12,12 @@ from . import _client
 
 
 def connect(id):
-    """Return a client for the cache declared as ``persist_redis(id)``."""
+    """Return a redis.Redis connected to the cache declared for ``id``."""
     slug = _client.slug(id)
-    host = _client.env("CLOUDCC_REDIS_%s_ENDPOINT" % slug, "persist_redis", id)
-    port = int(_client.env("CLOUDCC_REDIS_%s_PORT" % slug, "persist_redis", id))
+    host = _client.env("CLOUDCC_REDIS_%s_ENDPOINT" % slug, "persist", id)
+    port = int(_client.env("CLOUDCC_REDIS_%s_PORT" % slug, "persist", id))
     tls = os.environ.get("CLOUDCC_REDIS_%s_TLS" % slug, "") == "true"
 
     import redis as _redis
 
-    return Redis(id, _redis.Redis(host=host, port=port, ssl=tls, decode_responses=True))
-
-
-class Redis:
-    def __init__(self, id, conn):
-        self.id = id
-        self._conn = conn
-
-    def get(self, key):
-        """Return the value at ``key``, or None."""
-        return self._conn.get(str(key))
-
-    def set(self, key, value, ex=None):
-        """Store ``value`` at ``key``, optionally expiring after ``ex`` seconds."""
-        self._conn.set(str(key), str(value), ex=ex)
-
-    def delete(self, key):
-        """Remove ``key`` if present."""
-        self._conn.delete(str(key))
-
-    def incr(self, key, amount=1):
-        """Increment ``key`` and return the new value."""
-        return int(self._conn.incrby(str(key), amount))
-
-    def __repr__(self):
-        return "<Redis %r (elasticache)>" % self.id
+    return _redis.Redis(host=host, port=port, ssl=tls, decode_responses=True)

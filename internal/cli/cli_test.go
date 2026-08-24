@@ -42,7 +42,7 @@ func writeApp(t *testing.T, files map[string]string) string {
 
 func TestBareInvocationCompiles(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"pets\")\n",
+		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"pets\")\n",
 	})
 	out := t.TempDir()
 
@@ -59,7 +59,7 @@ func TestBareInvocationCompiles(t *testing.T) {
 func TestExitCodes(t *testing.T) {
 	good := writeApp(t, map[string]string{"app.py": "x = 1\n"})
 	bad := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\nname = \"x\"\npets = cloudcc.persist_kv(name)\n",
+		"app.py": "import cloudcompiler as cloudcc\nname = \"x\"\npets = cloudcc.persist(cloudcc.KVStore(), id=name)\n",
 	})
 
 	cases := []struct {
@@ -85,13 +85,13 @@ func TestExitCodes(t *testing.T) {
 
 func TestNonLiteralArgumentIsReportedWithAPosition(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\nname = \"x\"\npets = cloudcc.persist_kv(name)\n",
+		"app.py": "import cloudcompiler as cloudcc\nname = \"x\"\npets = cloudcc.persist(cloudcc.KVStore(), id=name)\n",
 	})
 	_, stderr, code := run(t, src, "-o", t.TempDir(), "--app", "demo")
 	if code != ExitCompile {
 		t.Fatalf("exit %d, want %d", code, ExitCompile)
 	}
-	if !strings.Contains(stderr, "app.py:3:27: error: persist_kv:") {
+	if !strings.Contains(stderr, "app.py:3:46: error: id must be a string literal") {
 		t.Errorf("the error should point at the argument:\n%s", stderr)
 	}
 	if !strings.Contains(stderr, "no output written") {
@@ -101,7 +101,7 @@ func TestNonLiteralArgumentIsReportedWithAPosition(t *testing.T) {
 
 func TestNoOutputIsWrittenWhenCompilationFails(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\nname = \"x\"\npets = cloudcc.persist_kv(name)\n",
+		"app.py": "import cloudcompiler as cloudcc\nname = \"x\"\npets = cloudcc.persist(cloudcc.KVStore(), id=name)\n",
 	})
 	out := t.TempDir()
 	run(t, src, "-o", out, "--app", "demo")
@@ -113,7 +113,7 @@ func TestNoOutputIsWrittenWhenCompilationFails(t *testing.T) {
 
 func TestStrictTurnsWarningsIntoErrors(t *testing.T) {
 	files := map[string]string{
-		"app.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"pets\")\n",
+		"app.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"pets\")\n",
 		"orphan.py": "x = 1\n", // reached by nothing
 	}
 	src := writeApp(t, files)
@@ -141,7 +141,7 @@ func TestStrictTurnsWarningsIntoErrors(t *testing.T) {
 func TestDumpIRIsStructured(t *testing.T) {
 	src := writeApp(t, map[string]string{
 		"app.py": "from fastapi import FastAPI\nimport cloudcompiler as cloudcc\n" +
-			"app = FastAPI()\npets = cloudcc.persist_kv(\"pets\")\ncloudcc.expose(app, id=\"api\")\n",
+			"app = FastAPI()\npets = cloudcc.persist(cloudcc.KVStore(), id=\"pets\")\ncloudcc.expose(app, id=\"api\")\n",
 	})
 	stdout, stderr, code := run(t, src, "-o", t.TempDir(), "--app", "demo", "--dump-ir")
 	if code != ExitOK {
@@ -207,7 +207,7 @@ func TestInitScaffoldsAConfig(t *testing.T) {
 
 func TestInitOutputCompiles(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"pets\")\n",
+		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"pets\")\n",
 	})
 	if _, _, code := run(t, "init", src, "--app", "demo"); code != ExitOK {
 		t.Fatal("init failed")
@@ -226,7 +226,7 @@ func TestVersion(t *testing.T) {
 
 func TestDiagramPrintsToStdout(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"pets\")\n",
+		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"pets\")\n",
 	})
 	stdout, stderr, code := run(t, "diagram", src, "-o", t.TempDir(), "--app", "demo", "--format", "mermaid")
 	if code != ExitOK {
@@ -244,7 +244,7 @@ func TestDiagramPrintsToStdout(t *testing.T) {
 
 func TestStateFileRecordsTheFingerprint(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"pets\")\n",
+		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"pets\")\n",
 	})
 	out := t.TempDir()
 	if _, stderr, code := run(t, src, "-o", out, "--app", "demo"); code != ExitOK {
@@ -269,14 +269,14 @@ func TestStateFileRecordsTheFingerprint(t *testing.T) {
 
 func TestChangingSourceChangesTheFingerprint(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"pets\")\n",
+		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"pets\")\n",
 	})
 	out := t.TempDir()
 	run(t, src, "-o", out, "--app", "demo")
 	before := readState(t, out).Fingerprint
 
 	if err := os.WriteFile(filepath.Join(src, "app.py"),
-		[]byte("import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"other\")\n"), 0o644); err != nil {
+		[]byte("import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"other\")\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	run(t, src, "-o", out, "--app", "demo")

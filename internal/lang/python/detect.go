@@ -221,13 +221,14 @@ func buildHint(f *source.File, call *ts.Node, fn string) (sdkdetect.Hint, *hintE
 				}
 			}
 		} else {
-			if positional >= len(sig.Params) {
+			allowed := sdkdetect.PositionalParams(fn)
+			if positional >= len(allowed) {
 				return h, &hintError{
-					msgf("%s() takes at most %d arguments", fn, len(sig.Params)),
+					msgf("%s() takes at most %d positional argument(s)", fn, len(allowed)),
 					arg.StartByte(),
 				}
 			}
-			p = sig.Params[positional]
+			p = allowed[positional]
 			positional++
 			value = arg
 		}
@@ -248,7 +249,122 @@ func buildHint(f *source.File, call *ts.Node, fn string) (sdkdetect.Hint, *hintE
 			}
 		}
 	}
+
+	if sig.Capability == "" {
+		if err := resolveClient(f, call, &h); err != nil {
+			return h, err
+		}
+	}
 	return h, nil
+}
+
+// resolveClient reads the capability from the type of the client being
+// wrapped. This is what makes one verb enough: persist(Redis()) and
+// persist(create_engine(...)) are the same call, and the argument decides
+// whether a cache or a database gets provisioned.
+func resolveClient(f *source.File, call *ts.Node, h *sdkdetect.Hint) *hintError {
+	args := call.ChildByFieldName("arguments")
+	clientNode := positionalArg(f, args, 0)
+	if clientNode == nil {
+		return &hintError{"persist() requires a client to wrap", call.StartByte()}
+	}
+	h.Client = f.Text(clientNode)
+
+	constructor, ctorCall := constructorOf(f, clientNode)
+	if constructor == "" {
+		return &hintError{
+			msgf("persist() needs a client whose type says what to provision, not %s; "+
+				"pass one of %s", describe(f, clientNode),
+				strings.Join(sdkdetect.KnownClients("python"), ", ")),
+			clientNode.StartByte(),
+		}
+	}
+
+	client, ok := sdkdetect.LookupClient("python", constructor)
+	if !ok {
+		return &hintError{
+			msgf("persist() does not recognise %s(); it understands %s",
+				constructor, strings.Join(sdkdetect.KnownClients("python"), ", ")),
+			clientNode.StartByte(),
+		}
+	}
+
+	h.Capability = client.Capability
+	h.ClientType = client.Type
+	if client.Type == "" {
+		// A library that speaks to several engines still supplies the default,
+		// read from the connection URL it was given.
+		h.ClientType = sdkdetect.RelationalType(firstStringArg(f, ctorCall))
+	}
+	return nil
+}
+
+// positionalArg returns the nth positional argument of a call.
+func positionalArg(f *source.File, args *ts.Node, n int) *ts.Node {
+	if args == nil {
+		return nil
+	}
+	seen := 0
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		arg := args.NamedChild(i)
+		if arg.Kind() == "comment" || arg.Kind() == "keyword_argument" {
+			continue
+		}
+		if seen == n {
+			return arg
+		}
+		seen++
+	}
+	return nil
+}
+
+// constructorOf returns the name at the head of a client expression, and the
+// call it belongs to. `redis.Redis(host=...)` and `Redis()` both give "Redis".
+func constructorOf(f *source.File, n *ts.Node) (string, *ts.Node) {
+	if n.Kind() != "call" {
+		return "", nil
+	}
+	fn := n.ChildByFieldName("function")
+	if fn == nil {
+		return "", nil
+	}
+	switch fn.Kind() {
+	case "identifier":
+		return f.Text(fn), n
+	case "attribute":
+		if attr := fn.ChildByFieldName("attribute"); attr != nil {
+			return f.Text(attr), n
+		}
+	}
+	return "", nil
+}
+
+// firstStringArg reads the first string literal a call was given, which for a
+// database client is its connection URL.
+func firstStringArg(f *source.File, call *ts.Node) string {
+	if call == nil {
+		return ""
+	}
+	args := call.ChildByFieldName("arguments")
+	if args == nil {
+		return ""
+	}
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		arg := args.NamedChild(i)
+		if arg.Kind() == "comment" {
+			continue
+		}
+		if arg.Kind() == "keyword_argument" {
+			arg = arg.ChildByFieldName("value")
+			if arg == nil {
+				continue
+			}
+		}
+		if s, ok := stringLiteral(f, arg); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 func msgf(format string, args ...any) string {
@@ -260,6 +376,11 @@ func msgf(format string, args ...any) string {
 func evalArg(f *source.File, n *ts.Node, p sdkdetect.Param) (any, *hintError) {
 	switch p.Kind {
 	case sdkdetect.ParamExpr:
+		return f.Text(n), nil
+
+	case sdkdetect.ParamClient:
+		// The client's type is the declaration. What matters is the
+		// constructor at the head of the expression, not the whole thing.
 		return f.Text(n), nil
 	case sdkdetect.ParamString:
 		s, ok := stringLiteral(f, n)

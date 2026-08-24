@@ -17,15 +17,15 @@ import (
 const PackageName = "cloudcompiler"
 
 // SDK function names.
+//
+// There is one verb per action rather than one per resource: what a call
+// persists is decided by the type of the client handed to it, not by the name
+// of the function. That is what lets a program bring the client it already
+// uses and keep its type all the way through.
 const (
+	FnPersist       = "persist"
 	FnExecutionUnit = "execution_unit"
 	FnExpose        = "expose"
-	FnPersistKV     = "persist_kv"
-	FnPersistFS     = "persist_fs"
-	FnPersistSecret = "persist_secret"
-	FnPersistORM    = "persist_orm"
-	FnPersistRedis  = "persist_redis"
-	FnPubSubTopic   = "pubsub_topic"
 	FnConfigValue   = "config_value"
 	FnStaticUnit    = "static_unit"
 	FnEmbedAssets   = "embed_assets"
@@ -49,6 +49,10 @@ const (
 	ParamStringList
 	// ParamExpr accepts any expression; the source text is recorded verbatim.
 	ParamExpr
+	// ParamClient is a client whose *type* declares the capability. The
+	// argument is an expression, and the constructor at its head is what
+	// decides whether this is a cache, a database or a bucket.
+	ParamClient
 )
 
 // Param is one declared parameter of an SDK function.
@@ -56,6 +60,22 @@ type Param struct {
 	Name     string
 	Kind     ParamKind
 	Required bool
+	// KeywordOnly mirrors a `*` in the SDK's Python signature. It matters
+	// because the compiler reads calls rather than running them: without it,
+	// a spelling Python itself would reject at runtime would still compile,
+	// and the program would work only after being compiled.
+	KeywordOnly bool
+}
+
+// PositionalParams returns the parameters that may be passed positionally.
+func PositionalParams(fn string) []Param {
+	var out []Param
+	for _, p := range signatures[fn].Params {
+		if !p.KeywordOnly {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Signature is an SDK function's shape.
@@ -74,6 +94,13 @@ func Lookup(fn string) (Signature, bool) {
 // signatures mirrors sdk/python/cloudcompiler/__init__.py. The SDK parity test
 // keeps the two in step.
 var signatures = map[string]Signature{
+	// persist has no fixed capability: the client decides it, which is why
+	// this entry leaves Capability empty for the detector to fill in.
+	FnPersist: {"", []Param{
+		{Name: "client", Kind: ParamClient, Required: true},
+		{Name: "id", Kind: ParamString, Required: true, KeywordOnly: true},
+		{Name: "models", Kind: ParamStringList, KeywordOnly: true},
+	}},
 	FnExecutionUnit: {config.KindExecutionUnit, []Param{
 		{Name: "id", Kind: ParamString, Required: true},
 		{Name: "type", Kind: ParamString},
@@ -83,15 +110,6 @@ var signatures = map[string]Signature{
 		{Name: "id", Kind: ParamString},
 		{Name: "target", Kind: ParamString},
 	}},
-	FnPersistKV:     {config.KindPersistKV, []Param{{Name: "id", Kind: ParamString, Required: true}}},
-	FnPersistFS:     {config.KindPersistFS, []Param{{Name: "id", Kind: ParamString, Required: true}}},
-	FnPersistSecret: {config.KindPersistSecret, []Param{{Name: "id", Kind: ParamString, Required: true}}},
-	FnPersistORM: {config.KindPersistORM, []Param{
-		{Name: "id", Kind: ParamString, Required: true},
-		{Name: "models", Kind: ParamStringList},
-	}},
-	FnPersistRedis: {config.KindPersistRedis, []Param{{Name: "id", Kind: ParamString, Required: true}}},
-	FnPubSubTopic:  {config.KindPubSub, []Param{{Name: "id", Kind: ParamString, Required: true}}},
 	FnConfigValue: {config.KindConfig, []Param{
 		{Name: "id", Kind: ParamString, Required: true},
 		{Name: "default", Kind: ParamString},
@@ -134,9 +152,17 @@ func ParamNames(fn string) []string {
 type Hint struct {
 	// Func is the SDK function name, e.g. "persist_kv".
 	Func string
-	// Capability is the config kind the call contributes to, e.g. "persist_kv"
-	// for persist_kv and "pubsub" for pubsub_topic.
+	// Capability is the config kind the call contributes to. For persist it is
+	// resolved from the client's type rather than from the function name.
 	Capability string
+	// ClientType is the concrete resource the client asks for, e.g.
+	// "elasticache" or "rds_mysql". It is the weakest layer of configuration:
+	// the library a program reached for supplies the default, and cloudcc.yaml
+	// still chooses between variants of it.
+	ClientType string
+	// Client is the source text of the wrapped client expression, kept so the
+	// rewriter knows what it is replacing.
+	Client string
 	// Args holds the resolved arguments by parameter name. String, bool and
 	// list literals are stored as Go values; pExpr parameters are stored as
 	// the verbatim source text of the expression.

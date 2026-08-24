@@ -14,7 +14,7 @@ _HANDLERS = {}
 
 
 def connect(id):
-    """Return a client for the topic declared as ``pubsub_topic(id)``."""
+    """Return a client for the topic declared as ``persist(Topic(), id=...)``."""
     arn = _client.env("CLOUDCC_TOPIC_%s_ARN" % _client.slug(id), "pubsub", id)
     return Topic(id, arn, _client.client("sns"))
 

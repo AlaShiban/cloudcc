@@ -24,7 +24,7 @@ func detect(t *testing.T, src string) ([]sdkdetect.Hint, *diag.Diagnostics) {
 func TestDetectModuleAlias(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
-pets = cloudcc.persist_kv("petsByOwner")
+pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -33,7 +33,7 @@ pets = cloudcc.persist_kv("petsByOwner")
 		t.Fatalf("got %d hints, want 1: %v", len(hints), hints)
 	}
 	h := hints[0]
-	if h.Func != sdkdetect.FnPersistKV || h.Capability != "persist_kv" {
+	if h.Func != sdkdetect.FnPersist || h.Capability != "persist_kv" {
 		t.Errorf("func/capability = %q/%q", h.Func, h.Capability)
 	}
 	if h.ID() != "petsByOwner" {
@@ -48,22 +48,22 @@ pets = cloudcc.persist_kv("petsByOwner")
 }
 
 func TestDetectPlainImport(t *testing.T) {
-	hints, _ := detect(t, "import cloudcompiler\nx = cloudcompiler.persist_fs(\"blobs\")\n")
-	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersistFS || hints[0].ID() != "blobs" {
+	hints, _ := detect(t, "import cloudcompiler\nx = cloudcompiler.persist(Path(\"./data\"), id=\"blobs\")\n")
+	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersist || hints[0].ID() != "blobs" {
 		t.Fatalf("hints = %v", hints)
 	}
 }
 
 func TestDetectFromImport(t *testing.T) {
-	hints, _ := detect(t, "from cloudcompiler import persist_kv\npets = persist_kv(\"a\")\n")
+	hints, _ := detect(t, "from cloudcompiler import persist, KVStore\npets = persist(KVStore(), id=\"a\")\n")
 	if len(hints) != 1 || hints[0].ID() != "a" {
 		t.Fatalf("hints = %v", hints)
 	}
 }
 
 func TestDetectFromImportAliased(t *testing.T) {
-	hints, _ := detect(t, "from cloudcompiler import persist_kv as pkv\npets = pkv(\"a\")\n")
-	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersistKV || hints[0].ID() != "a" {
+	hints, _ := detect(t, "from cloudcompiler import persist as pk, KVStore\npets = pk(KVStore(), id=\"a\")\n")
+	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersist || hints[0].ID() != "a" {
 		t.Fatalf("hints = %v", hints)
 	}
 }
@@ -72,10 +72,10 @@ func TestUnrelatedCallsIgnored(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
 import other
-other.persist_kv("not-ours")
+other.persist(other.KVStore(), id="not-ours")
 cloudcc.not_a_capability("x")
 print("hello")
-pets = cloudcc.persist_kv("ours")
+pets = cloudcc.persist(cloudcc.KVStore(), id="ours")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -86,7 +86,7 @@ pets = cloudcc.persist_kv("ours")
 }
 
 func TestNoSDKImportMeansNoHints(t *testing.T) {
-	hints, _ := detect(t, "persist_kv(\"x\")\n")
+	hints, _ := detect(t, "persist(KVStore(), id=\"x\")\n")
 	if len(hints) != 0 {
 		t.Fatalf("hints = %v", hints)
 	}
@@ -136,7 +136,7 @@ lvl = cloudcc.config_value("log_level", "info")
 func TestPersistORMModelList(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
-db = cloudcc.persist_orm("maindb", models=["Pet", "Owner"])
+db = cloudcc.persist(create_engine("postgresql://x"), id="maindb", models=["Pet", "Owner"])
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -149,7 +149,7 @@ db = cloudcc.persist_orm("maindb", models=["Pet", "Owner"])
 func TestPersistORMAcceptsModelClassNames(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
-db = cloudcc.persist_orm("maindb", models=[Pet, Owner])
+db = cloudcc.persist(create_engine("postgresql://x"), id="maindb", models=[Pet, Owner])
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -163,15 +163,15 @@ func TestNonLiteralArgumentIsAPreciseError(t *testing.T) {
 	_, d := detect(t, `
 import cloudcompiler as cloudcc
 name = "petsByOwner"
-pets = cloudcc.persist_kv(name)
+pets = cloudcc.persist(cloudcc.KVStore(), id=name)
 `)
 	items := d.Items()
 	if len(items) != 1 {
 		t.Fatalf("got %d diagnostics, want 1: %v", len(items), items)
 	}
 	got := items[0].String()
-	// The offending argument starts at line 4, column 27.
-	if !strings.HasPrefix(got, "app.py:4:27: error: persist_kv:") {
+	// The offending argument starts at line 4, column 46.
+	if !strings.HasPrefix(got, "app.py:4:46: error: id must be") {
 		t.Errorf("diagnostic = %q", got)
 	}
 	if !strings.Contains(got, "string literal") || !strings.Contains(got, "the variable name") {
@@ -180,7 +180,7 @@ pets = cloudcc.persist_kv(name)
 }
 
 func TestFStringRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv(f\"pets-{env}\")\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(cloudcc.KVStore(), id=f\"pets-{env}\")\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "f-string") {
 		t.Fatalf("diagnostics = %v", items)
@@ -188,7 +188,7 @@ func TestFStringRejected(t *testing.T) {
 }
 
 func TestUnknownKeywordRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv(id=\"a\", nope=1)\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(cloudcc.KVStore(), id=\"a\", nope=1)\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "no parameter") {
 		t.Fatalf("diagnostics = %v", items)
@@ -196,17 +196,27 @@ func TestUnknownKeywordRejected(t *testing.T) {
 }
 
 func TestMissingRequiredArgRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv()\n")
-	items := d.Items()
-	if len(items) != 1 || !strings.Contains(items[0].Message, "requires the id argument") {
-		t.Fatalf("diagnostics = %v", items)
+	// Both of persist's arguments are required, and each is missed separately:
+	// a client with no id names nothing, and an id with no client says nothing
+	// about what to provision.
+	for name, src := range map[string]struct{ code, want string }{
+		"no client": {"x = cloudcc.persist()", "requires the client argument"},
+		"no id":     {"x = cloudcc.persist(cloudcc.KVStore())", "requires the id argument"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, d := detect(t, "import cloudcompiler as cloudcc\n"+src.code+"\n")
+			items := d.Items()
+			if len(items) != 1 || !strings.Contains(items[0].Message, src.want) {
+				t.Fatalf("diagnostics = %v, want one mentioning %q", items, src.want)
+			}
+		})
 	}
 }
 
 func TestTooManyPositionalArgsRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv(\"a\", \"b\")\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(cloudcc.KVStore(), \"a\", \"b\")\n")
 	items := d.Items()
-	if len(items) != 1 || !strings.Contains(items[0].Message, "at most 1") {
+	if len(items) != 1 || !strings.Contains(items[0].Message, "at most 1 positional") {
 		t.Fatalf("diagnostics = %v", items)
 	}
 }
@@ -229,7 +239,7 @@ func TestEnclosingFunctionRecorded(t *testing.T) {
 	hints, _ := detect(t, `
 import cloudcompiler as cloudcc
 def handler():
-    t = cloudcc.pubsub_topic("events")
+    t = cloudcc.persist(cloudcc.Topic(), id="events")
 `)
 	if len(hints) != 1 || hints[0].Enclosing != "handler" {
 		t.Fatalf("hints = %+v", hints)
@@ -237,10 +247,10 @@ def handler():
 }
 
 func TestSpanCoversTheWholeCall(t *testing.T) {
-	src := "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n"
+	src := "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n"
 	hints, _ := detect(t, src)
 	h := hints[0]
-	if got, want := src[h.Span[0]:h.Span[1]], `cloudcc.persist_kv("petsByOwner")`; got != want {
+	if got, want := src[h.Span[0]:h.Span[1]], `cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")`; got != want {
 		t.Errorf("span text = %q, want %q", got, want)
 	}
 }
@@ -248,9 +258,9 @@ func TestSpanCoversTheWholeCall(t *testing.T) {
 func TestHintsSortedByOffset(t *testing.T) {
 	hints, _ := detect(t, `
 import cloudcompiler as cloudcc
-a = cloudcc.persist_kv("a")
-b = cloudcc.persist_fs("b")
-c = cloudcc.pubsub_topic("c")
+a = cloudcc.persist(cloudcc.KVStore(), id="a")
+b = cloudcc.persist(Path("./data"), id="b")
+c = cloudcc.persist(cloudcc.Topic(), id="c")
 `)
 	var ids []string
 	for _, h := range hints {
@@ -281,9 +291,8 @@ func TestResolveImportsRecordsAlias(t *testing.T) {
 
 func TestSignaturesCoverEveryFunctionName(t *testing.T) {
 	want := []string{
-		sdkdetect.FnConfigValue, sdkdetect.FnEmbedAssets, sdkdetect.FnExecutionUnit, sdkdetect.FnExpose, sdkdetect.FnPersistFS,
-		sdkdetect.FnPersistKV, sdkdetect.FnPersistORM, sdkdetect.FnPersistRedis, sdkdetect.FnPersistSecret,
-		sdkdetect.FnPubSubTopic, sdkdetect.FnStaticUnit,
+		sdkdetect.FnConfigValue, sdkdetect.FnEmbedAssets, sdkdetect.FnExecutionUnit,
+		sdkdetect.FnExpose, sdkdetect.FnPersist, sdkdetect.FnStaticUnit,
 	}
 	if got := sdkdetect.FunctionNames(); !reflect.DeepEqual(got, want) {
 		t.Errorf("sdkdetect.FunctionNames() = %v, want %v", got, want)
@@ -297,11 +306,12 @@ func TestParenthesizedStringLiteral(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
 
-pets = cloudcc.persist_kv(
-    (
+pets = cloudcc.persist(
+    cloudcc.KVStore(),
+    id=(
         "pets"
         "ByOwner"
-    )
+    ),
 )
 `)
 	if d.HasErrors() {
@@ -313,7 +323,7 @@ pets = cloudcc.persist_kv(
 }
 
 func TestParenthesizedSingleString(t *testing.T) {
-	hints, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv((\"a\"))\n")
+	hints, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(cloudcc.KVStore(), id=(\"a\"))\n")
 	if d.HasErrors() || len(hints) != 1 || hints[0].ID() != "a" {
 		t.Fatalf("hints = %v, diagnostics = %v", hints, d.Items())
 	}
@@ -321,7 +331,7 @@ func TestParenthesizedSingleString(t *testing.T) {
 
 // A parenthesised expression that is not a constant must still be rejected.
 func TestParenthesizedNonLiteralStillRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nname = \"x\"\ny = cloudcc.persist_kv((name))\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nname = \"x\"\ny = cloudcc.persist(cloudcc.KVStore(), id=(name))\n")
 	if !d.HasErrors() {
 		t.Fatal("a parenthesised variable is still not a literal")
 	}
@@ -359,7 +369,7 @@ func TestCommentInsideAListArgument(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
 
-db = cloudcc.persist_orm("main", models=[
+db = cloudcc.persist(create_engine("postgresql://x"), id="main", models=[
     "Pet",   # the first
     # and the second
     "Owner",
@@ -377,12 +387,13 @@ func TestCommentInsideAParenthesizedString(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
 
-pets = cloudcc.persist_kv(
-    (
+pets = cloudcc.persist(
+    cloudcc.KVStore(),
+    id=(
         # split for the line limit
         "pets"
         "ByOwner"
-    )
+    ),
 )
 `)
 	if d.HasErrors() {

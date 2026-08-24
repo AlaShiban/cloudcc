@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cloudcompiler/cloudcc/internal/config"
 	runtimepy "github.com/cloudcompiler/cloudcc/internal/runtime/py"
 	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 	"github.com/cloudcompiler/cloudcc/internal/source"
@@ -31,21 +32,45 @@ type shimTarget struct {
 	Erase string
 }
 
-// shims maps every SDK function to its runtime counterpart. Compile-only
+// shims maps a capability to the runtime module that connects to it.
+//
+// Keyed by capability rather than by function name, because one verb now
+// covers every store and it is the client's type that says which one this is.
+var shims = map[string]shimTarget{
+	config.KindPersistKV:     {Module: "kv", Alias: "_cloudcc_kv"},
+	config.KindPersistFS:     {Module: "fs", Alias: "_cloudcc_fs"},
+	config.KindPersistSecret: {Module: "secret", Alias: "_cloudcc_secret"},
+	config.KindPersistORM:    {Module: "orm", Alias: "_cloudcc_orm"},
+	config.KindPersistRedis:  {Module: "redis_", Alias: "_cloudcc_redis"},
+	config.KindPubSub:        {Module: "pubsub", Alias: "_cloudcc_pubsub"},
+}
+
+// verbShims maps the verbs that name their own capability. Compile-only
 // hints -- execution_unit, static_unit -- are erased, because they describe
 // the build rather than anything that happens at runtime.
-var shims = map[string]shimTarget{
-	sdkdetect.FnPersistKV:     {Module: "kv", Alias: "_cloudcc_kv", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPersistFS:     {Module: "fs", Alias: "_cloudcc_fs", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPersistSecret: {Module: "secret", Alias: "_cloudcc_secret", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPersistORM:    {Module: "orm", Alias: "_cloudcc_orm", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPersistRedis:  {Module: "redis_", Alias: "_cloudcc_redis", Call: "connect", Args: []string{"id"}},
-	sdkdetect.FnPubSubTopic:   {Module: "pubsub", Alias: "_cloudcc_pubsub", Call: "connect", Args: []string{"id"}},
+var verbShims = map[string]shimTarget{
 	sdkdetect.FnConfigValue:   {Module: "config", Alias: "_cloudcc_config", Call: "value", Args: []string{"id", "default"}},
 	sdkdetect.FnExpose:        {Module: "expose", Alias: "_cloudcc_expose", Call: "register", Args: []string{"app", "id", "target"}},
 	sdkdetect.FnExecutionUnit: {Erase: "None"},
 	sdkdetect.FnStaticUnit:    {Erase: "None"},
 	sdkdetect.FnEmbedAssets:   {Erase: "pattern"},
+}
+
+// shimFor returns the rewrite target for a hint.
+func shimFor(h sdkdetect.Hint) (shimTarget, bool) {
+	if h.Func != sdkdetect.FnPersist {
+		target, ok := verbShims[h.Func]
+		return target, ok
+	}
+	target, ok := shims[h.Capability]
+	if !ok {
+		return shimTarget{}, false
+	}
+	// Every store connects the same way: by id, returning a client of the
+	// same type the program declared.
+	target.Call = "connect"
+	target.Args = []string{"id"}
+	return target, true
 }
 
 // Rewrite replaces every SDK hint call in f with its runtime equivalent and
@@ -71,7 +96,7 @@ func rewrite(f *source.File, hints []sdkdetect.Hint) error {
 		if h.File != f.Path {
 			continue
 		}
-		target, ok := shims[h.Func]
+		target, ok := shimFor(h)
 		if !ok {
 			continue
 		}

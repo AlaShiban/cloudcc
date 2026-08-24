@@ -190,7 +190,8 @@ func (g *generator) build(seed int64) *Program {
 	topicID := ""
 	if multi && g.rng.Intn(2) == 0 {
 		topicID = makeID(g.rng, "events", g.rng.Intn(9))
-		storeMod.assign("events", storeMod.hint("pubsub_topic", pos(storeMod.quote(topicID))))
+		storeMod.assign("events", storeMod.hint("persist",
+			pos(storeMod.clientExpr(g.rng, KindPubSub)), kw("id", storeMod.quote(topicID))))
 		p.Expect.Topics = append(p.Expect.Topics, topicID)
 	}
 
@@ -317,12 +318,14 @@ func (g *generator) hintMaybeCommented(m *pyModule, fn string, args ...arg) stri
 	return m.hint(fn, args...)
 }
 
+// storeArgs builds the arguments to one persist() call: the client, whose type
+// says what the store is, and the id, which is always explicit and always a
+// keyword -- a resource that renamed itself when a variable was renamed would
+// be a trap, so the SDK does not offer the shorter spelling.
 func (g *generator) storeArgs(m *pyModule, kind, id string) []arg {
-	args := []arg{}
-	if g.rng.Intn(3) == 0 {
-		args = append(args, kw("id", m.quote(id)))
-	} else {
-		args = append(args, pos(m.quote(id)))
+	args := []arg{
+		pos(m.clientExpr(g.rng, kind)),
+		kw("id", m.quote(id)),
 	}
 	if kind == KindPersistORM && g.rng.Intn(2) == 0 {
 		args = append(args, kw("models", `["Row"]`))
@@ -704,14 +707,13 @@ func moduleName(path string) string {
 	return strings.ReplaceAll(path, "/", ".")
 }
 
+// sdkFunc is the verb that declares a capability. Every store now goes through
+// one verb; what it wraps is what tells them apart.
 func sdkFunc(kind string) string {
-	switch kind {
-	case KindPubSub:
-		return "pubsub_topic"
-	case KindConfig:
+	if kind == KindConfig {
 		return "config_value"
 	}
-	return kind
+	return "persist"
 }
 
 func storeBase(kind string) string {

@@ -3,6 +3,7 @@ package fuzz_test
 import (
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/cloudcompiler/cloudcc/internal/fuzz"
@@ -18,6 +19,11 @@ import (
 var CorpusSeeds = []int64{
 	1, 2, 3, 5, 7, 11, 13, 17, 19, 23,
 	29, 31, 37, 41, 43, 47, 53, 59, 61, 67,
+	// Added when persist() started reading the wrapped client's type: 30 is
+	// the first seed writing `redis.Redis(...)` dotted, 96 the first writing a
+	// SQLAlchemy driver-qualified URL. TestCorpusCoversEveryClientShape is
+	// what says whether this list is still complete.
+	30, 96,
 }
 
 // TestCorpus is the permanent one: twenty fixed programs, compiled and checked
@@ -150,5 +156,49 @@ func walk(t *testing.T, root, dir string, out map[string]string) {
 			t.Fatal(err)
 		}
 		out[full[len(root):]] = string(data)
+	}
+}
+
+// clientShapes are the ways a persist() argument can be written. Since the
+// compiler now learns what a store is from the type of the expression it
+// wraps, each of these is a distinct path through the detector -- so a corpus
+// that misses one is not testing the thing that decides what gets provisioned.
+var clientShapes = []string{
+	"KVStore(",
+	"Secret(",
+	"Topic(",
+	"Path(",
+	"pathlib.Path(",
+	"create_engine(",
+	"sqlalchemy.create_engine(",
+	"postgresql://",
+	"postgresql+psycopg://",
+	"mysql://",
+	"mysql+pymysql://",
+	"Redis(",
+	"redis.Redis(",
+	"StrictRedis(",
+}
+
+// TestCorpusCoversEveryClientShape keeps the corpus honest. The seed list is
+// chosen by hand, and a hand-chosen list quietly stops covering things as the
+// generator grows; this fails when it does, rather than leaving a detector path
+// untested and the suite still green.
+func TestCorpusCoversEveryClientShape(t *testing.T) {
+	seen := map[string]bool{}
+	for _, seed := range CorpusSeeds {
+		p := fuzz.Generate(seed, fuzz.Options{})
+		for _, content := range p.Files {
+			for _, shape := range clientShapes {
+				if strings.Contains(content, shape) {
+					seen[shape] = true
+				}
+			}
+		}
+	}
+	for _, shape := range clientShapes {
+		if !seen[shape] {
+			t.Errorf("no corpus seed generates %q; add a seed that does", shape)
+		}
 	}
 }

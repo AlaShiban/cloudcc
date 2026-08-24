@@ -129,7 +129,7 @@ func (p *ShimsPlugin) injectRuntime(ctx *compiler.Context) error {
 
 		generated, err := front.UnitFiles(unit, lang.UnitOptions{
 			Manifest:       p.manifest(ctx, front),
-			UsesRedis:      p.usesRedis(ctx, unit),
+			Capabilities:   p.capabilities(ctx, unit),
 			Container:      container,
 			UserDockerfile: unit.DockerfileProvided,
 		})
@@ -158,15 +158,15 @@ func (p *ShimsPlugin) manifest(ctx *compiler.Context, front lang.Frontend) []byt
 	return nil
 }
 
-// usesRedis reports whether a unit declares a cache, which is what decides
-// whether its bundle carries a Redis client.
-func (p *ShimsPlugin) usesRedis(ctx *compiler.Context, unit *ir.ExecUnit) bool {
+// capabilities returns the capability kinds a unit uses, sorted. It is what
+// decides which client libraries the bundle carries: a program with no cache
+// does not ship a Redis client.
+func (p *ShimsPlugin) capabilities(ctx *compiler.Context, unit *ir.ExecUnit) []string {
+	seen := map[string]bool{}
 	for _, e := range ctx.Graph.EdgesFrom(unit.Key(), ir.EdgeUses) {
-		if e.To.Kind == config.KindPersistRedis {
-			return true
-		}
+		seen[e.To.Kind] = true
 	}
-	return false
+	return config.SortedKeys(seen)
 }
 
 // writePackagingScript emits bin/package.sh. Pulumi does not install Python

@@ -183,9 +183,13 @@ func (r *Resolver) secret(p *ir.Persist) error {
 func (r *Resolver) database(p *ir.Persist) error {
 	name := r.uniqueName("rds", p.ID, sanitize.RDSIdentifier)
 	dbName := sanitize.DBIdentifier(p.ID)
+	engine, port := "postgres", 5432
+	if p.Config().Type == "rds_mysql" {
+		engine, port = "mysql", 3306
+	}
 	props := map[string]any{
 		"identifier":               name,
-		"engine":                   "postgres",
+		"engine":                   engine,
 		"instanceClass":            "db.t4g.micro",
 		"allocatedStorage":         20,
 		"dbName":                   dbName,
@@ -200,8 +204,13 @@ func (r *Resolver) database(p *ir.Persist) error {
 	// AWS manages the master password, so the URL carries no credential: the
 	// shim fetches the password from the managed secret and splices it in.
 	// Putting a password in an environment variable would defeat D21.
+	scheme := "postgresql"
+	if engine == "mysql" {
+		scheme = "mysql"
+	}
+	_ = port
 	url := ir.Lit(
-		"postgresql://ccadmin@", ir.Ref{Key: key, Prop: "address"},
+		scheme+"://ccadmin@", ir.Ref{Key: key, Prop: "address"},
 		":", ir.Ref{Key: key, Prop: "port"},
 		"/", dbName,
 	)

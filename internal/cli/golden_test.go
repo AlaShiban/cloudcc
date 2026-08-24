@@ -487,11 +487,11 @@ import cloudcompiler as cloudcc
 app = FastAPI()
 cloudcc.expose(app, id="gw")
 
-a = cloudcc.persist_fs("my_bucket")
-b = cloudcc.persist_fs("my-bucket")
-c = cloudcc.persist_fs("my.bucket")
-x = cloudcc.persist_kv("my_table")
-y = cloudcc.persist_kv("my-table")
+a = cloudcc.persist(Path("./data"), id="my_bucket")
+b = cloudcc.persist(Path("./data"), id="my-bucket")
+c = cloudcc.persist(Path("./data"), id="my.bucket")
+x = cloudcc.persist(cloudcc.KVStore(), id="my_table")
+y = cloudcc.persist(cloudcc.KVStore(), id="my-table")
 `,
 	})
 	out := t.TempDir()

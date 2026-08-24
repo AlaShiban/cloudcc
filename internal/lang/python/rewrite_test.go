@@ -45,7 +45,7 @@ func assertParses(t *testing.T, src string) {
 }
 
 func TestRewritePersistKV(t *testing.T) {
-	got := rewritten(t, "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"petsByOwner\")\n")
+	got := rewritten(t, "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n")
 
 	if strings.Contains(got, "cloudcompiler") {
 		t.Errorf("the SDK import should be removed:\n%s", got)
@@ -63,7 +63,7 @@ func TestRewriteLeavesApplicationCodeAlone(t *testing.T) {
 import cloudcompiler as cloudcc
 
 app = FastAPI()
-pets = cloudcc.persist_kv("petsByOwner")
+pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
 
 
 @app.get("/pets/{pet_id}")
@@ -130,7 +130,7 @@ func TestImportsGoAfterTheDocstring(t *testing.T) {
 
 import cloudcompiler as cloudcc
 
-pets = cloudcc.persist_kv("a")
+pets = cloudcc.persist(cloudcc.KVStore(), id="a")
 `)
 	if !strings.HasPrefix(got, `"""Module docstring."""`) {
 		t.Errorf("the docstring must stay first:\n%s", got)
@@ -147,7 +147,7 @@ func TestFutureImportsStayFirst(t *testing.T) {
 
 import cloudcompiler as cloudcc
 
-pets = cloudcc.persist_kv("a")
+pets = cloudcc.persist(cloudcc.KVStore(), id="a")
 `)
 	future := strings.Index(got, "from __future__ import annotations")
 	shim := strings.Index(got, "from _cloudcc_runtime")
@@ -157,7 +157,7 @@ pets = cloudcc.persist_kv("a")
 }
 
 func TestFromImportFormIsRewritten(t *testing.T) {
-	got := rewritten(t, "from cloudcompiler import persist_kv\npets = persist_kv(\"a\")\n")
+	got := rewritten(t, "from cloudcompiler import persist, KVStore\npets = persist(KVStore(), id=\"a\")\n")
 	if !strings.Contains(got, `pets = _cloudcc_kv.connect("a")`) || strings.Contains(got, "cloudcompiler") {
 		t.Errorf("from-import form was not rewritten:\n%s", got)
 	}
@@ -166,9 +166,9 @@ func TestFromImportFormIsRewritten(t *testing.T) {
 func TestSeveralHintsInOneFile(t *testing.T) {
 	got := rewritten(t, `import cloudcompiler as cloudcc
 
-pets = cloudcc.persist_kv("pets")
-blobs = cloudcc.persist_fs("blobs")
-events = cloudcc.pubsub_topic("events")
+pets = cloudcc.persist(cloudcc.KVStore(), id="pets")
+blobs = cloudcc.persist(Path("./data"), id="blobs")
+events = cloudcc.persist(cloudcc.Topic(), id="events")
 level = cloudcc.config_value("log_level")
 `)
 	for _, want := range []string{
@@ -192,7 +192,7 @@ level = cloudcc.config_value("log_level")
 }
 
 func TestRewriteIsDeterministic(t *testing.T) {
-	src := "import cloudcompiler as cloudcc\na = cloudcc.persist_kv(\"a\")\nb = cloudcc.persist_fs(\"b\")\nc = cloudcc.pubsub_topic(\"c\")\n"
+	src := "import cloudcompiler as cloudcc\na = cloudcc.persist(cloudcc.KVStore(), id=\"a\")\nb = cloudcc.persist(Path(\"./data\"), id=\"b\")\nc = cloudcc.persist(cloudcc.Topic(), id=\"c\")\n"
 	first := rewritten(t, src)
 	for i := 0; i < 10; i++ {
 		if got := rewritten(t, src); got != first {
@@ -235,7 +235,7 @@ func TestUnusedSDKImportIsStripped(t *testing.T) {
 }
 
 func TestUnusedFromImportIsStripped(t *testing.T) {
-	src := "from cloudcompiler import persist_kv\n\nVALUE = 1\n"
+	src := "from cloudcompiler import persist\n\nVALUE = 1\n"
 	f := &source.File{Path: "helpers.py", Content: []byte(src)}
 	if err := f.ParsePython(); err != nil {
 		t.Fatal(err)

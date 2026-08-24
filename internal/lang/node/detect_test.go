@@ -23,8 +23,8 @@ func detect(t *testing.T, path, src string) ([]sdkdetect.Hint, *diag.Diagnostics
 
 func TestDetectNamedImport(t *testing.T) {
 	hints, d := detect(t, "app.js", `
-import { persistKv } from "@cloudcompiler/sdk";
-const pets = persistKv("petsByOwner");
+import { persist, KVStore } from "@cloudcompiler/sdk";
+const pets = persist(new KVStore(), { id: "petsByOwner" });
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -36,8 +36,8 @@ const pets = persistKv("petsByOwner");
 
 func TestDetectAliasedImport(t *testing.T) {
 	hints, _ := detect(t, "app.ts", `
-import { persistKv as kvStore } from "@cloudcompiler/sdk";
-const pets = kvStore("a");
+import { persist as store, KVStore } from "@cloudcompiler/sdk";
+const pets = store(new KVStore(), { id: "a" });
 `)
 	if len(hints) != 1 || hints[0].ID() != "a" {
 		t.Fatalf("hints = %+v", hints)
@@ -47,9 +47,9 @@ const pets = kvStore("a");
 func TestDetectNamespaceImport(t *testing.T) {
 	hints, _ := detect(t, "app.js", `
 import * as sdk from "@cloudcompiler/sdk";
-const pets = sdk.persistKv("a");
+const pets = sdk.persist(new sdk.KVStore(), { id: "a" });
 `)
-	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersistKV {
+	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersist {
 		t.Fatalf("hints = %+v", hints)
 	}
 }
@@ -57,12 +57,12 @@ const pets = sdk.persistKv("a");
 // Both module systems are idiomatic and a program may mix them.
 func TestDetectRequireForms(t *testing.T) {
 	cases := map[string]string{
-		"destructured": `const { persistKv } = require("@cloudcompiler/sdk");
-const pets = persistKv("a");`,
+		"destructured": `const { persist, KVStore } = require("@cloudcompiler/sdk");
+const pets = persist(new KVStore(), { id: "a" });`,
 		"namespace": `const sdk = require("@cloudcompiler/sdk");
-const pets = sdk.persistKv("a");`,
-		"renamed": `const { persistKv: kv } = require("@cloudcompiler/sdk");
-const pets = kv("a");`,
+const pets = sdk.persist(new sdk.KVStore(), { id: "a" });`,
+		"renamed": `const { persist: kv, KVStore } = require("@cloudcompiler/sdk");
+const pets = kv(new KVStore(), { id: "a" });`,
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -119,20 +119,21 @@ expose(app, { id: "pet-api" });
 // rediscovered.
 func TestStringLiteralForms(t *testing.T) {
 	cases := map[string]string{
-		"double":        `persistKv("petsByOwner")`,
-		"single":        `persistKv('petsByOwner')`,
-		"template":      "persistKv(`petsByOwner`)",
-		"concatenated":  `persistKv("pets" + "ByOwner")`,
-		"parenthesised": `persistKv(("pets" + "ByOwner"))`,
-		"multiline": `persistKv(
-    "pets" +
-    "ByOwner"
-  )`,
+		"double":        `persist(new KVStore(), { id: "petsByOwner" })`,
+		"single":        `persist(new KVStore(), { id: 'petsByOwner' })`,
+		"template":      "persist(new KVStore(), { id: `petsByOwner` })",
+		"concatenated":  `persist(new KVStore(), { id: "pets" + "ByOwner" })`,
+		"parenthesised": `persist(new KVStore(), { id: ("pets" + "ByOwner") })`,
+		"multiline": `persist(new KVStore(), {
+    id:
+      "pets" +
+      "ByOwner",
+  })`,
 	}
 	for name, call := range cases {
 		t.Run(name, func(t *testing.T) {
 			hints, d := detect(t, "app.js",
-				"import { persistKv } from \"@cloudcompiler/sdk\";\nconst pets = "+call+";\n")
+				"import { persist, KVStore } from \"@cloudcompiler/sdk\";\nconst pets = "+call+";\n")
 			if d.HasErrors() {
 				t.Fatalf("diagnostics: %v", d.Items())
 			}
@@ -147,9 +148,9 @@ func TestStringLiteralForms(t *testing.T) {
 // running the program, and must stay an error rather than be guessed at.
 func TestSubstitutedTemplateIsRejected(t *testing.T) {
 	_, d := detect(t, "app.js", `
-import { persistKv } from "@cloudcompiler/sdk";
+import { persist, KVStore } from "@cloudcompiler/sdk";
 const env = "prod";
-const pets = persistKv(`+"`pets-${env}`"+`);
+const pets = persist(new KVStore(), { id: `+"`pets-${env}`"+` });
 `)
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "template literal") {
@@ -159,16 +160,16 @@ const pets = persistKv(`+"`pets-${env}`"+`);
 
 func TestNonLiteralIsAPreciseError(t *testing.T) {
 	_, d := detect(t, "app.js", `
-import { persistKv } from "@cloudcompiler/sdk";
+import { persist, KVStore } from "@cloudcompiler/sdk";
 const name = "petsByOwner";
-const pets = persistKv(name);
+const pets = persist(new KVStore(), { id: name });
 `)
 	items := d.Items()
 	if len(items) != 1 {
 		t.Fatalf("diagnostics = %v", items)
 	}
 	got := items[0].String()
-	if !strings.HasPrefix(got, "app.js:4:24: error: persist_kv:") {
+	if !strings.HasPrefix(got, "app.js:4:43: error: id must be") {
 		t.Errorf("the error should point at the argument: %q", got)
 	}
 	if !strings.Contains(got, "the variable name") {
@@ -214,8 +215,8 @@ const level = configValue(
 
 func TestUnknownOptionIsRejected(t *testing.T) {
 	_, d := detect(t, "app.js", `
-import { persistKv } from "@cloudcompiler/sdk";
-const pets = persistKv("a", { nope: 1 });
+import { persist, KVStore } from "@cloudcompiler/sdk";
+const pets = persist(new KVStore(), { id: "a", nope: 1 });
 `)
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "not an option") {
@@ -225,11 +226,11 @@ const pets = persistKv("a", { nope: 1 });
 
 func TestUnrelatedCallsIgnored(t *testing.T) {
 	hints, d := detect(t, "app.js", `
-import { persistKv } from "@cloudcompiler/sdk";
+import { persist, KVStore } from "@cloudcompiler/sdk";
 import other from "other";
-other.persistKv("not-ours");
+other.persist(new other.KVStore(), { id: "not-ours" });
 console.log("hello");
-const pets = persistKv("ours");
+const pets = persist(new KVStore(), { id: "ours" });
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -240,7 +241,7 @@ const pets = persistKv("ours");
 }
 
 func TestNoSDKImportMeansNoHints(t *testing.T) {
-	hints, _ := detect(t, "app.js", `const pets = persistKv("x");`)
+	hints, _ := detect(t, "app.js", `const pets = persist(new KVStore(), { id: "x" });`)
 	if len(hints) != 0 {
 		t.Fatalf("hints = %+v", hints)
 	}
@@ -248,9 +249,9 @@ func TestNoSDKImportMeansNoHints(t *testing.T) {
 
 func TestTypeScriptAnnotationsDoNotHide(t *testing.T) {
 	hints, d := detect(t, "app.ts", `
-import { persistKv, type KVStore } from "@cloudcompiler/sdk";
+import { persist, KVStore } from "@cloudcompiler/sdk";
 
-const pets: KVStore = persistKv("petsByOwner");
+const pets: KVStore = persist(new KVStore(), { id: "petsByOwner" });
 
 export function get(id: string): Promise<unknown> {
   return pets.get(id);
@@ -266,9 +267,9 @@ export function get(id: string): Promise<unknown> {
 
 func TestEnclosingFunctionRecorded(t *testing.T) {
 	hints, _ := detect(t, "app.js", `
-import { pubsubTopic } from "@cloudcompiler/sdk";
+import { persist, Topic } from "@cloudcompiler/sdk";
 function handler() {
-  const t = pubsubTopic("events");
+  const t = persist(new Topic(), { id: "events" });
   return t;
 }
 `)
@@ -278,9 +279,9 @@ function handler() {
 }
 
 func TestSpanCoversTheWholeCall(t *testing.T) {
-	src := "import { persistKv } from \"@cloudcompiler/sdk\";\nconst pets = persistKv(\"petsByOwner\");\n"
+	src := "import { persist, KVStore } from \"@cloudcompiler/sdk\";\nconst pets = persist(new KVStore(), { id: \"petsByOwner\" });\n"
 	hints, _ := detect(t, "app.js", src)
-	if got, want := src[hints[0].Span[0]:hints[0].Span[1]], `persistKv("petsByOwner")`; got != want {
+	if got, want := src[hints[0].Span[0]:hints[0].Span[1]], `persist(new KVStore(), { id: "petsByOwner" })`; got != want {
 		t.Errorf("span text = %q, want %q", got, want)
 	}
 }

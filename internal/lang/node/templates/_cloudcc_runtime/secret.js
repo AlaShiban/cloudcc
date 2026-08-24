@@ -5,7 +5,7 @@ import { GetSecretValueCommand, PutSecretValueCommand, SecretsManagerClient } fr
 import { common, env, slug } from "./client.js";
 
 export function connect(id) {
-  const arn = env(`CLOUDCC_SECRET_${slug(id)}_ARN`, "persistSecret", id);
+  const arn = env(`CLOUDCC_SECRET_${slug(id)}_ARN`, "persist", id);
   return new Secret(id, arn, new SecretsManagerClient(common()));
 }
 

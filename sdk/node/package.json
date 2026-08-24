@@ -1,6 +1,6 @@
 {
   "name": "@cloudcompiler/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Compile-time hints for CloudCompiler; the compiler reads these calls, never runs them.",
   "license": "Apache-2.0",
   "type": "module",

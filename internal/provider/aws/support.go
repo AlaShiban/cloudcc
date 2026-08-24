@@ -53,6 +53,7 @@ var typeSupport = map[string]map[string]Level{
 	},
 	config.KindPersistORM: {
 		"rds_postgres":           Supported,
+		"rds_mysql":              Supported,
 		"cockroachdb_serverless": NotYetSupported,
 	},
 	config.KindPersistRedis: {

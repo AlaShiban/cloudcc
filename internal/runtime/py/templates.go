@@ -172,10 +172,14 @@ func render(name string, data any) ([]byte, error) {
 // capability that pulls them in. They are merged into a unit's
 // requirements.txt only when that unit actually uses the capability, so a
 // program with no Redis does not ship a Redis client.
+// Each capability pulls in the library whose type the program declared, so the
+// compiled bundle holds the same client the source did.
 var ShimRequirements = map[string][]string{
 	"base":          {"boto3>=1.34"},
 	"asgi":          {"mangum>=0.17"},
 	"persist_redis": {"redis>=5.0"},
+	"persist_orm":   {"SQLAlchemy>=2.0"},
+	"persist_fs":    {"cloudpathlib[s3]>=0.20"},
 }
 
 // MergeRequirements folds the shim requirements into an existing

@@ -1,4 +1,13 @@
-"""Relational database handle backed by RDS."""
+"""Relational database backed by RDS.
+
+``connect`` returns a real SQLAlchemy ``Engine``. The program declared one by
+calling ``create_engine``, and it gets one back -- pointed at RDS, with the
+managed password spliced in.
+
+The URL delivered in the environment carries no password: AWS manages the
+master credential, and the compiler passes the managed secret's ARN separately
+so nothing sensitive ever sits in an environment variable.
+"""
 
 import json
 import os
@@ -7,40 +16,23 @@ from urllib.parse import quote
 from . import _client
 
 
-def connect(id, models=None):
-    """Return a handle for the database declared as ``persist_orm(id)``.
+def connect(id):
+    """Return a SQLAlchemy Engine connected to the database declared for ``id``."""
+    from sqlalchemy import create_engine
 
-    The URL delivered in the environment carries no password: AWS manages the
-    master credential, and the compiler passes the managed secret's ARN
-    separately so nothing sensitive ever sits in an environment variable.
-    """
+    return create_engine(url(id))
+
+
+def url(id):
+    """The connection URL, with the managed password spliced in."""
     slug = _client.slug(id)
-    url = _client.env("CLOUDCC_ORM_%s_URL" % slug, "persist_orm", id)
+    base = _client.env("CLOUDCC_ORM_%s_URL" % slug, "persist", id)
     arn = os.environ.get("CLOUDCC_ORM_%s_SECRET_ARN" % slug)
-    return OrmSession(id, url, arn)
+    if not arn:
+        return base
 
-
-class OrmSession:
-    def __init__(self, id, url, secret_arn=None):
-        self.id = id
-        self._url = url
-        self._secret_arn = secret_arn
-        self._resolved = None
-
-    def url(self):
-        """The database connection URL, with the managed password spliced in."""
-        if self._resolved is not None:
-            return self._resolved
-        if not self._secret_arn:
-            self._resolved = self._url
-            return self._resolved
-
-        raw = _client.client("secretsmanager").get_secret_value(SecretId=self._secret_arn)
-        password = json.loads(raw["SecretString"])["password"]
-        scheme, rest = self._url.split("://", 1)
-        user, host = rest.split("@", 1)
-        self._resolved = "%s://%s:%s@%s" % (scheme, user, quote(password, safe=""), host)
-        return self._resolved
-
-    def __repr__(self):
-        return "<OrmSession %r (rds)>" % self.id
+    raw = _client.client("secretsmanager").get_secret_value(SecretId=arn)
+    password = json.loads(raw["SecretString"])["password"]
+    scheme, rest = base.split("://", 1)
+    user, host = rest.split("@", 1)
+    return "%s://%s:%s@%s" % (scheme, user, quote(password, safe=""), host)

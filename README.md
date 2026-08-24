@@ -9,8 +9,8 @@ import cloudcompiler as cloudcc
 
 app = FastAPI()
 
-pets = cloudcc.persist_kv("petsByOwner")     # -> DynamoDB
-cloudcc.expose(app, id="pet-api")            # -> API Gateway v2 + Lambda
+pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")  # -> DynamoDB
+cloudcc.expose(app, id="pet-api")                            # -> API Gateway v2 + Lambda
 
 
 @app.get("/pets/{pet_id}")
@@ -38,7 +38,7 @@ compiled/
 ├── topology.mmd / .dot   # architecture diagram, rendered locally
 ├── bin/package.sh        # installs dependencies and zips each unit
 ├── main/                 # your code, rewritten
-│   ├── app.py            #   cloudcc.persist_kv(...) -> _cloudcc_kv.connect(...)
+│   ├── app.py            #   cloudcc.persist(...) -> _cloudcc_kv.connect(...)
 │   ├── _cloudcc_runtime/      #   the injected clients; the only place boto3 appears
 │   ├── cloudcc_lambda_entry.py
 │   └── requirements.txt  #   yours, plus what the shims need
@@ -110,31 +110,60 @@ Everything `cloudcc` understands is a call in the `cloudcompiler` package:
 |---|---|
 | `cloudcc.expose(app, id=...)` | API Gateway v2 (or an ALB) |
 | `cloudcc.execution_unit(id=...)` | Lambda (or ECS Fargate) |
-| `cloudcc.persist_kv(id)` | DynamoDB |
-| `cloudcc.persist_fs(id)` | S3 |
-| `cloudcc.persist_secret(id)` | Secrets Manager |
-| `cloudcc.persist_orm(id)` | RDS Postgres |
-| `cloudcc.persist_redis(id)` | ElastiCache (or MemoryDB) |
-| `cloudcc.pubsub_topic(id)` | SNS + subscriptions |
+| `cloudcc.persist(client, id=...)` | see below — the client decides |
 | `cloudcc.static_unit(id, static_files=...)` | S3 website |
 | `cloudcc.config_value(id, secret=...)` | environment variable, Pulumi stack secret when secret |
 | `cloudcc.embed_assets(pattern)` | files bundled with the declaring unit |
 
+### `persist` — bring your own client
+
+There is one verb for state, and what you hand it is what decides the resource:
+
+```python
+cache = cloudcc.persist(Redis(host="localhost"), id="itemCache")
+db    = cloudcc.persist(create_engine("postgresql://localhost/shop"), id="shopdb")
+docs  = cloudcc.persist(Path("./itemDocs"), id="itemDocs")
+```
+
+| What you pass | Compiles to |
+|---|---|
+| `redis.Redis(...)` | ElastiCache (or MemoryDB) |
+| `sqlalchemy.create_engine("postgresql…")` | RDS Postgres |
+| `sqlalchemy.create_engine("mysql…")` | RDS MySQL |
+| `pathlib.Path(...)` | S3, as a `cloudpathlib.S3Path` |
+| `cloudcc.KVStore()` | DynamoDB |
+| `cloudcc.Topic()` | SNS + subscriptions |
+| `cloudcc.Secret()` | Secrets Manager |
+
+`persist` is **type-preserving**: it returns exactly what you gave it. Uncompiled
+it *is* the object you passed — your program talks to a local Redis, a local
+Postgres, a local directory. Compiled, the same expression becomes a client of
+the same type pointed at AWS. There is no parallel API to learn and none for us
+to keep in step with yours.
+
+Where the ecosystem has no standard client — a key/value store, a topic, a
+secret — the SDK supplies a typed one, wrapped by the same verb.
+
 Two rules follow from the hints being read rather than run:
 
-**Arguments must be literals.** `cloudcc.persist_kv(name)` is a compile error that
-points at the argument, because `cloudcc` would have to run your program to know
-what `name` is.
+**Arguments must be literals.** `cloudcc.persist(client, id=name)` is a compile
+error that points at the argument, because `cloudcc` would have to run your
+program to know what `name` is.
 
-**Your program still runs locally.** Outside the compiler the SDK returns small
-local emulations — a dict for a KV store, a directory for a bucket — so
-`uvicorn app:app` works on your laptop with no cloud account. The SDK never
-imports boto3; that only ever appears in the `_cloudcc_runtime` package injected
-into the compiled copy.
+**Ids are always explicit.** They are deliberately not taken from the variable
+you assign to: renaming a local would otherwise replace a live resource, and
+losing a database to a rename is not a trade worth making for brevity.
+
+**Your program still runs locally.** `uvicorn app:app` works on your laptop with
+no cloud account. The SDK never imports boto3; that only ever appears in the
+`_cloudcc_runtime` package injected into the compiled copy.
 
 ## Configuration
 
-`cloudcc.yaml` decides every type. Nothing is inferred from the shape of your code.
+`cloudcc.yaml` has the final say on every type. The client your program reached
+for is the weakest layer — a Redis client asks for ElastiCache — so an explicit
+entry here still wins, and moving to MemoryDB stays a configuration change
+rather than a code change.
 
 ```yaml
 app: petstore
