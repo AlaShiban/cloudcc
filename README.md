@@ -203,3 +203,5 @@ up in the topology, and `cc` says so.
   add a capability or a resource type.
 - [`docs/testing.md`](docs/testing.md) — the test pyramid and the
   capability-by-capability support matrix.
+- [`docs/decisions.md`](docs/decisions.md) — where the implementation departed
+  from its brief, and why.

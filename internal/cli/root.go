@@ -3,7 +3,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -63,6 +62,12 @@ func NewRootCommand() *cobra.Command {
 func Execute(args []string) int {
 	root := NewRootCommand()
 	root.SetArgs(args)
+	return execute(root)
+}
+
+// execute runs a prepared command tree, reporting failures through the
+// command's own error stream so tests observe exactly what a user would.
+func execute(root *cobra.Command) int {
 	err := root.Execute()
 	if err == nil {
 		return ExitOK
@@ -73,7 +78,7 @@ func Execute(args []string) int {
 		code = ee.code
 		err = ee.err
 	}
-	fmt.Fprintf(os.Stderr, "cc: %v\n", err)
+	fmt.Fprintf(root.ErrOrStderr(), "cc: %v\n", err)
 	return code
 }
 

@@ -14,19 +14,6 @@ const VPCID = "network"
 // availability zone going away.
 const subnetCount = 2
 
-// vpcNeeded reports whether anything in the program requires a VPC.
-//
-// Lambda deliberately does not: putting a function in a VPC costs cold-start
-// time and buys nothing unless it must reach a private resource. Only the
-// types that genuinely cannot exist outside one pull a VPC in.
-func (r *Resolver) vpcNeeded() bool {
-	var types []string
-	for _, in := range r.Program.Intents() {
-		types = append(types, in.Config().Type)
-	}
-	return NeedsVPC(types)
-}
-
 // network creates the VPC and its public subnets, once, on demand.
 func (r *Resolver) network() {
 	vpcKey := ir.Key{Kind: KindVPC, ID: VPCID}
