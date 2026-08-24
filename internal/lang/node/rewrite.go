@@ -34,9 +34,21 @@ var shims = map[string]shimTarget{
 	config.KindPersistKV:     {Module: "kv", Alias: "_cloudccKv"},
 	config.KindPersistFS:     {Module: "fs", Alias: "_cloudccFs"},
 	config.KindPersistSecret: {Module: "secret", Alias: "_cloudccSecret"},
-	config.KindPersistORM:    {Module: "orm", Alias: "_cloudccOrm"},
-	config.KindPersistRedis:  {Module: "redis", Alias: "_cloudccRedis"},
 	config.KindPubSub:        {Module: "pubsub", Alias: "_cloudccPubsub"},
+}
+
+// libraryShims are the capabilities where the client library, not the
+// capability, picks the module.
+//
+// Each of these modules imports exactly one package. That is what lets the
+// bundler pull in ioredis or node-redis but never both, and it is why connect
+// can stay synchronous: a single static import needs no await, and every one
+// of these libraries connects lazily.
+var libraryShims = map[string]shimTarget{
+	sdkdetect.LibIORedis:   {Module: "redis_ioredis", Alias: "_cloudccRedis"},
+	sdkdetect.LibNodeRedis: {Module: "redis_node", Alias: "_cloudccRedis"},
+	sdkdetect.LibPg:        {Module: "orm_pg", Alias: "_cloudccOrm"},
+	sdkdetect.LibKnex:      {Module: "orm_knex", Alias: "_cloudccOrm"},
 }
 
 // verbShims maps the verbs that name their own capability.
@@ -54,13 +66,38 @@ func shimFor(h sdkdetect.Hint) (shimTarget, bool) {
 		target, ok := verbShims[h.Func]
 		return target, ok
 	}
-	target, ok := shims[h.Capability]
+	// A declared library picks the module; the capabilities this SDK supplies
+	// a class for have no library and fall back to one module each.
+	target, ok := libraryShims[h.ClientLibrary]
 	if !ok {
-		return shimTarget{}, false
+		if target, ok = shims[h.Capability]; !ok {
+			return shimTarget{}, false
+		}
 	}
+	// Every store connects the same way: by id, returning a client of the same
+	// type the program declared.
 	target.Call = "connect"
 	target.Args = []string{"id"}
 	return target, true
+}
+
+// withLibrary returns h with its client library exposed as an argument, so the
+// generic argument renderer emits it without needing a special case.
+//
+// The map is copied rather than written through: hints are shared between the
+// plugins that read them, and a rewrite quietly editing one would be a bug
+// found a long way from here.
+func withLibrary(h sdkdetect.Hint) sdkdetect.Hint {
+	if h.Func != sdkdetect.FnPersist || h.ClientLibrary == "" {
+		return h
+	}
+	args := make(map[string]any, len(h.Args)+1)
+	for k, v := range h.Args {
+		args[k] = v
+	}
+	args["library"] = h.ClientLibrary
+	h.Args = args
+	return h
 }
 
 // rewrite replaces every SDK hint call with its runtime equivalent and removes
@@ -103,7 +140,7 @@ func rewrite(f *source.File, hints []sdkdetect.Hint, esm bool) error {
 			continue
 		}
 		needed[target.Alias] = target.Module
-		splices = append(splices, splice{h.Span[0], h.Span[1], renderCall(target, h)})
+		splices = append(splices, splice{h.Span[0], h.Span[1], renderCall(target, withLibrary(h))})
 	}
 
 	for _, span := range imp.spans {

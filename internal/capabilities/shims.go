@@ -130,6 +130,7 @@ func (p *ShimsPlugin) injectRuntime(ctx *compiler.Context) error {
 		generated, err := front.UnitFiles(unit, lang.UnitOptions{
 			Manifest:       p.manifest(ctx, front),
 			Capabilities:   p.capabilities(ctx, unit),
+			Libraries:      p.libraries(ctx, unit),
 			Container:      container,
 			UserDockerfile: unit.DockerfileProvided,
 		})
@@ -165,6 +166,23 @@ func (p *ShimsPlugin) capabilities(ctx *compiler.Context, unit *ir.ExecUnit) []s
 	seen := map[string]bool{}
 	for _, e := range ctx.Graph.EdgesFrom(unit.Key(), ir.EdgeUses) {
 		seen[e.To.Kind] = true
+	}
+	return config.SortedKeys(seen)
+}
+
+// libraries returns the client libraries a unit's stores declared, sorted. It
+// is what decides the exact package a bundle carries: persist_redis alone does
+// not say whether the program reached for ioredis or node-redis.
+func (p *ShimsPlugin) libraries(ctx *compiler.Context, unit *ir.ExecUnit) []string {
+	seen := map[string]bool{}
+	for _, e := range ctx.Graph.EdgesFrom(unit.Key(), ir.EdgeUses) {
+		intent, ok := ctx.Graph.Intent(e.To)
+		if !ok {
+			continue
+		}
+		if store, isStore := intent.(*ir.Persist); isStore && store.Library != "" {
+			seen[store.Library] = true
+		}
 	}
 	return config.SortedKeys(seen)
 }

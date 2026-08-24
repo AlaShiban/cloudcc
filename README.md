@@ -128,6 +128,7 @@ docs  = cloudcc.persist(Path("./itemDocs"), id="itemDocs")
 | What you pass | Compiles to |
 |---|---|
 | `redis.Redis(...)` | ElastiCache (or MemoryDB) |
+| `sqlalchemy.create_async_engine(...)` | RDS, as an `AsyncEngine` |
 | `sqlalchemy.create_engine("postgresql…")` | RDS Postgres |
 | `sqlalchemy.create_engine("mysql…")` | RDS MySQL |
 | `pathlib.Path(...)` | S3, as a `cloudpathlib.S3Path` |

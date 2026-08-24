@@ -126,10 +126,16 @@ type UnitOptions struct {
 	Manifest []byte
 	// ManifestPath is where that manifest came from, for diagnostics.
 	ManifestPath string
-	// Capabilities are the capability kinds this unit uses, sorted. A
-	// frontend adds the client library for each, so a bundle carries the same
-	// client the source declared and nothing it does not.
+	// Capabilities are the capability kinds this unit uses, sorted.
 	Capabilities []string
+	// Libraries are the client libraries this unit's stores declared, sorted.
+	//
+	// This is finer-grained than Capabilities on purpose: two Redis libraries
+	// are both persist_redis but are different packages with different APIs,
+	// so a program using ioredis must not be shipped node-redis. A frontend
+	// adds the package for each, and a bundle carries the same client the
+	// source declared and nothing it does not.
+	Libraries []string
 	// Container reports whether the unit is deployed as an image.
 	Container bool
 	// UserDockerfile reports that the user supplied their own build file, in

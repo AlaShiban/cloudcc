@@ -66,10 +66,16 @@ func shimFor(h sdkdetect.Hint) (shimTarget, bool) {
 	if !ok {
 		return shimTarget{}, false
 	}
-	// Every store connects the same way: by id, returning a client of the
-	// same type the program declared.
 	target.Call = "connect"
 	target.Args = []string{"id"}
+	// The relational shim is the one that varies on the library: a program
+	// that called create_async_engine must get an AsyncEngine back, and
+	// handing it the synchronous one would fail on the first `async with`.
+	// The other stores have one implementation each, so naming it would be
+	// noise in the generated source.
+	if h.Capability == config.KindPersistORM {
+		target.Args = append(target.Args, "library")
+	}
 	return target, true
 }
 
@@ -109,7 +115,7 @@ func rewrite(f *source.File, hints []sdkdetect.Hint) error {
 			continue
 		}
 		needed[target.Alias] = target.Module
-		splices = append(splices, splice{h.Span[0], h.Span[1], renderCall(target, h)})
+		splices = append(splices, splice{h.Span[0], h.Span[1], renderCall(target, withLibrary(h))})
 	}
 
 	// The SDK is compile-time only and is not installed in the bundle, so its
@@ -144,6 +150,25 @@ func rewrite(f *source.File, hints []sdkdetect.Hint) error {
 // renderCall builds the shim call that replaces one hint. The first declared
 // argument is passed positionally and the rest by keyword, which keeps the
 // generated call readable and immune to an omitted optional in the middle.
+// withLibrary returns h with its client library exposed as an argument, so the
+// generic argument renderer emits it without needing a special case.
+//
+// The map is copied rather than written through: hints are shared between the
+// plugins that read them, and a rewrite quietly editing one would be a bug
+// found a long way from here.
+func withLibrary(h sdkdetect.Hint) sdkdetect.Hint {
+	if h.Func != sdkdetect.FnPersist || h.ClientLibrary == "" {
+		return h
+	}
+	args := make(map[string]any, len(h.Args)+1)
+	for k, v := range h.Args {
+		args[k] = v
+	}
+	args["library"] = h.ClientLibrary
+	h.Args = args
+	return h
+}
+
 func renderCall(target shimTarget, h sdkdetect.Hint) string {
 	var args []string
 	for i, name := range target.Args {

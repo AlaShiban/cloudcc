@@ -150,8 +150,8 @@ func (Frontend) UnitFiles(u *ir.ExecUnit, opts lang.UnitOptions) (map[string][]b
 	if u.ASGIApp != "" && !opts.Container {
 		add = append(add, runtimepy.ShimRequirements["asgi"]...)
 	}
-	for _, capability := range opts.Capabilities {
-		add = append(add, runtimepy.ShimRequirements[capability]...)
+	for _, library := range opts.Libraries {
+		add = append(add, runtimepy.ShimRequirements[library]...)
 	}
 	out["requirements.txt"] = runtimepy.MergeRequirements(opts.Manifest, add)
 	return out, nil

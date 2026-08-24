@@ -171,6 +171,7 @@ var clientShapes = []string{
 	"pathlib.Path(",
 	"create_engine(",
 	"sqlalchemy.create_engine(",
+	"create_async_engine(",
 	"postgresql://",
 	"postgresql+psycopg://",
 	"mysql://",

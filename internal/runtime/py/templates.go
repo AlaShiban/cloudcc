@@ -175,11 +175,15 @@ func render(name string, data any) ([]byte, error) {
 // Each capability pulls in the library whose type the program declared, so the
 // compiled bundle holds the same client the source did.
 var ShimRequirements = map[string][]string{
-	"base":          {"boto3>=1.34"},
-	"asgi":          {"mangum>=0.17"},
-	"persist_redis": {"redis>=5.0"},
-	"persist_orm":   {"SQLAlchemy>=2.0"},
-	"persist_fs":    {"cloudpathlib[s3]>=0.20"},
+	"base": {"boto3>=1.34"},
+	"asgi": {"mangum>=0.17"},
+	// Keyed by client library rather than by capability, because the capability
+	// does not say enough: an async SQLAlchemy engine needs an async driver,
+	// and a bundle without one fails on its first connection.
+	"redis-py":         {"redis>=5.0"},
+	"sqlalchemy":       {"SQLAlchemy>=2.0"},
+	"sqlalchemy-async": {"SQLAlchemy[asyncio]>=2.0", "asyncpg>=0.30"},
+	"pathlib":          {"cloudpathlib[s3]>=0.20"},
 }
 
 // MergeRequirements folds the shim requirements into an existing

@@ -408,12 +408,19 @@ func (m *pyModule) clientExpr(rng *rand.Rand, kind string) string {
 			"mysql+pymysql://localhost/app",
 			"mysql://localhost/app",
 		}[rng.Intn(4)]
-		if rng.Intn(2) == 0 {
+		switch rng.Intn(3) {
+		case 0:
 			m.importStd("from sqlalchemy import create_engine")
 			return "create_engine(" + m.quote(url) + ")"
+		case 1:
+			m.importStd("import sqlalchemy")
+			return "sqlalchemy.create_engine(" + m.quote(url) + ")"
+		default:
+			// An async engine is a different type with a different driver, and
+			// the shim has to hand back an AsyncEngine to match.
+			m.importStd("from sqlalchemy.ext.asyncio import create_async_engine")
+			return "create_async_engine(" + m.quote(url) + ")"
 		}
-		m.importStd("import sqlalchemy")
-		return "sqlalchemy.create_engine(" + m.quote(url) + ")"
 
 	case "persist_redis":
 		switch rng.Intn(3) {
