@@ -163,7 +163,7 @@ def y():
     return {}
 `,
 	})
-	if !containsSubstr(diagStrings(ctx), "APIRouter") {
+	if !containsSubstr(diagStrings(ctx), "routes registered on a router are not detected") {
 		t.Errorf("expected an APIRouter warning, got %v", diagStrings(ctx))
 	}
 }

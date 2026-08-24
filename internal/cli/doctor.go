@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/cloudcompiler/cloudcc/internal/lang"
 	"github.com/spf13/cobra"
 )
 
@@ -40,11 +42,26 @@ type tool struct {
 var toolchain = []tool{
 	{name: "go", binary: "go", required: false, brew: "brew install go", why: "only needed to build cloudcc from source"},
 	{name: "pulumi", binary: "pulumi", required: true, brew: "brew install pulumi", why: "runs the generated infrastructure project"},
-	{name: "uv", binary: "uv", required: true, brew: "brew install uv", why: "installs Python dependencies when packaging execution units"},
 	{name: "node", binary: "node", required: false, brew: "brew install node", why: "type-checks the generated TypeScript"},
 	{name: "dot", binary: "dot", required: false, brew: "brew install graphviz", why: "renders the topology diagram as PNG"},
 	{name: "docker", binary: "docker", required: false, brew: "brew install --cask docker", why: "runs the AWS emulator and builds container images"},
 	{name: "aws", binary: "aws", required: false, brew: "brew install awscli", why: "used by the integration tests to assert provisioned resources"},
+}
+
+// allTools is the fixed checklist plus whatever each registered language
+// frontend needs, so adding a language does not mean editing this file.
+func allTools() []tool {
+	out := append([]tool(nil), toolchain...)
+	for _, front := range lang.All() {
+		for _, t := range front.Tools() {
+			out = append(out, tool{
+				name: t.Name, binary: t.Binary, required: t.Required,
+				brew: t.Install, why: t.Why,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
 }
 
 func newDoctorCommand() *cobra.Command {
@@ -56,7 +73,7 @@ func newDoctorCommand() *cobra.Command {
 			w := cmd.OutOrStdout()
 			missingRequired := 0
 
-			for _, t := range toolchain {
+			for _, t := range allTools() {
 				path, err := exec.LookPath(t.binary)
 				switch {
 				case err == nil:

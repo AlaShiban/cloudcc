@@ -2,12 +2,12 @@ package capabilities
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/cloudcompiler/cloudcc/internal/compiler"
 	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/diag"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/lang"
 )
 
 // DefaultUnitID is the single unit every program gets when it declares none.
@@ -73,14 +73,25 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 		unit := &ir.ExecUnit{Entrypoints: entrypoints[id]}
 		unit.ID = id
 
+		// The unit's language comes from its entrypoint, so a program can
+		// hold units written in different languages.
+		front, ok := lang.For(entrypoints[id][0])
+		if !ok {
+			ctx.Diags.Errorf(diag.Position{File: entrypoints[id][0]}, config.KindExecutionUnit,
+				"no language frontend claims this file")
+			continue
+		}
+		ctx.Language[id] = front.Name()
+		unit.Language = front.Name()
+
 		var files []string
 		for _, entry := range entrypoints[id] {
-			closure, unresolved := Closure(ctx.Files, entry, ctx.ClaimedFiles)
-			files = union(files, closure)
+			reached, unresolved := front.Closure(ctx.Files, entry, ctx.ClaimedFiles)
+			files = union(files, reached)
 			for _, imp := range unresolved {
 				ctx.Diags.Warnf(ctx.Pos(entry, imp.Offset), config.KindExecutionUnit,
-					"relative import %q could not be resolved to a file in the source tree; "+
-						"it will not be bundled into execution unit %q", renderImport(imp), id)
+					"the import %q could not be resolved to a file in the source tree; "+
+						"it will not be bundled into execution unit %q", imp.Rendered, id)
 			}
 		}
 		// Everything that is not Python source -- templates, data files,
@@ -113,69 +124,23 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 	return nil
 }
 
-// defaultEntrypoint picks the entry module for the implicit single unit.
-//
-// The module that exposes an ASGI app wins outright: it is the one the runtime
-// has to import, and a program that exposes something has told us plainly
-// where it starts. Only when nothing is exposed does this fall back to
-// convention and then to layout.
-//
-// The fallback deliberately skips empty files. A package's __init__.py is
-// often empty and often the shallowest Python file in the tree, so a naive
-// "shallowest wins" rule picks it and produces a unit containing nothing --
-// which is how this was found.
+// defaultEntrypoint picks the entry module for the implicit single unit by
+// asking each frontend for its candidates, best first. Which module a language
+// considers a sensible entry is a property of that language.
 func (p *ExecUnitsPlugin) defaultEntrypoint(ctx *compiler.Context) string {
-	available := func(path string) bool {
-		if _, claimed := ctx.ClaimedFiles[path]; claimed {
-			return false
-		}
-		f, ok := ctx.Files.Get(path)
-		return ok && f.IsPython()
-	}
-
-	// 1. A module that exposes an application.
+	var exposedIn []string
 	for _, h := range ctx.HintsFor(config.KindExpose) {
-		if available(h.File) {
-			return h.File
+		exposedIn = append(exposedIn, h.File)
+	}
+	for _, front := range lang.All() {
+		if candidates := front.EntrypointCandidates(ctx.Files, exposedIn, ctx.ClaimedFiles); len(candidates) > 0 {
+			return candidates[0]
 		}
 	}
-
-	var candidates []string
-	for _, f := range ctx.Files.PythonFiles() {
-		if available(f.Path) {
-			candidates = append(candidates, f.Path)
-		}
-	}
-	if len(candidates) == 0 {
-		return ""
-	}
-
-	// 2. A conventionally named module at the root.
-	for _, preferred := range []string{"app.py", "main.py"} {
-		for _, c := range candidates {
-			if c == preferred {
-				return c
-			}
-		}
-	}
-
-	// 3. The shallowest module with something in it, alphabetically.
-	sort.Slice(candidates, func(i, j int) bool {
-		di, dj := strings.Count(candidates[i], "/"), strings.Count(candidates[j], "/")
-		if di != dj {
-			return di < dj
-		}
-		return candidates[i] < candidates[j]
-	})
-	for _, c := range candidates {
-		if f, ok := ctx.Files.Get(c); ok && len(strings.TrimSpace(string(f.Content))) > 0 {
-			return c
-		}
-	}
-	return candidates[0]
+	return ""
 }
 
-// sharedAssets returns every non-Python file that no capability has claimed.
+// sharedAssets returns every non-source file that no capability has claimed.
 //
 // A file claimed by cloudcc.embed_assets is deliberately excluded: claiming it is
 // how a program says which unit owns it, so shipping it to every unit as well
@@ -189,7 +154,7 @@ func (p *ExecUnitsPlugin) sharedAssets(ctx *compiler.Context) []string {
 	}
 	var out []string
 	for _, f := range ctx.Files.Files() {
-		if f.IsPython() || embedded[f.Path] {
+		if f.Parsed() || embedded[f.Path] {
 			continue
 		}
 		if _, claimed := ctx.ClaimedFiles[f.Path]; claimed {
@@ -203,7 +168,7 @@ func (p *ExecUnitsPlugin) sharedAssets(ctx *compiler.Context) []string {
 // warnUnreachable reports Python files no unit reached. They are pruned from
 // the output, so silence here would mean silently dropping code.
 func (p *ExecUnitsPlugin) warnUnreachable(ctx *compiler.Context, assigned map[string]bool) {
-	for _, f := range ctx.Files.PythonFiles() {
+	for _, f := range ctx.Files.ParsedFiles() {
 		if assigned[f.Path] {
 			continue
 		}
@@ -213,18 +178,6 @@ func (p *ExecUnitsPlugin) warnUnreachable(ctx *compiler.Context, assigned map[st
 		ctx.Diags.Warnf(diag.Position{File: f.Path}, config.KindExecutionUnit,
 			"no execution unit imports this file; it will not be deployed")
 	}
-}
-
-func renderImport(imp pyImport) string {
-	var b strings.Builder
-	b.WriteString("from ")
-	b.WriteString(strings.Repeat(".", imp.Level))
-	b.WriteString(imp.Module)
-	if len(imp.Names) > 0 {
-		b.WriteString(" import ")
-		b.WriteString(strings.Join(imp.Names, ", "))
-	}
-	return b.String()
 }
 
 func findEntry(entrypoints map[string][]string, file string) (string, bool) {

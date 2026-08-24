@@ -35,6 +35,13 @@ type Options struct {
 	SkipPaths []string
 	// MaxFileSize skips files larger than this many bytes (0 = no limit).
 	MaxFileSize int64
+	// Parse is called for every file read. It decides whether the file is
+	// source in some language and parses it if so. A nil Parse leaves every
+	// file unparsed.
+	//
+	// It is a callback rather than a registry lookup so that this package
+	// stays independent of the frontends, which need to read files.
+	Parse func(*File) error
 }
 
 // Walk reads Root into a Set, parsing every .py file.
@@ -92,8 +99,8 @@ func Walk(opts Options) (*Set, error) {
 			return fmt.Errorf("reading %s: %w", rel, rerr)
 		}
 		f := &File{Path: rel, Content: content, SHA256: Fingerprint(content)}
-		if strings.HasSuffix(rel, ".py") {
-			if perr := f.ParsePython(); perr != nil {
+		if opts.Parse != nil {
+			if perr := opts.Parse(f); perr != nil {
 				return perr
 			}
 		}
@@ -106,6 +113,7 @@ func Walk(opts Options) (*Set, error) {
 	}
 
 	set.RequirementsPath, set.PyProjectPath = findDependencyManifests(set, root)
+	set.PackageJSONPath = shallowestNamed(set, "package.json")
 	return set, nil
 }
 
@@ -157,6 +165,20 @@ func findDependencyManifests(set *Set, root string) (requirements, pyproject str
 		}
 	}
 	return
+}
+
+// shallowestNamed returns the least deeply nested file with a given name.
+func shallowestNamed(set *Set, name string) string {
+	best, bestDepth := "", -1
+	for _, p := range set.Paths() {
+		if filepath.Base(p) != name {
+			continue
+		}
+		if depth := strings.Count(p, "/"); bestDepth < 0 || depth < bestDepth {
+			best, bestDepth = p, depth
+		}
+	}
+	return best
 }
 
 func fileExists(p string) bool {

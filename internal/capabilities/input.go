@@ -6,6 +6,7 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/compiler"
 	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/lang"
 	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 	"github.com/cloudcompiler/cloudcc/internal/source"
 )
@@ -39,6 +40,15 @@ func (p *InputPlugin) Transform(ctx *compiler.Context) error {
 	set, err := source.Walk(source.Options{
 		Root:      ctx.SrcRoot,
 		SkipPaths: []string{ctx.Config.OutDir, config.DefaultOutDir},
+		// Which files are source, and how to read them, is the frontends'
+		// business; this package only walks the tree.
+		Parse: func(f *source.File) error {
+			front, ok := lang.For(f.Path)
+			if !ok {
+				return nil
+			}
+			return front.Parse(f)
+		},
 	})
 	if err != nil {
 		return err
@@ -53,10 +63,10 @@ func (p *InputPlugin) Transform(ctx *compiler.Context) error {
 	if set.Len() == 0 {
 		return fmt.Errorf("no source files found under %s", ctx.SrcRoot)
 	}
-	for _, f := range set.PythonFiles() {
+	for _, f := range set.ParsedFiles() {
 		if f.HasParseError() {
 			ctx.Diags.Warnf(diag.Position{File: f.Path},
-				"input", "the file could not be fully parsed as Python; hints in it may be missed")
+				"input", "the file could not be fully parsed; hints in it may be missed")
 		}
 	}
 	return nil
@@ -72,8 +82,12 @@ func NewDetectPlugin() *DetectPlugin {
 
 func (p *DetectPlugin) Transform(ctx *compiler.Context) error {
 	var hints []sdkdetect.Hint
-	for _, f := range ctx.Files.PythonFiles() {
-		hints = append(hints, sdkdetect.Detect(f, ctx.Diags)...)
+	for _, f := range ctx.Files.ParsedFiles() {
+		front, ok := lang.For(f.Path)
+		if !ok {
+			continue
+		}
+		hints = append(hints, front.Detect(f, ctx.Diags)...)
 	}
 	// PythonFiles is sorted by path and Detect sorts by offset, so the result
 	// is already in a stable order.

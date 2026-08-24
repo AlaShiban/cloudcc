@@ -1,0 +1,20 @@
+echo "packaging execution unit {{.ID}}"
+unit_build="$build/{{.ID}}"
+mkdir -p "$unit_build"
+cp -R "{{.ID}}/." "$unit_build/"
+
+if [ -s "{{.ID}}/requirements.txt" ]; then
+  uv pip install \
+    --quiet \
+    --target "$unit_build" \
+    --python-version "{{.PythonVersion}}" \
+    --only-binary=:all: \
+    -r "{{.ID}}/requirements.txt"
+fi
+
+# Deterministic zip: fixed timestamps and sorted entries, so an unchanged unit
+# produces a byte-identical artefact and Pulumi sees no diff.
+find "$unit_build" -name '__pycache__' -type d -prune -exec rm -rf {} +
+find "$unit_build" -exec touch -t 198001010000 {} +
+( cd "$unit_build" && find . -type f | LC_ALL=C sort | zip -q -X -@ "../{{.ID}}.zip" )
+echo "  wrote $build/{{.ID}}.zip"

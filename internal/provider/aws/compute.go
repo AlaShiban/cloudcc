@@ -2,7 +2,6 @@ package aws
 
 import (
 	"fmt"
-	"path"
 	"sort"
 
 	"github.com/cloudcompiler/cloudcc/internal/config"
@@ -59,10 +58,10 @@ func (r *Resolver) lambda(u *ir.ExecUnit) error {
 
 	fn := ir.NewResource(KindLambda, u.ID, "aws.lambda.Function", map[string]any{
 		"name":    fnName,
-		"runtime": LambdaRuntime,
+		"runtime": u.Runtime,
 		"handler": u.Handler,
 		"role":    ir.Ref{Key: roleKey, Prop: "arn"},
-		"code":    ir.Raw(fmt.Sprintf("new pulumi.asset.FileArchive(%q)", path.Join(BuildDir, u.ID+".zip"))),
+		"code":    ir.Raw(fmt.Sprintf("new pulumi.asset.FileArchive(%q)", u.Artifact)),
 		"timeout": 30,
 		// 512 MB is enough for a FastAPI app under Mangum and keeps cold
 		// starts short; raise it through pulumi_params if a unit needs more.

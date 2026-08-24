@@ -20,12 +20,15 @@ type File struct {
 	Content []byte
 	SHA256  string
 
-	// tree is the parsed tree-sitter tree for Python files, nil otherwise.
-	tree *pyTree
+	// tree is the syntax tree, nil for files no frontend claimed.
+	tree *parsed
 }
 
+// Parsed reports whether a frontend claimed and parsed this file.
+func (f *File) Parsed() bool { return f.tree != nil }
+
 // IsPython reports whether the file was parsed as Python.
-func (f *File) IsPython() bool { return f.tree != nil }
+func (f *File) IsPython() bool { return f.Language() == "python" }
 
 // Fingerprint computes the SHA-256 of b as lowercase hex.
 func Fingerprint(b []byte) string {
@@ -43,6 +46,9 @@ type Set struct {
 	// PyProjectPath is the relative path of the discovered pyproject.toml, if
 	// any.
 	PyProjectPath string
+	// PackageJSONPath is the relative path of the discovered package.json, if
+	// any.
+	PackageJSONPath string
 
 	files map[string]*File
 }
@@ -97,22 +103,48 @@ func (s *Set) Files() []*File {
 	return out
 }
 
-// PythonFiles returns the parsed Python files in sorted-path order.
-func (s *Set) PythonFiles() []*File {
+// ParsedFiles returns every file a frontend claimed, in sorted-path order.
+func (s *Set) ParsedFiles() []*File {
 	var out []*File
 	for _, f := range s.Files() {
-		if f.IsPython() {
+		if f.Parsed() {
 			out = append(out, f)
 		}
 	}
 	return out
 }
 
+// FilesIn returns the parsed files belonging to one language, sorted.
+func (s *Set) FilesIn(language string) []*File {
+	var out []*File
+	for _, f := range s.Files() {
+		if f.Language() == language {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// PythonFiles returns the parsed Python files in sorted-path order.
+func (s *Set) PythonFiles() []*File { return s.FilesIn("python") }
+
 // Close releases every parse tree in the set.
 func (s *Set) Close() {
 	for _, f := range s.files {
 		f.close()
 	}
+}
+
+// ManifestPath returns the dependency manifest for a language, empty when the
+// program has none.
+func (s *Set) ManifestPath(language string) string {
+	switch language {
+	case "python":
+		return s.RequirementsPath
+	case "node":
+		return s.PackageJSONPath
+	}
+	return ""
 }
 
 // ModuleName converts a relative file path to its Python dotted module name.

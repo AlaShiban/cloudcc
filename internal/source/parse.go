@@ -8,11 +8,16 @@ import (
 	tspython "github.com/tree-sitter/tree-sitter-python/bindings/go"
 )
 
-// pyTree owns a tree-sitter parse tree. It is a struct rather than a bare
+// parsed owns a tree-sitter parse tree. It is a struct rather than a bare
 // *ts.Tree so File can carry it without exposing the cgo types to callers that
 // do not need them.
-type pyTree struct {
+type parsed struct {
 	tree *ts.Tree
+	// language is the tree-sitter grammar the tree was built with, kept so a
+	// reparse after a rewrite uses the same one.
+	language *ts.Language
+	// name is the frontend that owns this file, e.g. "python".
+	name string
 }
 
 func (f *File) close() {
@@ -20,6 +25,32 @@ func (f *File) close() {
 		f.tree.tree.Close()
 		f.tree.tree = nil
 	}
+}
+
+// Language returns the frontend that parsed this file, empty when unparsed.
+func (f *File) Language() string {
+	if f.tree == nil {
+		return ""
+	}
+	return f.tree.name
+}
+
+// Parse builds a syntax tree for the file with the given grammar. The language
+// name is recorded so a later reparse -- after the shim rewrite splices the
+// bytes -- uses the same grammar without the caller having to remember.
+func (f *File) Parse(name string, language *ts.Language) error {
+	p := ts.NewParser()
+	defer p.Close()
+	if err := p.SetLanguage(language); err != nil {
+		return fmt.Errorf("configuring the %s grammar: %w", name, err)
+	}
+	tree := p.Parse(f.Content, nil)
+	if tree == nil {
+		return fmt.Errorf("%s: the %s parser returned no tree", f.Path, name)
+	}
+	f.close()
+	f.tree = &parsed{tree: tree, language: language, name: name}
+	return nil
 }
 
 var (
@@ -33,21 +64,9 @@ func PythonLanguage() *ts.Language {
 	return pyLang
 }
 
-// ParsePython parses src as Python and stores the tree on f.
-func (f *File) ParsePython() error {
-	p := ts.NewParser()
-	defer p.Close()
-	if err := p.SetLanguage(PythonLanguage()); err != nil {
-		return fmt.Errorf("configuring the Python grammar: %w", err)
-	}
-	tree := p.Parse(f.Content, nil)
-	if tree == nil {
-		return fmt.Errorf("%s: the Python parser returned no tree", f.Path)
-	}
-	f.close()
-	f.tree = &pyTree{tree: tree}
-	return nil
-}
+// ParsePython parses src as Python. It is a convenience for the many tests
+// that build a Python file directly.
+func (f *File) ParsePython() error { return f.Parse("python", PythonLanguage()) }
 
 // Root returns the root node of the file's parse tree.
 func (f *File) Root() *ts.Node {
@@ -58,15 +77,21 @@ func (f *File) Root() *ts.Node {
 }
 
 // SetContent replaces the file's bytes, refreshes its fingerprint, and
-// reparses when the file is Python. Reparsing after a splice keeps the AST
-// consistent with the bytes, which is what makes successive rewrites safe.
+// reparses with whatever grammar built the original tree. Reparsing after a
+// splice keeps the tree consistent with the bytes, which is what makes
+// successive rewrites safe.
 func (f *File) SetContent(b []byte) error {
-	wasPython := f.IsPython()
+	var name string
+	var language *ts.Language
+	if f.tree != nil {
+		name, language = f.tree.name, f.tree.language
+	}
 	f.Content = b
 	f.SHA256 = Fingerprint(b)
-	if wasPython {
-		return f.ParsePython()
+	if language != nil && b != nil {
+		return f.Parse(name, language)
 	}
+	f.close()
 	return nil
 }
 
@@ -120,11 +145,11 @@ func (f *File) Query(q *ts.Query, fn func(captures map[string]*ts.Node)) {
 	}
 }
 
-// MustQuery compiles a query against the Python grammar, panicking on a
-// malformed pattern. Query patterns are compile-time constants, so a failure
-// is always a programming error.
-func MustQuery(pattern string) *ts.Query {
-	q, err := ts.NewQuery(PythonLanguage(), pattern)
+// MustQuery compiles a query against a grammar, panicking on a malformed
+// pattern. Query patterns are compile-time constants, so a failure is always a
+// programming error rather than something to handle.
+func MustQuery(language *ts.Language, pattern string) *ts.Query {
+	q, err := ts.NewQuery(language, pattern)
 	if err != nil {
 		panic(fmt.Sprintf("invalid tree-sitter query %q: %v", pattern, err))
 	}

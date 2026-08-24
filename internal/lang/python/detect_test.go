@@ -1,4 +1,4 @@
-package sdkdetect
+package python
 
 import (
 	"reflect"
@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 	"github.com/cloudcompiler/cloudcc/internal/source"
 )
 
-func detect(t *testing.T, src string) ([]Hint, *diag.Diagnostics) {
+func detect(t *testing.T, src string) ([]sdkdetect.Hint, *diag.Diagnostics) {
 	t.Helper()
 	f := &source.File{Path: "app.py", Content: []byte(src)}
 	if err := f.ParsePython(); err != nil {
@@ -17,7 +18,7 @@ func detect(t *testing.T, src string) ([]Hint, *diag.Diagnostics) {
 	}
 	t.Cleanup(func() { f.SetContent(nil) })
 	var d diag.Diagnostics
-	return Detect(f, &d), &d
+	return detectHints(f, &d), &d
 }
 
 func TestDetectModuleAlias(t *testing.T) {
@@ -32,7 +33,7 @@ pets = cloudcc.persist_kv("petsByOwner")
 		t.Fatalf("got %d hints, want 1: %v", len(hints), hints)
 	}
 	h := hints[0]
-	if h.Func != FnPersistKV || h.Capability != "persist_kv" {
+	if h.Func != sdkdetect.FnPersistKV || h.Capability != "persist_kv" {
 		t.Errorf("func/capability = %q/%q", h.Func, h.Capability)
 	}
 	if h.ID() != "petsByOwner" {
@@ -48,7 +49,7 @@ pets = cloudcc.persist_kv("petsByOwner")
 
 func TestDetectPlainImport(t *testing.T) {
 	hints, _ := detect(t, "import cloudcompiler\nx = cloudcompiler.persist_fs(\"blobs\")\n")
-	if len(hints) != 1 || hints[0].Func != FnPersistFS || hints[0].ID() != "blobs" {
+	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersistFS || hints[0].ID() != "blobs" {
 		t.Fatalf("hints = %v", hints)
 	}
 }
@@ -62,7 +63,7 @@ func TestDetectFromImport(t *testing.T) {
 
 func TestDetectFromImportAliased(t *testing.T) {
 	hints, _ := detect(t, "from cloudcompiler import persist_kv as pkv\npets = pkv(\"a\")\n")
-	if len(hints) != 1 || hints[0].Func != FnPersistKV || hints[0].ID() != "a" {
+	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersistKV || hints[0].ID() != "a" {
 		t.Fatalf("hints = %v", hints)
 	}
 }
@@ -272,7 +273,7 @@ func TestResolveImportsRecordsAlias(t *testing.T) {
 	if err := f.ParsePython(); err != nil {
 		t.Fatal(err)
 	}
-	imp := ResolveImports(f)
+	imp := resolveImports(f)
 	if imp.Alias != "cloudcc" || !imp.Modules["cloudcc"] {
 		t.Errorf("imports = %+v", imp)
 	}
@@ -280,12 +281,12 @@ func TestResolveImportsRecordsAlias(t *testing.T) {
 
 func TestSignaturesCoverEveryFunctionName(t *testing.T) {
 	want := []string{
-		FnConfigValue, FnEmbedAssets, FnExecutionUnit, FnExpose, FnPersistFS,
-		FnPersistKV, FnPersistORM, FnPersistRedis, FnPersistSecret,
-		FnPubSubTopic, FnStaticUnit,
+		sdkdetect.FnConfigValue, sdkdetect.FnEmbedAssets, sdkdetect.FnExecutionUnit, sdkdetect.FnExpose, sdkdetect.FnPersistFS,
+		sdkdetect.FnPersistKV, sdkdetect.FnPersistORM, sdkdetect.FnPersistRedis, sdkdetect.FnPersistSecret,
+		sdkdetect.FnPubSubTopic, sdkdetect.FnStaticUnit,
 	}
-	if got := FunctionNames(); !reflect.DeepEqual(got, want) {
-		t.Errorf("FunctionNames() = %v, want %v", got, want)
+	if got := sdkdetect.FunctionNames(); !reflect.DeepEqual(got, want) {
+		t.Errorf("sdkdetect.FunctionNames() = %v, want %v", got, want)
 	}
 }
 

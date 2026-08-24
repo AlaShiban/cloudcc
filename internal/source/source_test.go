@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
@@ -52,24 +53,33 @@ func TestWalkCollectsAndSkips(t *testing.T) {
 	}
 }
 
-func TestWalkParsesPythonOnly(t *testing.T) {
+// Which files are source is the frontends' business, so Walk parses nothing
+// unless it is told how. This callback stands in for the Python frontend.
+func parsePython(f *File) error {
+	if strings.HasSuffix(f.Path, ".py") {
+		return f.ParsePython()
+	}
+	return nil
+}
+
+func TestWalkParsesWhatItIsToldTo(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app.py":    "import os\n",
 		"notes.txt": "hello",
 	})
-	set, err := Walk(Options{Root: root})
+	set, err := Walk(Options{Root: root, Parse: parsePython})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer set.Close()
 
 	py, _ := set.Get("app.py")
-	if !py.IsPython() || py.Root() == nil {
+	if !py.Parsed() || py.Language() != "python" || py.Root() == nil {
 		t.Error("app.py was not parsed")
 	}
 	txt, _ := set.Get("notes.txt")
-	if txt.IsPython() {
-		t.Error("notes.txt should not be parsed as Python")
+	if txt.Parsed() {
+		t.Error("notes.txt is not source and should not have been parsed")
 	}
 	if got := len(set.PythonFiles()); got != 1 {
 		t.Errorf("PythonFiles() has %d entries, want 1", got)
@@ -164,7 +174,7 @@ func TestQueryFindsCalls(t *testing.T) {
 	}
 	defer f.close()
 
-	q := MustQuery(`(call function: (_) @fn) @call`)
+	q := MustQuery(PythonLanguage(), `(call function: (_) @fn) @call`)
 	defer q.Close()
 
 	var fns []string
@@ -182,5 +192,5 @@ func TestMustQueryPanicsOnBadPattern(t *testing.T) {
 			t.Error("expected a panic for an invalid query")
 		}
 	}()
-	MustQuery(`(this_node_type_does_not_exist)`)
+	MustQuery(PythonLanguage(), `(this_node_type_does_not_exist)`)
 }

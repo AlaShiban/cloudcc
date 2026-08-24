@@ -1,7 +1,7 @@
 {
   "version": 1,
   "app": "kitchen-sink",
-  "fingerprint": "55669ac3f145783c8fdf4c18bd236bce84f0f087c80513cf1b40c97c39cc2218",
+  "fingerprint": "7b3d4207bdf0ce1a5202944cae45445a74294c1566daddd54314c490fc46a8b5",
   "units": [
     "api",
     "reporter"

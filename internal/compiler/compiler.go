@@ -15,6 +15,7 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/diag"
 	"github.com/cloudcompiler/cloudcc/internal/graph"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/lang"
 	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 	"github.com/cloudcompiler/cloudcc/internal/source"
 	"github.com/spf13/afero"
@@ -68,6 +69,10 @@ type Context struct {
 	// the execution-unit closure can leave those files out of compute bundles.
 	ClaimedFiles map[string]string
 
+	// Language maps an execution unit to the frontend that owns it, chosen
+	// from its entrypoint. A program may contain units in different languages.
+	Language map[string]string
+
 	// Notice, when set, reports something worth telling the user that is not a
 	// diagnostic about their code -- an optional tool that was missing, for
 	// instance.
@@ -92,6 +97,7 @@ func NewContext(cfg *config.App, srcRoot string, out afero.Fs) *Context {
 		SrcRoot:      srcRoot,
 		UnitFiles:    map[string][]string{},
 		ClaimedFiles: map[string]string{},
+		Language:     map[string]string{},
 		Embedded:     map[string][]string{},
 	}
 }
@@ -103,6 +109,16 @@ func NewContext(cfg *config.App, srcRoot string, out afero.Fs) *Context {
 // rendering a program that is already known to be wrong -- and doing so only
 // produces a second, confusing error about a decision the first one explains.
 func (c *Context) Failed() bool { return c.Diags.HasErrors() }
+
+// Frontend returns the language frontend that owns an execution unit.
+func (c *Context) Frontend(unit string) (lang.Frontend, bool) {
+	return lang.Get(c.Language[unit])
+}
+
+// FrontendFor returns the frontend that owns a source path.
+func (c *Context) FrontendFor(path string) (lang.Frontend, bool) {
+	return lang.For(path)
+}
 
 // Pos builds a diagnostic position for a byte offset in a source file.
 func (c *Context) Pos(path string, offset int) diag.Position {

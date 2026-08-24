@@ -1,29 +1,12 @@
 package capabilities
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/cloudcompiler/cloudcc/internal/compiler"
 	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
-	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
-	"github.com/cloudcompiler/cloudcc/internal/source"
-	ts "github.com/tree-sitter/go-tree-sitter"
 )
-
-// httpVerbs are the FastAPI/Starlette route decorator methods recognised on an
-// exposed application object.
-var httpVerbs = map[string]string{
-	"get":     "GET",
-	"post":    "POST",
-	"put":     "PUT",
-	"delete":  "DELETE",
-	"patch":   "PATCH",
-	"head":    "HEAD",
-	"options": "OPTIONS",
-	"trace":   "TRACE",
-}
 
 // ExposePlugin turns cloudcc.expose hints into gateway intents and discovers the
 // routes declared on the exposed application object.
@@ -60,6 +43,12 @@ func (p *ExposePlugin) Transform(ctx *compiler.Context) error {
 			continue
 		}
 		unitID := units[0]
+		front, ok := ctx.Frontend(unitID)
+		if !ok {
+			ctx.Diags.Errorf(ctx.HintPos(h), config.KindExpose,
+				"execution unit %q has no language frontend", unitID)
+			continue
+		}
 
 		gw := &ir.Expose{
 			Target: orDefault(h.Str("target"), "public"),
@@ -73,12 +62,16 @@ func (p *ExposePlugin) Transform(ctx *compiler.Context) error {
 			continue
 		}
 
-		gw.Routes = p.routes(ctx, ctx.UnitFiles[unitID], appVar)
+		gw.Routes = front.Routes(ctx.Files, ctx.UnitFiles[unitID], appVar)
 		if len(gw.Routes) == 0 {
 			ctx.Diags.Warnf(ctx.HintPos(h), config.KindExpose,
 				"no routes found on %q; the gateway will forward every path to the unit anyway", appVar)
 		}
-		p.warnAboutRouters(ctx, ctx.UnitFiles[unitID], h.File)
+		if file, offset, found := front.RouterWarning(ctx.Files, ctx.UnitFiles[unitID]); found {
+			ctx.Diags.Warnf(ctx.Pos(file, offset), config.KindExpose,
+				"routes registered on a router are not detected; "+
+					"they will still be served, but will not appear in the topology")
+		}
 
 		cfg := ctx.Config.Lookup(config.KindExpose, id)
 		if err := gw.Configure(cfg); err != nil {
@@ -97,92 +90,6 @@ func (p *ExposePlugin) Transform(ctx *compiler.Context) error {
 		}
 	}
 	return nil
-}
-
-var decoratorQuery = source.MustQuery(`
-  (decorated_definition
-    (decorator
-      (call
-        function: (attribute object: (identifier) @obj attribute: (identifier) @verb)
-        arguments: (argument_list) @args)) @decorator)
-`)
-
-// routes finds @<app>.<verb>("/path") decorators across a unit's files.
-func (p *ExposePlugin) routes(ctx *compiler.Context, files []string, appVar string) []ir.Route {
-	seen := map[string]bool{}
-	var out []ir.Route
-	for _, path := range files {
-		f, ok := ctx.Files.Get(path)
-		if !ok || !f.IsPython() {
-			continue
-		}
-		f.Query(decoratorQuery, func(caps map[string]*ts.Node) {
-			obj, verbNode, args := caps["obj"], caps["verb"], caps["args"]
-			if obj == nil || verbNode == nil || args == nil || f.Text(obj) != appVar {
-				return
-			}
-			verb, ok := httpVerbs[f.Text(verbNode)]
-			if !ok {
-				return
-			}
-			route, ok := firstStringArgument(f, args)
-			if !ok {
-				return
-			}
-			key := verb + " " + route
-			if seen[key] {
-				return
-			}
-			seen[key] = true
-			out = append(out, ir.Route{Verb: verb, Path: route})
-		})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Path != out[j].Path {
-			return out[i].Path < out[j].Path
-		}
-		return out[i].Verb < out[j].Verb
-	})
-	return out
-}
-
-var routerQuery = source.MustQuery(`(call function: (identifier) @fn) @call`)
-
-// warnAboutRouters reports APIRouter use, whose routes are not discovered.
-// Routing still works at runtime -- the gateway forwards everything to the
-// unit -- but the topology and the emitted route list will be incomplete.
-func (p *ExposePlugin) warnAboutRouters(ctx *compiler.Context, files []string, hintFile string) {
-	for _, path := range files {
-		f, ok := ctx.Files.Get(path)
-		if !ok || !f.IsPython() {
-			continue
-		}
-		reported := false
-		f.Query(routerQuery, func(caps map[string]*ts.Node) {
-			if reported || f.Text(caps["fn"]) != "APIRouter" {
-				return
-			}
-			reported = true
-			ctx.Diags.Warnf(ctx.Pos(path, int(caps["call"].StartByte())), config.KindExpose,
-				"routes registered on an APIRouter are not detected; "+
-					"they will still be served, but will not appear in the topology")
-		})
-	}
-}
-
-// firstStringArgument returns the first positional string literal of a call,
-// using the same decoder as hint arguments so a route path written as a
-// concatenated or parenthesised string is read rather than silently skipped.
-func firstStringArgument(f *source.File, args *ts.Node) (string, bool) {
-	for i := uint(0); i < args.NamedChildCount(); i++ {
-		arg := args.NamedChild(i)
-		// A comment is a named child too, and a decorator can carry one.
-		if arg.Kind() == "keyword_argument" || arg.Kind() == "comment" {
-			continue
-		}
-		return sdkdetect.StringLiteral(f, arg)
-	}
-	return "", false
 }
 
 // promoteEntrypoint makes file the unit's primary entry module.

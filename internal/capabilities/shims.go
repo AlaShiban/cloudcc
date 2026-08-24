@@ -6,9 +6,9 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/compiler"
 	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/lang"
 	runtimepy "github.com/cloudcompiler/cloudcc/internal/runtime/py"
 	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
-	"github.com/cloudcompiler/cloudcc/internal/source"
 )
 
 // BinDir holds the generated helper scripts.
@@ -73,8 +73,12 @@ func (p *ShimsPlugin) rewriteSources(ctx *compiler.Context) error {
 	for _, h := range ctx.Hints {
 		byFile[h.File] = append(byFile[h.File], h)
 	}
-	for _, f := range ctx.Files.PythonFiles() {
-		if err := runtimepy.Rewrite(f, byFile[f.Path]); err != nil {
+	for _, f := range ctx.Files.ParsedFiles() {
+		front, ok := lang.For(f.Path)
+		if !ok {
+			continue
+		}
+		if err := front.Rewrite(f, byFile[f.Path]); err != nil {
 			return err
 		}
 	}
@@ -84,90 +88,85 @@ func (p *ShimsPlugin) rewriteSources(ctx *compiler.Context) error {
 // injectRuntime writes the _cloudcc_runtime package, the compute entrypoint and the
 // merged requirements into each unit's output directory.
 func (p *ShimsPlugin) injectRuntime(ctx *compiler.Context) error {
-	runtimeFiles, err := runtimepy.RuntimeFiles()
-	if err != nil {
-		return err
-	}
+	// The runtime package is per-language and identical for every unit in that
+	// language, so it is rendered once rather than once per unit.
+	runtimeFiles := map[string]map[string][]byte{}
 
 	for _, unitID := range config.SortedKeys(ctx.UnitFiles) {
 		unit, ok := lookupUnit(ctx, unitID)
 		if !ok {
 			continue
 		}
-		computeType := unit.Config().Type
-		entryModule := source.ModuleName(unit.Entrypoint())
-
-		unit.EntryModule = entryModule
-
-		for _, rel := range config.SortedKeys(runtimeFiles) {
-			if err := writeOut(ctx.Out, path.Join(unitID, rel), runtimeFiles[rel]); err != nil {
-				return err
-			}
+		front, ok := ctx.Frontend(unitID)
+		if !ok {
+			continue
 		}
 
-		data := runtimepy.UnitTemplateData{
-			Unit:        unitID,
-			EntryModule: entryModule,
-			ASGIApp:     unit.ASGIApp,
-		}
-
-		switch computeType {
-		case "lambda":
-			entry, err := runtimepy.RenderLambdaEntry(data)
+		if _, done := runtimeFiles[front.Name()]; !done {
+			files, err := front.RuntimeFiles()
 			if err != nil {
 				return err
 			}
-			if err := writeOut(ctx.Out, path.Join(unitID, runtimepy.LambdaEntryModule+".py"), entry); err != nil {
-				return err
-			}
-			unit.Handler = runtimepy.LambdaHandler
-		case "ecs":
-			if userDockerfile(ctx, unitID) {
-				// The user's Dockerfile wins; it was already copied through
-				// with the rest of the unit's files (D13).
-				unit.DockerfileProvided = true
-				break
-			}
-			dockerfile, err := runtimepy.RenderDockerfile(data)
-			if err != nil {
-				return err
-			}
-			if err := writeOut(ctx.Out, path.Join(unitID, runtimepy.DockerfileName), dockerfile); err != nil {
+			runtimeFiles[front.Name()] = files
+		}
+		for _, rel := range config.SortedKeys(runtimeFiles[front.Name()]) {
+			if err := writeOut(ctx.Out, path.Join(unitID, rel), runtimeFiles[front.Name()][rel]); err != nil {
 				return err
 			}
 		}
 
-		reqs, err := p.requirements(ctx, unitID, unit)
+		pkg := front.Packaging(unit)
+		unit.EntryModule = pkg.EntryModule
+		unit.Runtime = pkg.LambdaRuntime
+		unit.Artifact = pkg.Artifact
+
+		container := unit.Config().Type == "ecs"
+		if container {
+			unit.DockerfileProvided = userDockerfile(ctx, unitID)
+		} else {
+			unit.Handler = pkg.Handler
+		}
+
+		generated, err := front.UnitFiles(unit, lang.UnitOptions{
+			Manifest:       p.manifest(ctx, front),
+			UsesRedis:      p.usesRedis(ctx, unit),
+			Container:      container,
+			UserDockerfile: unit.DockerfileProvided,
+		})
 		if err != nil {
 			return err
 		}
-		if err := writeOut(ctx.Out, path.Join(unitID, "requirements.txt"), reqs); err != nil {
-			return err
+		for _, rel := range config.SortedKeys(generated) {
+			if err := writeOut(ctx.Out, path.Join(unitID, rel), generated[rel]); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// requirements merges the shim dependencies into the unit's requirements.txt,
-// adding only what the unit's declared capabilities actually need.
-func (p *ShimsPlugin) requirements(ctx *compiler.Context, unitID string, unit *ir.ExecUnit) ([]byte, error) {
-	var existing []byte
-	if manifest := ctx.Files.RequirementsPath; manifest != "" {
-		if f, ok := ctx.Files.Get(manifest); ok {
-			existing = f.Content
-		}
+// manifest returns the user's dependency manifest for a language, empty when
+// they have none.
+func (p *ShimsPlugin) manifest(ctx *compiler.Context, front lang.Frontend) []byte {
+	name := ctx.Files.ManifestPath(front.Name())
+	if name == "" {
+		return nil
 	}
+	if f, ok := ctx.Files.Get(name); ok {
+		return f.Content
+	}
+	return nil
+}
 
-	add := append([]string{}, runtimepy.ShimRequirements["base"]...)
-	if unit.ASGIApp != "" && unit.Config().Type == "lambda" {
-		add = append(add, runtimepy.ShimRequirements["asgi"]...)
-	}
+// usesRedis reports whether a unit declares a cache, which is what decides
+// whether its bundle carries a Redis client.
+func (p *ShimsPlugin) usesRedis(ctx *compiler.Context, unit *ir.ExecUnit) bool {
 	for _, e := range ctx.Graph.EdgesFrom(unit.Key(), ir.EdgeUses) {
-		if extra, ok := runtimepy.ShimRequirements[e.To.Kind]; ok {
-			add = append(add, extra...)
+		if e.To.Kind == config.KindPersistRedis {
+			return true
 		}
 	}
-	return runtimepy.MergeRequirements(existing, add), nil
+	return false
 }
 
 // writePackagingScript emits bin/package.sh. Pulumi does not install Python
@@ -180,9 +179,19 @@ func (p *ShimsPlugin) writePackagingScript(ctx *compiler.Context) error {
 		if !ok {
 			continue
 		}
+		front, ok := ctx.Frontend(id)
+		if !ok {
+			continue
+		}
 		isContainer := unit.Config().Type == "ecs"
 		containers = containers || isContainer
-		units = append(units, runtimepy.PackageUnit{ID: id, Container: isContainer})
+		units = append(units, runtimepy.PackageUnit{
+			ID:        id,
+			Container: isContainer,
+			// Each unit contributes the shell that builds it, so the script
+			// itself does not have to know what any unit was written in.
+			Fragment: front.PackagingScript(unit),
+		})
 	}
 
 	script, err := runtimepy.RenderPackageScript(units)

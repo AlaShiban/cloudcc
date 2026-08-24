@@ -1,24 +1,21 @@
-// Package py injects the runtime shims and rewrites SDK hint calls in the
-// compiled copy of a program (D13).
+// Rewriting SDK hint calls into runtime client calls (D13).
 //
 // The user's source tree is never modified. Rewriting is a byte-range splice
 // at each hint's recorded span followed by a reparse, so successive rewrites
-// stay consistent with the AST -- the same approach Klotho 1 used, and the
-// reason hints carry byte spans at all.
-package py
+// stay consistent with the tree -- which is the reason hints carry byte spans
+// at all.
+package python
 
 import (
 	"fmt"
 	"sort"
 	"strings"
 
+	runtimepy "github.com/cloudcompiler/cloudcc/internal/runtime/py"
 	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 	"github.com/cloudcompiler/cloudcc/internal/source"
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
-
-// RuntimePackage is the injected package's name.
-const RuntimePackage = "_cloudcc_runtime"
 
 // shimTarget describes what one SDK function is rewritten into.
 type shimTarget struct {
@@ -54,11 +51,11 @@ var shims = map[string]shimTarget{
 // Rewrite replaces every SDK hint call in f with its runtime equivalent and
 // swaps the SDK import for the shim imports the file now needs. It is a no-op
 // for files that do not import the SDK.
-func Rewrite(f *source.File, hints []sdkdetect.Hint) error {
+func rewrite(f *source.File, hints []sdkdetect.Hint) error {
 	if !f.IsPython() {
 		return nil
 	}
-	imports := sdkdetect.ResolveImports(f)
+	imports := resolveImports(f)
 	if !imports.Any() && len(hints) == 0 {
 		return nil
 	}
@@ -192,7 +189,7 @@ func insertImports(content []byte, needed map[string]string) []byte {
 	var block strings.Builder
 	block.WriteString("# Injected by cloudcc: runtime clients for this program's declared capabilities.\n")
 	for _, alias := range aliases {
-		fmt.Fprintf(&block, "from %s import %s as %s\n", RuntimePackage, needed[alias], alias)
+		fmt.Fprintf(&block, "from %s import %s as %s\n", runtimepy.RuntimePackage, needed[alias], alias)
 	}
 	block.WriteString("\n")
 

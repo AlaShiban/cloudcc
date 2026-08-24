@@ -1,4 +1,4 @@
-package sdkdetect
+package python
 
 import (
 	"fmt"
@@ -7,12 +7,13 @@ import (
 	"strings"
 
 	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 	"github.com/cloudcompiler/cloudcc/internal/source"
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
 
-// Imports records how a file refers to the SDK.
-type Imports struct {
+// imports records how a file refers to the SDK.
+type imports struct {
 	// Modules are the local names bound to the package itself, so that
 	// `cloudcc.persist_kv(...)` resolves. `import cloudcompiler as cloudcc` adds "cloudcc".
 	Modules map[string]bool
@@ -25,13 +26,13 @@ type Imports struct {
 }
 
 // Any reports whether the file imports the SDK at all.
-func (i Imports) Any() bool { return len(i.Modules) > 0 || len(i.Direct) > 0 }
+func (i imports) Any() bool { return len(i.Modules) > 0 || len(i.Direct) > 0 }
 
-var callQuery = source.MustQuery(`(call) @call`)
+var callQuery = source.MustQuery(source.PythonLanguage(), `(call) @call`)
 
 // ResolveImports finds the local names that refer to the SDK in f.
-func ResolveImports(f *source.File) Imports {
-	imp := Imports{Modules: map[string]bool{}, Direct: map[string]string{}}
+func resolveImports(f *source.File) imports {
+	imp := imports{Modules: map[string]bool{}, Direct: map[string]string{}}
 	root := f.Root()
 	if root == nil {
 		return imp
@@ -45,16 +46,16 @@ func ResolveImports(f *source.File) Imports {
 				child := n.NamedChild(i)
 				switch child.Kind() {
 				case "dotted_name":
-					if f.Text(child) == PackageName {
-						imp.Modules[PackageName] = true
+					if f.Text(child) == sdkdetect.PackageName {
+						imp.Modules[sdkdetect.PackageName] = true
 						if imp.Alias == "" {
-							imp.Alias = PackageName
+							imp.Alias = sdkdetect.PackageName
 						}
 					}
 				case "aliased_import":
 					name := child.ChildByFieldName("name")
 					alias := child.ChildByFieldName("alias")
-					if name != nil && alias != nil && f.Text(name) == PackageName {
+					if name != nil && alias != nil && f.Text(name) == sdkdetect.PackageName {
 						local := f.Text(alias)
 						imp.Modules[local] = true
 						if imp.Alias == "" {
@@ -65,7 +66,7 @@ func ResolveImports(f *source.File) Imports {
 			}
 		case "import_from_statement":
 			mod := n.ChildByFieldName("module_name")
-			if mod == nil || f.Text(mod) != PackageName {
+			if mod == nil || f.Text(mod) != sdkdetect.PackageName {
 				break
 			}
 			for i := uint(0); i < n.NamedChildCount(); i++ {
@@ -76,7 +77,7 @@ func ResolveImports(f *source.File) Imports {
 				switch child.Kind() {
 				case "dotted_name":
 					name := f.Text(child)
-					if _, ok := signatures[name]; ok {
+					if _, ok := sdkdetect.Lookup(name); ok {
 						imp.Direct[name] = name
 					}
 				case "aliased_import":
@@ -86,7 +87,7 @@ func ResolveImports(f *source.File) Imports {
 						continue
 					}
 					fn := f.Text(name)
-					if _, ok := signatures[fn]; ok {
+					if _, ok := sdkdetect.Lookup(fn); ok {
 						imp.Direct[f.Text(alias)] = fn
 					}
 				}
@@ -102,13 +103,13 @@ func ResolveImports(f *source.File) Imports {
 
 // Detect finds every SDK hint call in f, appending diagnostics for calls whose
 // arguments are not statically evaluable.
-func Detect(f *source.File, diags *diag.Diagnostics) []Hint {
-	imp := ResolveImports(f)
+func detectHints(f *source.File, diags *diag.Diagnostics) []sdkdetect.Hint {
+	imp := resolveImports(f)
 	if !imp.Any() {
 		return nil
 	}
 
-	var hints []Hint
+	var hints []sdkdetect.Hint
 	f.Query(callQuery, func(caps map[string]*ts.Node) {
 		call := caps["call"]
 		fn := call.ChildByFieldName("function")
@@ -123,7 +124,7 @@ func Detect(f *source.File, diags *diag.Diagnostics) []Hint {
 		if err != nil {
 			line, col := f.PositionAt(int(err.offset))
 			diags.Errorf(diag.Position{File: f.Path, Line: line, Col: col},
-				signatures[name].Capability, "%s", err.msg)
+				capabilityOf(name), "%s", err.msg)
 			return
 		}
 		hints = append(hints, h)
@@ -134,7 +135,7 @@ func Detect(f *source.File, diags *diag.Diagnostics) []Hint {
 }
 
 // resolveCallee maps a call's function expression to an SDK function name.
-func resolveCallee(f *source.File, fn *ts.Node, imp Imports) (string, bool) {
+func resolveCallee(f *source.File, fn *ts.Node, imp imports) (string, bool) {
 	switch fn.Kind() {
 	case "identifier":
 		name, ok := imp.Direct[f.Text(fn)]
@@ -149,12 +150,18 @@ func resolveCallee(f *source.File, fn *ts.Node, imp Imports) (string, bool) {
 			return "", false
 		}
 		name := f.Text(attr)
-		if _, ok := signatures[name]; !ok {
+		if _, ok := sdkdetect.Lookup(name); !ok {
 			return "", false
 		}
 		return name, true
 	}
 	return "", false
+}
+
+// capabilityOf is the config kind an SDK function contributes to.
+func capabilityOf(fn string) string {
+	sig, _ := sdkdetect.Lookup(fn)
+	return sig.Capability
 }
 
 // hintError carries a message plus the byte offset it should be reported at.
@@ -163,9 +170,9 @@ type hintError struct {
 	offset uint
 }
 
-func buildHint(f *source.File, call *ts.Node, fn string) (Hint, *hintError) {
-	sig := signatures[fn]
-	h := Hint{
+func buildHint(f *source.File, call *ts.Node, fn string) (sdkdetect.Hint, *hintError) {
+	sig, _ := sdkdetect.Lookup(fn)
+	h := sdkdetect.Hint{
 		Func:       fn,
 		Capability: sig.Capability,
 		Args:       map[string]any{},
@@ -190,7 +197,7 @@ func buildHint(f *source.File, call *ts.Node, fn string) (Hint, *hintError) {
 		if arg.Kind() == "comment" {
 			continue
 		}
-		var p param
+		var p sdkdetect.Param
 		var value *ts.Node
 
 		if arg.Kind() == "keyword_argument" {
@@ -209,7 +216,7 @@ func buildHint(f *source.File, call *ts.Node, fn string) (Hint, *hintError) {
 			}
 			if !found {
 				return h, &hintError{
-					msgf("%s() has no parameter %q; expected one of %s", fn, key, strings.Join(ParamNames(fn), ", ")),
+					msgf("%s() has no parameter %q; expected one of %s", fn, key, strings.Join(sdkdetect.ParamNames(fn), ", ")),
 					arg.StartByte(),
 				}
 			}
@@ -250,11 +257,11 @@ func msgf(format string, args ...any) string {
 
 // evalArg statically evaluates one argument. A nil value with a nil error
 // means "explicitly None", which is treated as absent.
-func evalArg(f *source.File, n *ts.Node, p param) (any, *hintError) {
+func evalArg(f *source.File, n *ts.Node, p sdkdetect.Param) (any, *hintError) {
 	switch p.Kind {
-	case pExpr:
+	case sdkdetect.ParamExpr:
 		return f.Text(n), nil
-	case pString:
+	case sdkdetect.ParamString:
 		s, ok := stringLiteral(f, n)
 		if !ok {
 			if n.Kind() == "none" {
@@ -266,7 +273,7 @@ func evalArg(f *source.File, n *ts.Node, p param) (any, *hintError) {
 			}
 		}
 		return s, nil
-	case pBool:
+	case sdkdetect.ParamBool:
 		switch n.Kind() {
 		case "true":
 			return true, nil
@@ -279,7 +286,7 @@ func evalArg(f *source.File, n *ts.Node, p param) (any, *hintError) {
 			msgf("%s must be True or False, not %s", p.Name, describe(f, n)),
 			n.StartByte(),
 		}
-	case pStringList:
+	case sdkdetect.ParamStringList:
 		if n.Kind() == "none" {
 			return nil, nil
 		}
@@ -348,17 +355,6 @@ func hasInterpolation(n *ts.Node) bool {
 		}
 	}
 	return false
-}
-
-// StringLiteral decodes a Python string literal, returning false when the
-// value is not knowable without running the program.
-//
-// Exported because route decorators need exactly the same decoding as hint
-// arguments. A second implementation drifted from this one and silently missed
-// routes written as concatenated strings, which is the kind of divergence two
-// copies of a parser always produce eventually.
-func StringLiteral(f *source.File, n *ts.Node) (string, bool) {
-	return stringLiteral(f, n)
 }
 
 // stringLiteral decodes a Python string literal. f-strings and any string

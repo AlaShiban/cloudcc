@@ -35,65 +35,75 @@ const (
 // but produces no intent of its own.
 const CapEmbedAssets = "embed_assets"
 
-// paramKind says how an argument is validated.
-type paramKind int
+// ParamKind says how an argument is validated. It is a property of the SDK's
+// surface, not of any one language: an id is a string literal whether it is
+// written in Python or TypeScript.
+type ParamKind int
 
 const (
-	// pString requires a string literal.
-	pString paramKind = iota
-	// pBool requires True or False.
-	pBool
-	// pStringList requires a list of string literals, or None.
-	pStringList
-	// pExpr accepts any expression; the source text is recorded verbatim.
-	pExpr
+	// ParamString requires a string literal.
+	ParamString ParamKind = iota
+	// ParamBool requires a boolean literal.
+	ParamBool
+	// ParamStringList requires a list of string literals, or null.
+	ParamStringList
+	// ParamExpr accepts any expression; the source text is recorded verbatim.
+	ParamExpr
 )
 
-type param struct {
+// Param is one declared parameter of an SDK function.
+type Param struct {
 	Name     string
-	Kind     paramKind
+	Kind     ParamKind
 	Required bool
 }
 
-type signature struct {
+// Signature is an SDK function's shape.
+type Signature struct {
 	// Capability is the config kind this call contributes to.
 	Capability string
-	Params     []param
+	Params     []Param
+}
+
+// Lookup returns the signature of an SDK function.
+func Lookup(fn string) (Signature, bool) {
+	sig, ok := signatures[fn]
+	return sig, ok
 }
 
 // signatures mirrors sdk/python/cloudcompiler/__init__.py. The SDK parity test
 // keeps the two in step.
-var signatures = map[string]signature{
-	FnExecutionUnit: {config.KindExecutionUnit, []param{
-		{Name: "id", Kind: pString, Required: true},
-		{Name: "type", Kind: pString},
+var signatures = map[string]Signature{
+	FnExecutionUnit: {config.KindExecutionUnit, []Param{
+		{Name: "id", Kind: ParamString, Required: true},
+		{Name: "type", Kind: ParamString},
 	}},
-	FnExpose: {config.KindExpose, []param{
-		{Name: "app", Kind: pExpr, Required: true},
-		{Name: "id", Kind: pString},
-		{Name: "target", Kind: pString},
+	FnExpose: {config.KindExpose, []Param{
+		{Name: "app", Kind: ParamExpr, Required: true},
+		{Name: "id", Kind: ParamString},
+		{Name: "target", Kind: ParamString},
 	}},
-	FnPersistKV:     {config.KindPersistKV, []param{{Name: "id", Kind: pString, Required: true}}},
-	FnPersistFS:     {config.KindPersistFS, []param{{Name: "id", Kind: pString, Required: true}}},
-	FnPersistSecret: {config.KindPersistSecret, []param{{Name: "id", Kind: pString, Required: true}}},
-	FnPersistORM: {config.KindPersistORM, []param{
-		{Name: "id", Kind: pString, Required: true},
-		{Name: "models", Kind: pStringList},
+	FnPersistKV:     {config.KindPersistKV, []Param{{Name: "id", Kind: ParamString, Required: true}}},
+	FnPersistFS:     {config.KindPersistFS, []Param{{Name: "id", Kind: ParamString, Required: true}}},
+	FnPersistSecret: {config.KindPersistSecret, []Param{{Name: "id", Kind: ParamString, Required: true}}},
+	FnPersistORM: {config.KindPersistORM, []Param{
+		{Name: "id", Kind: ParamString, Required: true},
+		{Name: "models", Kind: ParamStringList},
 	}},
-	FnPersistRedis: {config.KindPersistRedis, []param{{Name: "id", Kind: pString, Required: true}}},
-	FnPubSubTopic:  {config.KindPubSub, []param{{Name: "id", Kind: pString, Required: true}}},
-	FnConfigValue: {config.KindConfig, []param{
-		{Name: "id", Kind: pString, Required: true},
-		{Name: "default", Kind: pString},
-		{Name: "secret", Kind: pBool},
+	FnPersistRedis: {config.KindPersistRedis, []Param{{Name: "id", Kind: ParamString, Required: true}}},
+	FnPubSubTopic:  {config.KindPubSub, []Param{{Name: "id", Kind: ParamString, Required: true}}},
+	FnConfigValue: {config.KindConfig, []Param{
+		{Name: "id", Kind: ParamString, Required: true},
+		{Name: "default", Kind: ParamString},
+		{Name: "secret", Kind: ParamBool},
 	}},
-	FnStaticUnit: {config.KindStaticUnit, []param{
-		{Name: "id", Kind: pString, Required: true},
-		{Name: "static_files", Kind: pString, Required: true},
-		{Name: "index_document", Kind: pString},
-		{Name: "shared_files", Kind: pString},
+	FnStaticUnit: {config.KindStaticUnit, []Param{
+		{Name: "id", Kind: ParamString, Required: true},
+		{Name: "static_files", Kind: ParamString, Required: true},
+		{Name: "index_document", Kind: ParamString},
+		{Name: "shared_files", Kind: ParamString},
 	}},
-	FnEmbedAssets: {CapEmbedAssets, []param{{Name: "pattern", Kind: pString, Required: true}}},
+	FnEmbedAssets: {CapEmbedAssets, []Param{{Name: "pattern", Kind: ParamString, Required: true}}},
 }
 
 // FunctionNames returns every SDK function name, sorted.

@@ -1,33 +1,25 @@
-package capabilities
+package python
 
 import (
 	"sort"
 
-	"github.com/cloudcompiler/cloudcc/internal/compiler"
+	"github.com/cloudcompiler/cloudcc/internal/lang"
 	"github.com/cloudcompiler/cloudcc/internal/source"
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
 
-var methodCallQuery = source.MustQuery(
+var methodCallQuery = source.MustQuery(source.PythonLanguage(),
 	`(call function: (attribute object: (identifier) @obj attribute: (identifier) @method)) @call`)
 
-// methodCall is one `name.method(...)` call site.
-type methodCall struct {
-	Object string
-	Method string
-	File   string
-	Offset int
-}
-
-// findMethodCalls returns every `<object>.<method>(...)` call in the given
+// methodCalls returns every `<object>.<method>(...)` call in the given
 // files. Identifier-name matching is deliberate: `from shared.store import
 // events` keeps the binding's name, so a name-based scan follows a handle
 // across modules without needing a full symbol table.
-func findMethodCalls(ctx *compiler.Context, files []string) []methodCall {
-	var out []methodCall
-	for _, path := range files {
-		f, ok := ctx.Files.Get(path)
-		if !ok || !f.IsPython() {
+func methodCalls(files *source.Set, unitFiles []string) []lang.MethodCall {
+	var out []lang.MethodCall
+	for _, path := range unitFiles {
+		f, ok := files.Get(path)
+		if !ok || !f.Parsed() {
 			continue
 		}
 		f.Query(methodCallQuery, func(caps map[string]*ts.Node) {
@@ -35,7 +27,7 @@ func findMethodCalls(ctx *compiler.Context, files []string) []methodCall {
 			if obj == nil || method == nil || call == nil {
 				return
 			}
-			out = append(out, methodCall{
+			out = append(out, lang.MethodCall{
 				Object: f.Text(obj),
 				Method: f.Text(method),
 				File:   path,
@@ -52,16 +44,16 @@ func findMethodCalls(ctx *compiler.Context, files []string) []methodCall {
 	return out
 }
 
-var identifierQuery = source.MustQuery(`(identifier) @id`)
+var identifierQuery = source.MustQuery(source.PythonLanguage(), `(identifier) @id`)
 
 // referencesIdentifier reports whether any of the files mention name.
-func referencesIdentifier(ctx *compiler.Context, files []string, name string) bool {
+func referencesIdentifier(files *source.Set, unitFiles []string, name string) bool {
 	if name == "" {
 		return false
 	}
-	for _, path := range files {
-		f, ok := ctx.Files.Get(path)
-		if !ok || !f.IsPython() {
+	for _, path := range unitFiles {
+		f, ok := files.Get(path)
+		if !ok || !f.Parsed() {
 			continue
 		}
 		found := false

@@ -33,6 +33,14 @@ type ExecUnit struct {
 
 	// EntryModule is the dotted module name of Entrypoint within the bundle.
 	EntryModule string `json:"entry_module,omitempty"`
+	// Language is the frontend that owns this unit, chosen from its
+	// entrypoint. A program may contain units in different languages.
+	Language string `json:"language,omitempty"`
+	// Runtime is the managed runtime identifier, e.g. "python3.12". It comes
+	// from the unit's language, which is why the provider does not name one.
+	Runtime string `json:"runtime,omitempty"`
+	// Artifact is the deployment archive, relative to the output root.
+	Artifact string `json:"artifact,omitempty"`
 	// Handler is the Lambda handler string, empty for non-Lambda units.
 	Handler string `json:"handler,omitempty"`
 	// DockerfileProvided reports that the user supplied their own Dockerfile,

@@ -3,6 +3,10 @@ package capabilities
 import (
 	"github.com/cloudcompiler/cloudcc/internal/compiler"
 	"github.com/cloudcompiler/cloudcc/internal/iac/pulumi_ts"
+
+	// Language frontends register themselves. Importing them here, where the
+	// chain is assembled, is what makes a language available.
+	_ "github.com/cloudcompiler/cloudcc/internal/lang/python"
 )
 
 // IntentChain returns the stages that read source and build the intent layer.

@@ -14,9 +14,6 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
-// LambdaRuntime is the managed runtime generated functions use.
-const LambdaRuntime = "python3.12"
-
 // BuildDir is where bin/package.sh writes each unit's deployment artefact,
 // relative to the output root.
 const BuildDir = "build"

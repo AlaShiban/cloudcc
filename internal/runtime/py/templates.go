@@ -13,12 +13,18 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/sanitize"
 )
 
+// RuntimePackage is the injected package's name.
+const RuntimePackage = "_cloudcc_runtime"
+
 //go:embed all:templates
 var templateFS embed.FS
 
 // PythonVersion is the interpreter the generated artefacts target. Lambda's
 // python3.12 runtime and the generated Dockerfile agree on it.
 const PythonVersion = "3.12"
+
+// LambdaRuntime is the managed AWS runtime these bundles target.
+const LambdaRuntime = "python3.12"
 
 // LambdaEntryModule is the generated entrypoint module for a Lambda unit.
 const LambdaEntryModule = "cloudcc_lambda_entry"
@@ -75,11 +81,15 @@ func RenderDockerfile(data UnitTemplateData) ([]byte, error) {
 	return render("templates/Dockerfile.tmpl", data)
 }
 
-// PackageUnit is one entry in the packaging script.
+// PackageUnit is one entry in the packaging script. The fragment that builds
+// it comes from that unit's language frontend, so this script does not have to
+// know what any unit was written in.
 type PackageUnit struct {
 	ID string
 	// Container is true for units deployed as an image rather than a zip.
 	Container bool
+	// Fragment is the shell that builds this unit's artefact.
+	Fragment string
 }
 
 // PackageData is what the packaging script is rendered against.
@@ -98,6 +108,26 @@ func RenderPackageScript(units []PackageUnit) ([]byte, error) {
 		PythonVersion: PythonVersion,
 		Units:         sorted,
 	})
+}
+
+// PackagingScript returns the shell fragment that builds one unit's artefact.
+// It is per-language because how a unit is packaged is the one part of
+// deployment that genuinely depends on what it was written in.
+func PackagingScript(unit string, container bool) string {
+	name := "templates/fragment-zip.sh.tmpl"
+	if container {
+		name = "templates/fragment-container.sh.tmpl"
+	}
+	out, err := render(name, struct {
+		ID            string
+		PythonVersion string
+	}{ID: unit, PythonVersion: PythonVersion})
+	if err != nil {
+		// The templates are embedded constants, so a failure here is a
+		// programming error rather than anything a user can cause.
+		panic("cloudcc: rendering the packaging fragment: " + err.Error())
+	}
+	return string(out)
 }
 
 // RenderPushScript produces bin/push-images.sh.

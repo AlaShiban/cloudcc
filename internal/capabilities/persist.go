@@ -128,8 +128,12 @@ func (p *PubSubPlugin) Transform(ctx *compiler.Context) error {
 			if _, ok := ctx.Graph.Intent(unitKey); !ok {
 				continue
 			}
+			front, ok := ctx.Frontend(unitID)
+			if !ok {
+				continue
+			}
 			publishes, subscribes := false, false
-			for _, call := range findMethodCalls(ctx, ctx.UnitFiles[unitID]) {
+			for _, call := range front.MethodCalls(ctx.Files, ctx.UnitFiles[unitID]) {
 				if call.Object != handle {
 					continue
 				}

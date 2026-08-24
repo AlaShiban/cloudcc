@@ -1,4 +1,6 @@
-package capabilities
+// Package python is the Python frontend: everything the compiler needs to read
+// a Python program and nothing it needs to read any other language.
+package python
 
 import (
 	"path"
@@ -174,11 +176,11 @@ func resolveImport(files *source.Set, from string, imp pyImport) []string {
 	return out
 }
 
-// Closure returns the transitive local-import closure of entry, skipping any
+// closure returns the transitive local-import closure of entry, skipping any
 // path in excluded. unresolved receives relative imports that matched nothing,
 // which are the only imports that are unambiguously a local mistake rather
 // than an ordinary third-party dependency.
-func Closure(files *source.Set, entry string, excluded map[string]string) (paths []string, unresolved []pyImport) {
+func closure(files *source.Set, entry string, excluded map[string]string) (paths []string, unresolved []pyImport) {
 	visited := map[string]bool{}
 	queue := []string{entry}
 	for len(queue) > 0 {
@@ -213,4 +215,16 @@ func Closure(files *source.Set, entry string, excluded map[string]string) (paths
 	}
 	sort.Strings(paths)
 	return paths, unresolved
+}
+
+func renderImport(imp pyImport) string {
+	var b strings.Builder
+	b.WriteString("from ")
+	b.WriteString(strings.Repeat(".", imp.Level))
+	b.WriteString(imp.Module)
+	if len(imp.Names) > 0 {
+		b.WriteString(" import ")
+		b.WriteString(strings.Join(imp.Names, ", "))
+	}
+	return b.String()
 }
