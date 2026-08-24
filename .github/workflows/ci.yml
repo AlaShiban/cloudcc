@@ -1,0 +1,115 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  GO_VERSION: "1.24"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # Compilation must need no network. Rather than asserting that, this job
+  # takes the network away after fetching dependencies and runs the whole
+  # offline half of the suite without it.
+  offline:
+    name: unit + golden (no network)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Unit and golden tests, with networking disabled
+        run: |
+          # unshare -rn drops the process into a network namespace with only
+          # loopback, so anything reaching for the network fails loudly.
+          unshare -rn go test ./... -count=1
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Python SDK suite
+        working-directory: sdk/python
+        run: uv run --with pytest --with-editable . python -m pytest tests -q
+
+  integration:
+    name: provisioning + functional (emulator)
+    runs-on: ubuntu-latest
+    services:
+      ministack:
+        image: ministackorg/ministack
+        ports: ["4566:4566"]
+        options: >-
+          --health-cmd "curl -sf http://localhost:4566 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      MINISTACK_ENDPOINT: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      PULUMI_CONFIG_PASSPHRASE: cc-ci
+      PULUMI_SKIP_UPDATE_CHECK: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: pulumi/actions@v6
+
+      - name: Install graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Toolchain check
+        run: |
+          go build -o cc ./cmd/cc
+          ./cc doctor
+
+      - name: Provisioning and functional tests
+        run: ./tests/e2e/ministack.sh
+
+      - name: cc deploy end to end
+        run: ./tests/e2e/deploy.sh
+
+      - name: Upload the work directory on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-output
+          path: /tmp/cc-e2e-*
+          if-no-files-found: ignore
+          retention-days: 3
