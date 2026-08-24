@@ -42,22 +42,26 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: Unit and golden tests, with networking disabled
+      - name: Unit and golden tests
+        run: go test ./... -count=1
+
+      - name: Prove compilation needs no network
         run: |
-          # unshare -rn drops the process into a network namespace with only
-          # loopback, so anything reaching for the network fails loudly.
-          # Unprivileged user namespaces are not available on every runner
-          # image, so fall back rather than failing for an unrelated reason --
-          # TestTheCompilePathCannotReachTheNetwork still enforces the rule
-          # structurally either way.
-          if unshare -rn true 2>/dev/null; then
-            echo "running the suite with only loopback available"
-            unshare -rn go test ./... -count=1
-          else
-            echo "::warning::unprivileged user namespaces unavailable;" \
-                 "running without network isolation"
+          docker pull --quiet golang:${{ env.GO_VERSION }}-bookworm
+          # --network none removes networking entirely -- not just the proxy,
+          # the whole namespace. The module cache is mounted in, so nothing
+          # legitimate needs fetching and anything reaching for the network
+          # fails loudly. GOPROXY=off turns a stray fetch into a clear error
+          # rather than a DNS timeout.
+          #
+          # This image has no python3, so the few assertions that shell out to
+          # it skip here; the run above already covered them.
+          docker run --rm --network none \
+            -v "$PWD":/src -w /src \
+            -v "$(go env GOMODCACHE)":/go/pkg/mod \
+            -e GOPROXY=off -e GOFLAGS=-mod=mod \
+            golang:${{ env.GO_VERSION }}-bookworm \
             go test ./... -count=1
-          fi
 
       - uses: astral-sh/setup-uv@v5
 

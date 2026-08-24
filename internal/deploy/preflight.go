@@ -33,6 +33,11 @@ func ReadState(dir string) (State, error) {
 	return st, nil
 }
 
+// lookPath is a variable so the preflight logic can be tested without
+// depending on which tools happen to be installed on the machine running the
+// tests. Production code always gets exec.LookPath.
+var lookPath = exec.LookPath
+
 // PreflightInput is what Preflight needs to check a deploy.
 type PreflightInput struct {
 	// Dir is the compiled output directory.
@@ -80,13 +85,13 @@ func Preflight(in PreflightInput) ([]string, error) {
 			Fix:    "run `cloudcc compile <path>` first, or pass -o to point at the right directory",
 		}
 	}
-	if _, err := exec.LookPath("pulumi"); err != nil {
+	if _, err := lookPath("pulumi"); err != nil {
 		return nil, &PreflightError{
 			Reason: "the pulumi CLI is not installed",
 			Fix:    "install it with: brew install pulumi",
 		}
 	}
-	if _, err := exec.LookPath("uv"); err != nil {
+	if _, err := lookPath("uv"); err != nil {
 		warnings = append(warnings, "uv is not installed, so packaging will fail (brew install uv)")
 	}
 

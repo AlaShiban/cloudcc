@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,42 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
+// withToolsInstalled makes the tool checks pass, so a test can exercise the
+// staleness logic without requiring pulumi and uv to be installed. Without
+// this the suite fails anywhere the toolchain is absent -- a container, a
+// fresh checkout, a CI image that has not run the setup steps yet.
+func withToolsInstalled(t *testing.T) {
+	t.Helper()
+	original := lookPath
+	lookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
+	t.Cleanup(func() { lookPath = original })
+}
+
+// withToolsMissing simulates a machine with neither tool installed.
+func withToolsMissing(t *testing.T) {
+	t.Helper()
+	original := lookPath
+	lookPath = func(name string) (string, error) {
+		return "", fmt.Errorf("exec: %q: executable file not found in $PATH", name)
+	}
+	t.Cleanup(func() { lookPath = original })
+}
+
+// TestPreflightRefusesWithoutPulumi pins the tool check itself, now that the
+// other tests stub it out.
+func TestPreflightRefusesWithoutPulumi(t *testing.T) {
+	withToolsMissing(t)
+	_, err := Preflight(PreflightInput{Dir: compiled(t, "abc")})
+	if err == nil || !strings.Contains(err.Error(), "pulumi") {
+		t.Fatalf("a missing pulumi CLI should be refused with a way to fix it: %v", err)
+	}
+	if !strings.Contains(err.Error(), "brew install pulumi") {
+		t.Errorf("the refusal should say how to install it: %v", err)
+	}
+}
+
 func TestPreflightAcceptsMatchingOutput(t *testing.T) {
+	withToolsInstalled(t)
 	_, err := Preflight(PreflightInput{
 		Dir:                compiled(t, "abc123"),
 		CurrentFingerprint: "abc123",
@@ -48,6 +84,7 @@ func TestPreflightAcceptsMatchingOutput(t *testing.T) {
 // deploying output that no longer matches the source is how a stack quietly
 // diverges from the program that produced it.
 func TestPreflightRefusesStaleOutput(t *testing.T) {
+	withToolsInstalled(t)
 	_, err := Preflight(PreflightInput{
 		Dir:                compiled(t, "old-fingerprint"),
 		CurrentFingerprint: "new-fingerprint",
@@ -64,6 +101,7 @@ func TestPreflightRefusesStaleOutput(t *testing.T) {
 }
 
 func TestForceOverridesStaleness(t *testing.T) {
+	withToolsInstalled(t)
 	warnings, err := Preflight(PreflightInput{
 		Dir:                compiled(t, "old"),
 		CurrentFingerprint: "new",
@@ -94,6 +132,7 @@ func TestPreflightRefusesADirectoryThatIsNotCompiledOutput(t *testing.T) {
 }
 
 func TestPreflightRefusesOutputWithNoState(t *testing.T) {
+	withToolsInstalled(t)
 	_, err := Preflight(PreflightInput{
 		Dir:                compiled(t, ""),
 		CurrentFingerprint: "anything",
@@ -119,6 +158,7 @@ func TestPreflightRefusesOutputWithNoState(t *testing.T) {
 // available to recompile: the deploy should proceed rather than refuse
 // something it cannot actually judge.
 func TestNoFingerprintSkipsTheCheck(t *testing.T) {
+	withToolsInstalled(t)
 	_, err := Preflight(PreflightInput{Dir: compiled(t, "whatever")})
 	if err != nil {
 		t.Fatalf("an unknown current fingerprint should not block a deploy: %v", err)

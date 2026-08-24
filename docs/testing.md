@@ -92,9 +92,21 @@ noticed yet.
 
 Two jobs, in `.github/workflows/ci.yml`:
 
-- **offline** — L1 and L2 with networking disabled, which is what actually
-  proves compilation needs no network. Also runs `gofmt`, `go vet` and the
-  Python suite.
+- **offline** — `gofmt`, `go vet`, the Go suite and the Python suite. The Go
+  suite then runs a second time inside a container with `--network none`, which
+  is what actually proves compilation needs no network: not a disabled proxy, no
+  network namespace at all. The module cache is mounted in, so a stray fetch
+  fails loudly instead of silently succeeding.
+
+  You can run that second pass locally:
+
+  ```bash
+  docker run --rm --network none \
+    -v "$PWD":/src -w /src \
+    -v "$(go env GOMODCACHE)":/go/pkg/mod \
+    -e GOPROXY=off -e GOFLAGS=-mod=mod \
+    golang:1.26-bookworm go test ./... -count=1
+  ```
 - **integration** — L3 to L5 with the emulator as a service container.
 
 A nightly job can run the same scripts against real AWS by leaving
