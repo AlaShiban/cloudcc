@@ -1,0 +1,10 @@
+{
+  "name": "petstore-node",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "dependencies": {
+    "@cloudcompiler/sdk": "file:../../sdk/node",
+    "express": "^4.21.2"
+  }
+}

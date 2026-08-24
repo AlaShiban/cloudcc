@@ -15,3 +15,8 @@ Pulumi.*.yaml.bak
 
 # Test scratch
 /tmp/
+
+# Node
+node_modules/
+sdk/node/dist/
+package-lock.json

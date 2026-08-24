@@ -1,0 +1,26 @@
+{
+  "name": "@cloudcompiler/sdk",
+  "version": "0.1.0",
+  "description": "Compile-time hints for CloudCompiler; the compiler reads these calls, never runs them.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test test/*.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7"
+  }
+}
