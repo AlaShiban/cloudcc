@@ -1,0 +1,10 @@
+app: petstore-multi
+provider: aws
+
+execution_units:
+  api:
+    type: lambda
+    environment_variables:
+      LOG_LEVEL: info
+  worker:
+    type: lambda
