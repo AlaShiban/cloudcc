@@ -11,6 +11,10 @@ func Chain(extra ...compiler.Plugin) []compiler.Plugin {
 		NewDetectPlugin(),
 		NewStaticUnitsPlugin(),
 		NewExecUnitsPlugin(),
+		NewExposePlugin(),
+		NewPersistPlugin(),
+		NewPubSubPlugin(),
+		NewConfigVarsPlugin(),
 	}
 	return append(plugins, extra...)
 }
