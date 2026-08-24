@@ -183,6 +183,13 @@ func buildHint(f *source.File, call *ts.Node, fn string) (Hint, *hintError) {
 	positional := 0
 	for i := uint(0); i < args.NamedChildCount(); i++ {
 		arg := args.NamedChild(i)
+		// tree-sitter counts a comment as a named child, so a call with
+		// comments between its arguments would otherwise be read as having a
+		// comment for an argument. People comment their arguments all the
+		// time; this is not an exotic shape.
+		if arg.Kind() == "comment" {
+			continue
+		}
 		var p param
 		var value *ts.Node
 
@@ -285,6 +292,9 @@ func evalArg(f *source.File, n *ts.Node, p param) (any, *hintError) {
 		var out []string
 		for i := uint(0); i < n.NamedChildCount(); i++ {
 			item := n.NamedChild(i)
+			if item.Kind() == "comment" {
+				continue
+			}
 			s, ok := stringLiteral(f, item)
 			if !ok {
 				// A list of ORM model classes is a common and legitimate
@@ -325,6 +335,8 @@ func describe(f *source.File, n *ts.Node) string {
 		return "an attribute lookup"
 	case "conditional_expression":
 		return "a conditional expression"
+	case "parenthesized_expression":
+		return "a parenthesized expression"
 	}
 	return n.Kind()
 }
@@ -336,6 +348,17 @@ func hasInterpolation(n *ts.Node) bool {
 		}
 	}
 	return false
+}
+
+// StringLiteral decodes a Python string literal, returning false when the
+// value is not knowable without running the program.
+//
+// Exported because route decorators need exactly the same decoding as hint
+// arguments. A second implementation drifted from this one and silently missed
+// routes written as concatenated strings, which is the kind of divergence two
+// copies of a parser always produce eventually.
+func StringLiteral(f *source.File, n *ts.Node) (string, bool) {
+	return stringLiteral(f, n)
 }
 
 // stringLiteral decodes a Python string literal. f-strings and any string
@@ -365,13 +388,34 @@ func stringLiteral(f *source.File, n *ts.Node) (string, bool) {
 	case "concatenated_string":
 		var sb strings.Builder
 		for i := uint(0); i < n.NamedChildCount(); i++ {
-			part, ok := stringLiteral(f, n.NamedChild(i))
+			child := n.NamedChild(i)
+			if child.Kind() == "comment" {
+				continue
+			}
+			part, ok := stringLiteral(f, child)
 			if !ok {
 				return "", false
 			}
 			sb.WriteString(part)
 		}
 		return sb.String(), true
+	case "parenthesized_expression":
+		// Wrapping a long string in parentheses and splitting it across lines
+		// is what Black does to keep within the line limit, so this shape
+		// turns up in ordinary formatted code. Rejecting it would mean running
+		// a formatter could break a program that compiled a moment earlier.
+		var inner *ts.Node
+		for i := uint(0); i < n.NamedChildCount(); i++ {
+			if child := n.NamedChild(i); child.Kind() != "comment" {
+				if inner != nil {
+					return "", false
+				}
+				inner = child
+			}
+		}
+		if inner != nil {
+			return stringLiteral(f, inner)
+		}
 	}
 	return "", false
 }

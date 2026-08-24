@@ -333,3 +333,39 @@ func containsSubstr(s []string, sub string) bool {
 	}
 	return false
 }
+
+// A package's __init__.py is often empty and often the shallowest Python file
+// in the tree. Picking it as the entrypoint produces a unit containing nothing
+// at all, which is how this was found: by a generated program whose modules
+// lived under a package directory.
+func TestDefaultEntrypointPrefersTheExposedModule(t *testing.T) {
+	ctx := harness(t, map[string]string{
+		"src/__init__.py":     "",
+		"src/svc/__init__.py": "",
+		"src/svc/api.py": "from fastapi import FastAPI\nimport cloudcompiler as cloudcc\n" +
+			"from .store import pets\napp = FastAPI()\ncloudcc.expose(app, id=\"gw\")\n",
+		"src/svc/store.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist_kv(\"pets\")\n",
+	})
+
+	unit := ctx.Graph.IntentsOfKind(config.KindExecutionUnit)[0].(*ir.ExecUnit)
+	if unit.Entrypoint() != "src/svc/api.py" {
+		t.Errorf("entrypoint = %q, want the module that exposes the app", unit.Entrypoint())
+	}
+	for _, want := range []string{"src/svc/api.py", "src/svc/store.py"} {
+		if !contains(ctx.UnitFiles[unit.ID], want) {
+			t.Errorf("unit is missing %s: %v", want, ctx.UnitFiles[unit.ID])
+		}
+	}
+}
+
+// With nothing exposed, an empty __init__.py must still not win.
+func TestDefaultEntrypointSkipsEmptyModules(t *testing.T) {
+	ctx := harness(t, map[string]string{
+		"pkg/__init__.py": "\n\n",
+		"pkg/worker.py":   "import cloudcompiler as cloudcc\nq = cloudcc.persist_kv(\"q\")\n",
+	})
+	unit := ctx.Graph.IntentsOfKind(config.KindExecutionUnit)[0].(*ir.ExecUnit)
+	if unit.Entrypoint() != "pkg/worker.py" {
+		t.Errorf("entrypoint = %q, want the module with something in it", unit.Entrypoint())
+	}
+}

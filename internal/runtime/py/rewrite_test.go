@@ -419,3 +419,39 @@ func TestShimRequirementsAreKnown(t *testing.T) {
 		t.Errorf("base requirements = %v", ShimRequirements["base"])
 	}
 }
+
+// A module can import the SDK for a type annotation, or keep an import it no
+// longer uses. The SDK is not installed in a deployment bundle, so that import
+// has to go even though there is nothing to rewrite.
+func TestUnusedSDKImportIsStripped(t *testing.T) {
+	src := "import cloudcompiler as cloudcc\n\n\ndef noop() -> None:\n    return None\n"
+	f := &source.File{Path: "helpers.py", Content: []byte(src)}
+	if err := f.ParsePython(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Rewrite(f, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := string(f.Content)
+	if strings.Contains(got, "cloudcompiler") {
+		t.Errorf("an unused SDK import survived:\n%s", got)
+	}
+	if !strings.Contains(got, "def noop()") {
+		t.Errorf("the rest of the module was lost:\n%s", got)
+	}
+	assertParses(t, got)
+}
+
+func TestUnusedFromImportIsStripped(t *testing.T) {
+	src := "from cloudcompiler import persist_kv\n\nVALUE = 1\n"
+	f := &source.File{Path: "helpers.py", Content: []byte(src)}
+	if err := f.ParsePython(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Rewrite(f, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(f.Content); strings.Contains(got, "cloudcompiler") {
+		t.Errorf("an unused from-import survived:\n%s", got)
+	}
+}

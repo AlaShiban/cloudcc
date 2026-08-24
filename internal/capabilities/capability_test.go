@@ -274,3 +274,74 @@ func containsStr(s []string, v string) bool {
 	}
 	return false
 }
+
+// A route path is a string literal like any other, and people write long ones
+// across lines. A second, simpler decoder in this file used to miss those,
+// which is why route reading now shares the one in sdkdetect.
+func TestRoutePathsInEveryStringForm(t *testing.T) {
+	ctx := harness(t, map[string]string{
+		"app.py": `from fastapi import FastAPI
+import cloudcompiler as cloudcc
+
+app = FastAPI()
+cloudcc.expose(app, id="gw")
+
+@app.get("/plain")
+def a():
+    return {}
+
+@app.get("/con" "catenated")
+def b():
+    return {}
+
+@app.get(
+    (
+        "/paren"
+        "thesised"
+    )
+)
+def c():
+    return {}
+
+@app.post('/single-quoted')
+def d():
+    return {}
+`,
+	})
+	gw := ctx.Graph.IntentsOfKind(config.KindExpose)[0].(*ir.Expose)
+	want := []ir.Route{
+		{Verb: "GET", Path: "/concatenated"},
+		{Verb: "GET", Path: "/parenthesised"},
+		{Verb: "GET", Path: "/plain"},
+		{Verb: "POST", Path: "/single-quoted"},
+	}
+	if !reflect.DeepEqual(gw.Routes, want) {
+		t.Errorf("routes =\n  %v\nwant\n  %v", gw.Routes, want)
+	}
+}
+
+// An f-string path is genuinely not knowable at compile time and must stay
+// undiscovered rather than being guessed at.
+func TestDynamicRoutePathIsNotInvented(t *testing.T) {
+	ctx := harness(t, map[string]string{
+		"app.py": `from fastapi import FastAPI
+import cloudcompiler as cloudcc
+
+app = FastAPI()
+cloudcc.expose(app, id="gw")
+prefix = "/v1"
+
+@app.get(f"{prefix}/items")
+def a():
+    return {}
+
+@app.get("/known")
+def b():
+    return {}
+`,
+	})
+	gw := ctx.Graph.IntentsOfKind(config.KindExpose)[0].(*ir.Expose)
+	if !reflect.DeepEqual(gw.Routes, []ir.Route{{Verb: "GET", Path: "/known"}}) {
+		t.Errorf("routes = %v; an f-string path should not be guessed", gw.Routes)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/compiler"
 	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 	"github.com/cloudcompiler/cloudcc/internal/source"
 	ts "github.com/tree-sitter/go-tree-sitter"
 )
@@ -169,27 +170,17 @@ func (p *ExposePlugin) warnAboutRouters(ctx *compiler.Context, files []string, h
 	}
 }
 
-// firstStringArgument returns the first positional string literal of a call.
+// firstStringArgument returns the first positional string literal of a call,
+// using the same decoder as hint arguments so a route path written as a
+// concatenated or parenthesised string is read rather than silently skipped.
 func firstStringArgument(f *source.File, args *ts.Node) (string, bool) {
 	for i := uint(0); i < args.NamedChildCount(); i++ {
 		arg := args.NamedChild(i)
-		if arg.Kind() == "keyword_argument" {
+		// A comment is a named child too, and a decorator can carry one.
+		if arg.Kind() == "keyword_argument" || arg.Kind() == "comment" {
 			continue
 		}
-		if arg.Kind() != "string" {
-			return "", false
-		}
-		var sb strings.Builder
-		for j := uint(0); j < arg.NamedChildCount(); j++ {
-			c := arg.NamedChild(j)
-			if c.Kind() == "interpolation" {
-				return "", false
-			}
-			if c.Kind() == "string_content" || c.Kind() == "escape_sequence" {
-				sb.WriteString(f.Text(c))
-			}
-		}
-		return sb.String(), true
+		return sdkdetect.StringLiteral(f, arg)
 	}
 	return "", false
 }

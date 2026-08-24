@@ -288,3 +288,106 @@ func TestSignaturesCoverEveryFunctionName(t *testing.T) {
 		t.Errorf("FunctionNames() = %v, want %v", got, want)
 	}
 }
+
+// A long string wrapped in parentheses and split across lines is what Black
+// produces. Rejecting it would mean running a formatter could break a program
+// that compiled a moment earlier.
+func TestParenthesizedStringLiteral(t *testing.T) {
+	hints, d := detect(t, `
+import cloudcompiler as cloudcc
+
+pets = cloudcc.persist_kv(
+    (
+        "pets"
+        "ByOwner"
+    )
+)
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if len(hints) != 1 || hints[0].ID() != "petsByOwner" {
+		t.Fatalf("hints = %v", hints)
+	}
+}
+
+func TestParenthesizedSingleString(t *testing.T) {
+	hints, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist_kv((\"a\"))\n")
+	if d.HasErrors() || len(hints) != 1 || hints[0].ID() != "a" {
+		t.Fatalf("hints = %v, diagnostics = %v", hints, d.Items())
+	}
+}
+
+// A parenthesised expression that is not a constant must still be rejected.
+func TestParenthesizedNonLiteralStillRejected(t *testing.T) {
+	_, d := detect(t, "import cloudcompiler as cloudcc\nname = \"x\"\ny = cloudcc.persist_kv((name))\n")
+	if !d.HasErrors() {
+		t.Fatal("a parenthesised variable is still not a literal")
+	}
+}
+
+// tree-sitter counts a comment as a named child, so a call whose arguments are
+// commented would otherwise be read as having a comment for an argument.
+// Commenting arguments is entirely ordinary in configuration-heavy code.
+func TestCommentsBetweenArguments(t *testing.T) {
+	hints, d := detect(t, `
+import cloudcompiler as cloudcc
+
+value = cloudcc.config_value(
+    # which setting
+    "log_level",
+    # what it falls back to
+    default="info",
+    # and whether to encrypt it
+    secret=False,
+)
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if len(hints) != 1 {
+		t.Fatalf("hints = %v", hints)
+	}
+	h := hints[0]
+	if h.ID() != "log_level" || h.Str("default") != "info" || h.Bool("secret") {
+		t.Errorf("args = %+v", h.Args)
+	}
+}
+
+func TestCommentInsideAListArgument(t *testing.T) {
+	hints, d := detect(t, `
+import cloudcompiler as cloudcc
+
+db = cloudcc.persist_orm("main", models=[
+    "Pet",   # the first
+    # and the second
+    "Owner",
+])
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if got, want := hints[0].StrList("models"), []string{"Pet", "Owner"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("models = %v, want %v", got, want)
+	}
+}
+
+func TestCommentInsideAParenthesizedString(t *testing.T) {
+	hints, d := detect(t, `
+import cloudcompiler as cloudcc
+
+pets = cloudcc.persist_kv(
+    (
+        # split for the line limit
+        "pets"
+        "ByOwner"
+    )
+)
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if hints[0].ID() != "petsByOwner" {
+		t.Errorf("id = %q", hints[0].ID())
+	}
+}

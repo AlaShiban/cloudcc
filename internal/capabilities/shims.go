@@ -62,17 +62,19 @@ func (p *ShimsPlugin) Transform(ctx *compiler.Context) error {
 // rewriteSources splices every hint call in the working copy. Each file is
 // rewritten once even when several units bundle it, so shared modules stay
 // byte-identical across units.
+//
+// Every Python file is visited, not only the ones containing hints: a module
+// may import the SDK for a type annotation, or keep an import that is no
+// longer used, and that import has to go either way. The SDK is not installed
+// in a deployment bundle, so leaving one behind means the unit dies on its
+// first import.
 func (p *ShimsPlugin) rewriteSources(ctx *compiler.Context) error {
 	byFile := map[string][]sdkdetect.Hint{}
 	for _, h := range ctx.Hints {
 		byFile[h.File] = append(byFile[h.File], h)
 	}
-	for _, rel := range config.SortedKeys(byFile) {
-		f, ok := ctx.Files.Get(rel)
-		if !ok {
-			continue
-		}
-		if err := runtimepy.Rewrite(f, byFile[rel]); err != nil {
+	for _, f := range ctx.Files.PythonFiles() {
+		if err := runtimepy.Rewrite(f, byFile[f.Path]); err != nil {
 			return err
 		}
 	}
