@@ -205,3 +205,7 @@ up in the topology, and `cloudcc` says so.
   capability-by-capability support matrix.
 - [`docs/decisions.md`](docs/decisions.md) — where the implementation departed
   from its brief, and why.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

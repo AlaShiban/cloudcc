@@ -6,7 +6,7 @@ on:
   pull_request:
 
 env:
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.26"
   PYTHON_VERSION: "3.12"
 
 jobs:
@@ -46,7 +46,18 @@ jobs:
         run: |
           # unshare -rn drops the process into a network namespace with only
           # loopback, so anything reaching for the network fails loudly.
-          unshare -rn go test ./... -count=1
+          # Unprivileged user namespaces are not available on every runner
+          # image, so fall back rather than failing for an unrelated reason --
+          # TestTheCompilePathCannotReachTheNetwork still enforces the rule
+          # structurally either way.
+          if unshare -rn true 2>/dev/null; then
+            echo "running the suite with only loopback available"
+            unshare -rn go test ./... -count=1
+          else
+            echo "::warning::unprivileged user namespaces unavailable;" \
+                 "running without network isolation"
+            go test ./... -count=1
+          fi
 
       - uses: astral-sh/setup-uv@v5
 

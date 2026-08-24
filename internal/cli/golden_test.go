@@ -67,6 +67,14 @@ func snapshot(t *testing.T, dir string) map[string]string {
 			}
 			return nil
 		}
+		// The rendered PNG is deliberately not part of the golden tree: it
+		// only exists when graphviz happens to be installed, and its bytes
+		// depend on which version. topology.mmd and topology.dot are the
+		// deterministic artefacts, and they are compared. That the PNG is
+		// written at all is covered by the topology package's own tests.
+		if strings.HasSuffix(rel, ".png") {
+			return nil
+		}
 		data, rerr := os.ReadFile(abs)
 		if rerr != nil {
 			return rerr
