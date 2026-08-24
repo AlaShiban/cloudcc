@@ -111,6 +111,7 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
     function: mainFn.name,
     principal: "apigateway.amazonaws.com",
     sourceArn: pulumi.interpolate`${petApiApi.executionArn}/*/*`,
+    statementId: "petstore-pet-api-invoke",
 });
 
 // Stack outputs. Every environment binding is exported under the exact

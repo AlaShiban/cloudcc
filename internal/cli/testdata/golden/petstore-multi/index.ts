@@ -221,6 +221,7 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
     function: apiFn.name,
     principal: "apigateway.amazonaws.com",
     sourceArn: pulumi.interpolate`${petApiApi.executionArn}/*/*`,
+    statementId: "petstore-multi-pet-api-invoke",
 });
 
 const workerEnv: { [key: string]: pulumi.Input<string> } = {
@@ -246,6 +247,7 @@ const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents
     function: workerFn.name,
     principal: "sns.amazonaws.com",
     sourceArn: petEventsTopic.arn,
+    statementId: "petstore-multi-worker-petEvents-sns",
 });
 
 const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEvents", {

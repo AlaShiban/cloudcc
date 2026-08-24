@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# Differential test: the same generated program, run twice.
+#
+#   A. uncompiled -- the program as written, against the SDK's local emulations
+#   B. compiled   -- the same program after cloudcc rewrote it, against real
+#                    AWS services in the emulator
+#
+# The same request scenario is replayed against both, and every response must
+# match. This is the actual correctness guarantee the compiler owes: that
+# rewriting a program preserves what it does. Everything else -- the IR, the
+# generated TypeScript -- is a means to that end.
+#
+# Usage:
+#   ./tests/e2e/differential.sh [seed ...]
+set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+SEEDS=("$@")
+if [ ${#SEEDS[@]} -eq 0 ]; then
+  read -r -a SEEDS <<< "${CLOUDCC_DIFF_SEEDS:-1 2 3}"
+fi
+
+WORK="${CLOUDCC_DIFF_WORKDIR:-$(mktemp -d "${TMPDIR:-/tmp}/cloudcc-diff-XXXXXX")}"
+KEEP="${CLOUDCC_E2E_KEEP:-0}"
+PORT_A=8101
+PORT_B=8102
+
+APP_PID=""
+CURRENT_OUT=""
+
+stop_app() {
+  if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
+    kill "$APP_PID" 2>/dev/null || true
+    wait "$APP_PID" 2>/dev/null || true
+  fi
+  APP_PID=""
+}
+
+cleanup() {
+  local status=$?
+  stop_app
+  if [ -n "$CURRENT_OUT" ] && [ -d "$CURRENT_OUT" ]; then
+    "$WORK/cloudcc" deploy "$CURRENT_OUT/../src" -o "$CURRENT_OUT" \
+      --stack ministack --destroy >/dev/null 2>&1 || true
+  fi
+  [ "$KEEP" = "0" ] && rm -rf "$WORK" || log "workdir kept at $WORK"
+  exit $status
+}
+trap cleanup EXIT
+
+require_endpoint
+log "emulator: $MINISTACK_ENDPOINT"
+log "seeds:    ${SEEDS[*]}"
+
+log "building cloudcc"
+( cd "$REPO_ROOT" && go build -o "$WORK/cloudcc" ./cmd/cloudcc )
+
+# serve starts a program and waits for it to answer.
+#   serve <dir> <module>:<app> <port> <label> [extra uv args...]
+serve() {
+  local dir="$1" target="$2" port="$3" label="$4"
+  shift 4
+  ( cd "$dir" && PYTHONPATH="$dir" exec uv run --quiet "$@" \
+      python -m uvicorn "$target" --host 127.0.0.1 --port "$port" --log-level error ) &
+  APP_PID=$!
+  if ! wait_for_http "http://127.0.0.1:$port/health" 60; then
+    fail "the $label program did not start on port $port"
+  fi
+}
+
+# replay issues the scenario and writes one normalised line per step, so the
+# two runs can be compared with a plain diff.
+replay() {
+  local port="$1" manifest="$2" out="$3"
+  : > "$out"
+
+  local count
+  count="$(jq '.scenario | length' "$manifest")"
+  for ((i = 0; i < count; i++)); do
+    local method path body status raw
+    method="$(jq -r ".scenario[$i].Method" "$manifest")"
+    path="$(jq -r ".scenario[$i].Path" "$manifest")"
+    body="$(jq -r ".scenario[$i].Body" "$manifest")"
+
+    local tmp="$WORK/response.$$"
+    if [ -n "$body" ] && [ "$body" != "null" ]; then
+      status="$(curl -s -o "$tmp" -w '%{http_code}' -X "$method" \
+        -H 'content-type: application/json' -d "$body" \
+        "http://127.0.0.1:$port$path")"
+    else
+      status="$(curl -s -o "$tmp" -w '%{http_code}' -X "$method" \
+        "http://127.0.0.1:$port$path")"
+    fi
+
+    # Sort object keys so an incidental ordering difference is not mistaken
+    # for a behavioural one. A non-JSON body is compared verbatim.
+    if raw="$(jq -S -c . < "$tmp" 2>/dev/null)"; then
+      printf '%s %s -> %s %s\n' "$method" "$path" "$status" "$raw" >> "$out"
+    else
+      printf '%s %s -> %s %s\n' "$method" "$path" "$status" "$(tr -d '\n' < "$tmp")" >> "$out"
+    fi
+    rm -f "$tmp"
+  done
+}
+
+failures=0
+
+for seed in "${SEEDS[@]}"; do
+  log "================ seed $seed ================"
+  case_dir="$WORK/case-$seed"
+  src="$case_dir/src"
+  out="$case_dir/out"
+  mkdir -p "$src"
+
+  manifest="$case_dir/manifest.json"
+  ( cd "$REPO_ROOT" && go run ./internal/fuzz/cmd/genprogram -seed "$seed" -out "$src" ) > "$manifest"
+
+  entry="$(jq -r .entry_module "$manifest")"
+  appvar="$(jq -r .app_var "$manifest")"
+  unit="$(jq -r .unit "$manifest")"
+  target="$entry:$appvar"
+  log "unit $unit, serving $target"
+
+  # ---------------------------------------------------------- A: as written
+  log "running the program as written, against the SDK's local emulations"
+  rm -rf "$case_dir/local-state"
+  CLOUDCC_LOCAL_STATE_DIR="$case_dir/local-state" \
+    serve "$src" "$target" "$PORT_A" "uncompiled" \
+      --with fastapi --with uvicorn --with-editable "$REPO_ROOT/sdk/python"
+  replay "$PORT_A" "$manifest" "$case_dir/uncompiled.txt"
+  stop_app
+  pass "uncompiled run recorded"
+
+  # ------------------------------------------------------------ B: compiled
+  log "compiling"
+  "$WORK/cloudcc" "$src" -o "$out" >/dev/null
+
+  log "deploying to the emulator"
+  CURRENT_OUT="$out"
+  "$WORK/cloudcc" deploy "$src" -o "$out" --stack ministack >/dev/null
+
+  # The compiled unit reads its bindings from the stack, exactly as it would
+  # in a real deployment.
+  bindings="$(cd "$out" && PULUMI_BACKEND_URL="file://$out/.pulumi-state" \
+    PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
+    pulumi stack output --json --stack ministack \
+    | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"')"
+
+  log "running the compiled program against the emulator"
+  (
+    set -a
+    eval "$bindings"
+    set +a
+    export CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT"
+    serve "$out/$unit" "$target" "$PORT_B" "compiled" \
+      --with fastapi --with uvicorn --with boto3
+    replay "$PORT_B" "$manifest" "$case_dir/compiled.txt"
+    stop_app
+  )
+  pass "compiled run recorded"
+
+  log "tearing down"
+  "$WORK/cloudcc" deploy "$src" -o "$out" --stack ministack --destroy >/dev/null
+  CURRENT_OUT=""
+
+  # ------------------------------------------------------------- compare
+  if diff -u "$case_dir/uncompiled.txt" "$case_dir/compiled.txt" > "$case_dir/diff.txt"; then
+    pass "seed $seed: compiled behaviour is identical to uncompiled"
+  else
+    failures=$((failures + 1))
+    printf '\033[1;31mFAIL\033[0m seed %s: compiling changed what the program does\n' "$seed" >&2
+    echo "--- uncompiled (-) vs compiled (+) ---" >&2
+    cat "$case_dir/diff.txt" >&2
+    echo "--- the program ---" >&2
+    find "$src" -name '*.py' -print -exec cat {} \; >&2
+  fi
+done
+
+if [ "$failures" -gt 0 ]; then
+  fail "$failures of ${#SEEDS[@]} programs behaved differently once compiled"
+fi
+log "every program behaved identically before and after compiling"

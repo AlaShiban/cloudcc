@@ -107,6 +107,11 @@ type Program struct {
 	PrimaryStore string
 	// RoutePrefix is the base path the exposed unit serves items under.
 	RoutePrefix string
+	// EntryModule is the dotted module of the exposed unit's entrypoint, and
+	// AppVar the module-level name of its ASGI application. The differential
+	// harness needs both to run the program before it is compiled.
+	EntryModule string
+	AppVar      string
 }
 
 // layout decides how modules are arranged on disk.
@@ -212,6 +217,11 @@ func (g *generator) build(seed int64) *Program {
 		}
 		if g.rng.Intn(4) == 0 {
 			expect.Secret = true
+			if g.opts.Behavioural && expect.Default == "" {
+				// The differential harness deploys unattended, so a secret it
+				// generates always carries a fallback.
+				expect.Default = fmt.Sprintf("secret-%d", i)
+			}
 		}
 		cfgVars[id] = expect
 		p.Expect.ConfigVars[id] = expect
@@ -267,6 +277,7 @@ func (g *generator) build(seed int64) *Program {
 		}
 	}
 
+	p.EntryModule = moduleName(p.Expect.EntryFile[p.PrimaryUnit])
 	g.applyFileShapes()
 	g.files["requirements.txt"] = "fastapi==0.115.6\n"
 	p.Config = g.renderConfig(p)
@@ -400,6 +411,7 @@ func (g *generator) writeExposedBody(p *Program, m *pyModule, unitID string,
 	m.importStd("from fastapi import FastAPI, HTTPException")
 	appVar := []string{"app", "api", "application"}[g.rng.Intn(3)]
 	m.assign(appVar, "FastAPI()")
+	p.AppVar = appVar
 
 	gatewayID := makeID(g.rng, "gw", g.rng.Intn(9))
 	exposeArgs := []arg{pos(appVar)}
@@ -628,7 +640,11 @@ func (g *generator) scenario(store, base string) []Step {
 // offset the compiler records has to survive carriage returns, tabs and
 // trailing whitespace, none of which change what the program means.
 func (g *generator) applyFileShapes() {
-	for path, src := range g.files {
+	// Sorted, not map order: every rng draw has to happen in the same sequence
+	// on every run, or a seed stops reproducing the program it produced last
+	// time -- which is the one property this whole approach rests on.
+	for _, path := range sortedKeys(g.files) {
+		src := g.files[path]
 		if !strings.HasSuffix(path, ".py") {
 			continue
 		}
@@ -678,6 +694,15 @@ func addHelperImport(src, spec string) string {
 }
 
 // ---------------------------------------------------------------- helpers
+
+// moduleName turns a source path into the dotted module a runtime import uses.
+func moduleName(path string) string {
+	path = strings.TrimSuffix(path, ".py")
+	if strings.HasSuffix(path, "/__init__") {
+		path = strings.TrimSuffix(path, "/__init__")
+	}
+	return strings.ReplaceAll(path, "/", ".")
+}
 
 func sdkFunc(kind string) string {
 	switch kind {

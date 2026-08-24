@@ -10,6 +10,8 @@
 | **L4 provisioning** | `pulumi up` against the emulator, then assert through the AWS CLI | emulator | `./tests/e2e/ministack.sh` |
 | **L5 functional** | Run the compiled application against those resources; assert HTTP responses *and* datastore state | emulator | `./tests/e2e/ministack.sh` |
 | **Python** | SDK emulations, and their signature parity with the injected shims | none | `cd sdk/python && uv run --with pytest --with-editable . python -m pytest tests` |
+| **Generated corpus** | Twenty generated programs compiled and checked against the generator's own ground truth | none | `go test ./internal/fuzz` |
+| **Differential** | The same generated program run uncompiled and compiled; every response must match | emulator | `./tests/e2e/differential.sh` |
 
 ```bash
 go test ./...                              # L1 + L2
@@ -20,6 +22,66 @@ cd sdk/python && uv run --with pytest --with-editable . python -m pytest tests
 
 `CLOUDCC_E2E_KEEP=1` leaves the work directory and the deployed stack in place for
 inspection; the harness prints the command to tear it down.
+
+## Generated programs
+
+`internal/fuzz` writes idiomatic Python programs that use the SDK, from a seed,
+along with the ground truth of what a correct compiler must find in them. That
+turns the oracle from "did it compile" into "did it find exactly what I
+planted, and nothing else".
+
+The point is coverage of *shape*. The compiler reads syntax rather than running
+code, so a hint written in a form it does not recognise becomes a resource that
+silently does not exist — nothing complains until production. The generator
+varies:
+
+- all four SDK import styles, including aliased from-imports;
+- flat, package and nested-package layouts, with relative and absolute imports;
+- one to three execution units, with and without an explicit `execution_unit`;
+- string literals as single, double, triple-quoted, implicitly concatenated and
+  parenthesised-across-lines;
+- calls laid out on one line, across lines, with trailing commas, with spaces
+  inside the parentheses, and with comments between arguments;
+- bindings as plain assignment, annotated assignment, two statements on one
+  line, inside an `if`, and as a class attribute;
+- handlers sync and async, plain and stacked under a user decorator;
+- ids containing dots, dashes, underscores, digits and mixed case;
+- files with CRLF endings, tab indentation and trailing whitespace.
+
+```bash
+go test ./internal/fuzz                                   # the frozen corpus
+CLOUDCC_FUZZ_SEEDS=500 go test ./internal/fuzz -run TestSweep   # hunt for more
+CLOUDCC_FUZZ_SEEDS=100 CLOUDCC_FUZZ_START=9000 go test ./internal/fuzz -run TestSweep
+```
+
+A seed always reproduces the same program, so any failure reproduces from the
+seed alone — and a failure prints the whole program, not just its number.
+Interesting seeds get promoted into `CorpusSeeds`.
+
+## The differential test
+
+`tests/e2e/differential.sh` is the correctness guarantee the compiler actually
+owes: that rewriting a program does not change what it does.
+
+Each generated program is run twice — once as written, against the SDK's local
+emulations, and once after compiling, against real AWS services in the
+emulator — and the same request scenario is replayed against both. Every status
+code and every response body must match.
+
+```bash
+./tests/e2e/differential.sh            # seeds 1 2 3
+./tests/e2e/differential.sh 7 11 13
+CLOUDCC_E2E_KEEP=1 ./tests/e2e/differential.sh 4   # keep the workdir to inspect
+```
+
+The scenario exercises real state transitions — a miss, a write, a hit, a
+listing, a delete, a miss again — so a compiler that dropped writes or lost a
+key would show up as a diff rather than as two identical empty results.
+
+Only KV and file stores take part. A secret reads as empty locally and as its
+real value in the cloud, and an ORM handle is a connection URL; those are not
+observably equivalent by design, so comparing them would be comparing the
+emulation, not the compiler.
 
 ## Probe, then assert
 
@@ -74,6 +136,10 @@ Some tests exist for a specific failure that would otherwise be easy to ship:
 | `TestTheCompilePathCannotReachTheNetwork` | A compile-time dependency on something remote |
 | `TestPreflightRefusesStaleOutput` | Deploying output that no longer matches the source |
 | `TestRuntimeFilesAreEmbedded` / `assertParses` | Shipping shims that are not valid Python |
+| `TestCorpus` | Any of the five bugs the generator found coming back |
+| `TestPhysicalNamesAreUnique` | Two capability ids silently sharing one cloud resource |
+| `TestGenerationIsReproducible` | A failing seed that cannot be reproduced |
+| `differential.sh` | Compilation changing what a program does |
 
 ## Golden trees
 

@@ -4,7 +4,8 @@ import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
 
 // Secret configuration values come from the encrypted stack config.
-// Set them with: pulumi config set --secret cloudcc:<name> <value>
+// Set them with:
+//   pulumi config set --secret cloudcc:stripe_key <value>
 const cloudccConfig = new pulumi.Config("cloudcc");
 const stripeKeySecret = cloudccConfig.requireSecret("stripe_key");
 
@@ -516,6 +517,7 @@ const shopApiPermission = new aws.lambda.Permission("shop-api", {
     function: apiFn.name,
     principal: "apigateway.amazonaws.com",
     sourceArn: pulumi.interpolate`${shopApiApi.executionArn}/*/*`,
+    statementId: "kitchen-sink-shop-api-invoke",
 });
 
 const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {

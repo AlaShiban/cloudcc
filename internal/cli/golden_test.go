@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -468,5 +469,97 @@ func copyTree(t *testing.T, from, to string) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestPhysicalNamesAreUnique pins the rule that two capability ids can never
+// end up sharing one cloud resource.
+//
+// Sanitising is lossy: "my_bucket" and "my-bucket" both reduce to
+// "app-my-bucket". Two distinct stores would then silently share a bucket and
+// each other's data, which is about the worst failure this compiler could
+// have. A generated program with dotted ids is what surfaced it.
+func TestPhysicalNamesAreUnique(t *testing.T) {
+	src := writeApp(t, map[string]string{
+		"app.py": `from fastapi import FastAPI
+import cloudcompiler as cloudcc
+
+app = FastAPI()
+cloudcc.expose(app, id="gw")
+
+a = cloudcc.persist_fs("my_bucket")
+b = cloudcc.persist_fs("my-bucket")
+c = cloudcc.persist_fs("my.bucket")
+x = cloudcc.persist_kv("my_table")
+y = cloudcc.persist_kv("my-table")
+`,
+	})
+	out := t.TempDir()
+	if _, stderr, code := run(t, src, "-o", out, "--app", "demo"); code != ExitOK {
+		t.Fatalf("exit %d\n%s", code, stderr)
+	}
+
+	index := readFile(t, filepath.Join(out, "index.ts"))
+	for _, class := range []string{"aws.s3.BucketV2", "aws.dynamodb.Table"} {
+		field := "bucket"
+		if class == "aws.dynamodb.Table" {
+			field = "name"
+		}
+		// Anchored to a top-level property, so the `name` inside an
+		// attributes list is not mistaken for the table's own name.
+		physicalRe := regexp.MustCompile(`(?m)^    ` + field + `: "([^"]+)"`)
+
+		names := map[string]string{}
+		for _, block := range strings.Split(index, "new "+class+"(")[1:] {
+			logical := block[:strings.Index(block, ",")]
+			end := strings.Index(block, "\n});")
+			if end < 0 {
+				end = len(block)
+			}
+			m := physicalRe.FindStringSubmatch(block[:end])
+			if m == nil {
+				t.Errorf("%s %s has no %s property", class, logical, field)
+				continue
+			}
+			if owner, taken := names[m[1]]; taken {
+				t.Errorf("%s and %s both resolved to the physical name %q",
+					owner, logical, m[1])
+			}
+			names[m[1]] = logical
+		}
+		if len(names) < 2 {
+			t.Errorf("expected several %s resources, found %d", class, len(names))
+		}
+	}
+}
+
+// A secret with a default must not block deployment. requireSecret would
+// contradict what the program said and fail every deploy with Pulumi's own
+// message, which does not mention how to set the value.
+func TestSecretWithADefaultDoesNotBlockDeployment(t *testing.T) {
+	src := writeApp(t, map[string]string{
+		"app.py": "import cloudcompiler as cloudcc\n" +
+			"a = cloudcc.config_value(\"with_default\", default=\"fallback\", secret=True)\n" +
+			"b = cloudcc.config_value(\"no_default\", secret=True)\n",
+	})
+	out := t.TempDir()
+	if _, stderr, code := run(t, src, "-o", out, "--app", "demo"); code != ExitOK {
+		t.Fatalf("exit %d\n%s", code, stderr)
+	}
+	index := readFile(t, filepath.Join(out, "index.ts"))
+
+	if !strings.Contains(index, `getSecret("with_default") ?? "fallback"`) {
+		t.Errorf("a secret with a default should fall back to it:\n%s", index)
+	}
+	if !strings.Contains(index, `requireSecret("no_default")`) {
+		t.Errorf("a secret with no default genuinely has to be supplied:\n%s", index)
+	}
+	// The generated file has to say how to supply it.
+	if !strings.Contains(index, "pulumi config set --secret cloudcc:no_default") {
+		t.Errorf("the file should carry the command that sets the value:\n%s", index)
+	}
+	// And the value itself must never be inlined.
+	if strings.Contains(index, `CLOUDCC_CONFIG_NO_DEFAULT: "`) {
+		t.Errorf("a secret was inlined as plaintext:\n%s", index)
 	}
 }

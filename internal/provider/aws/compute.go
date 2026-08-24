@@ -23,7 +23,7 @@ func (r *Resolver) execUnit(u *ir.ExecUnit) error {
 }
 
 func (r *Resolver) lambda(u *ir.ExecUnit) error {
-	fnName := sanitize.LambdaFunction(r.App, u.ID)
+	fnName := r.uniqueName("lambda", u.ID, sanitize.LambdaFunction)
 	roleKey := ir.Key{Kind: KindLambdaRole, ID: u.ID}
 	logsKey := ir.Key{Kind: KindLogGroup, ID: u.ID}
 	fnKey := ir.Key{Kind: KindLambda, ID: u.ID}
@@ -115,7 +115,7 @@ func (r *Resolver) apiGatewayV2(e *ir.Expose) error {
 	}
 
 	api := ir.NewResource(KindAPIGatewayV2, e.ID, "aws.apigatewayv2.Api", map[string]any{
-		"name":         sanitize.APIName(r.App, e.ID),
+		"name":         r.uniqueName("apigateway", e.ID, sanitize.APIName),
 		"protocolType": "HTTP",
 	}, ir.Env(EnvGatewayURL(e.ID), "apiEndpoint"))
 	r.Program.Resolve(e.Key(), api)
@@ -153,6 +153,8 @@ func (r *Resolver) apiGatewayV2(e *ir.Expose) error {
 		"function":  ir.Ref{Key: fnKey, Prop: "name"},
 		"principal": "apigateway.amazonaws.com",
 		"sourceArn": ir.Lit(ir.Ref{Key: apiKey, Prop: "executionArn"}, "/*/*"),
+		"statementId": r.uniqueName("lambda-permission", e.ID,
+			func(app, id string) string { return sanitize.StatementID(app, id, "invoke") }),
 	}, nil)
 	r.Program.Resolve(e.Key(), permission)
 	r.Program.Connect(permission.Key(), apiKey, ir.EdgeDependsOn)
@@ -197,6 +199,8 @@ func (r *Resolver) subscriptions() error {
 					"function":  ir.Ref{Key: fnKey, Prop: "name"},
 					"principal": "sns.amazonaws.com",
 					"sourceArn": ir.Ref{Key: topicKey, Prop: "arn"},
+					"statementId": r.uniqueName("lambda-permission", id,
+						func(app, key string) string { return sanitize.StatementID(app, key, "sns") }),
 				}, nil)
 				r.Program.Resolve(edge.To, perm)
 				r.Program.Connect(perm.Key(), topicKey, ir.EdgeDependsOn)

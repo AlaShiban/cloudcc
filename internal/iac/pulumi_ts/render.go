@@ -261,9 +261,21 @@ func secretConfigReads(req iac.Request) string {
 
 	var b strings.Builder
 	b.WriteString("// Secret configuration values come from the encrypted stack config.\n")
-	b.WriteString("// Set them with: pulumi config set --secret cloudcc:<name> <value>\n")
+	b.WriteString("// Set them with:\n")
+	for _, v := range secrets {
+		fmt.Fprintf(&b, "//   pulumi config set --secret cloudcc:%s <value>\n", v.ID)
+	}
 	b.WriteString("const cloudccConfig = new pulumi.Config(\"cloudcc\");\n")
 	for _, v := range secrets {
+		if v.Default != "" {
+			// The program supplied a fallback, so requiring the value here
+			// would contradict what it said and block every deploy until an
+			// operator happened to guess the right command.
+			fmt.Fprintf(&b, "const %s = cloudccConfig.getSecret(%s) ?? %s;\n",
+				secretConstName(v.ID), quote(v.ID), quote(v.Default))
+			continue
+		}
+		// No fallback: the value genuinely has to be provided.
 		fmt.Fprintf(&b, "const %s = cloudccConfig.requireSecret(%s);\n",
 			secretConstName(v.ID), quote(v.ID))
 	}

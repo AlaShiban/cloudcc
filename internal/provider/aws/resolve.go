@@ -1,6 +1,8 @@
 package aws
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"mime"
 	"path"
@@ -27,6 +29,35 @@ type Resolver struct {
 	// StaticDir is where static site assets were written, relative to the
 	// output root.
 	StaticDir string
+
+	// usedNames maps "service|name" to the capability id that claimed it.
+	// Sanitising is lossy -- "gw.1" and "gw-1" reduce to the same string -- so
+	// two distinct ids can arrive at one physical name and silently share a
+	// resource. Collisions are a property of the set of names in one
+	// application, not of any name on its own, which is why they are resolved
+	// here rather than inside the sanitisers.
+	usedNames map[string]string
+}
+
+// uniqueName returns the physical name for a resource, disambiguating with a
+// short digest of the id when a different id already claimed that name.
+// Resolution runs in sorted order, so which id gets the plain name is stable.
+func (r *Resolver) uniqueName(service, id string, sanitise func(app, id string) string) string {
+	if r.usedNames == nil {
+		r.usedNames = map[string]string{}
+	}
+	name := sanitise(r.App, id)
+	if owner, taken := r.usedNames[service+"|"+name]; taken && owner != id {
+		name = sanitise(r.App, id+"-"+shortDigest(id))
+	}
+	r.usedNames[service+"|"+name] = id
+	return name
+}
+
+// shortDigest is a stable eight-character tag derived from an id.
+func shortDigest(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 // Resolve expands every intent in the program. Iteration is over sorted keys
@@ -120,7 +151,7 @@ func (r *Resolver) persist(p *ir.Persist) error {
 
 func (r *Resolver) dynamoTable(p *ir.Persist) error {
 	props := map[string]any{
-		"name":        sanitize.DynamoTable(r.App, p.ID),
+		"name":        r.uniqueName("dynamodb", p.ID, sanitize.DynamoTable),
 		"billingMode": "PAY_PER_REQUEST",
 		"hashKey":     "id",
 		"attributes": []any{
@@ -134,7 +165,7 @@ func (r *Resolver) dynamoTable(p *ir.Persist) error {
 
 func (r *Resolver) fsBucket(p *ir.Persist) error {
 	props := map[string]any{
-		"bucket":       sanitize.S3Bucket(r.App, p.ID),
+		"bucket":       r.uniqueName("s3", p.ID, sanitize.S3Bucket),
 		"forceDestroy": true,
 	}
 	r.resolve(p.Key(), KindS3Bucket, p.ID, "aws.s3.BucketV2", props,
@@ -144,7 +175,7 @@ func (r *Resolver) fsBucket(p *ir.Persist) error {
 
 func (r *Resolver) secret(p *ir.Persist) error {
 	props := map[string]any{
-		"name":                 sanitize.SecretName(r.App, p.ID),
+		"name":                 r.uniqueName("secretsmanager", p.ID, sanitize.SecretName),
 		"recoveryWindowInDays": 0,
 	}
 	r.resolve(p.Key(), KindSecret, p.ID, "aws.secretsmanager.Secret", props,
@@ -153,7 +184,7 @@ func (r *Resolver) secret(p *ir.Persist) error {
 }
 
 func (r *Resolver) database(p *ir.Persist) error {
-	name := sanitize.RDSIdentifier(r.App, p.ID)
+	name := r.uniqueName("rds", p.ID, sanitize.RDSIdentifier)
 	dbName := sanitize.DBIdentifier(p.ID)
 	props := map[string]any{
 		"identifier":               name,
@@ -185,7 +216,7 @@ func (r *Resolver) database(p *ir.Persist) error {
 }
 
 func (r *Resolver) cache(p *ir.Persist) error {
-	name := sanitize.ElastiCacheCluster(r.App, p.ID)
+	name := r.uniqueName("elasticache", p.ID, sanitize.ElastiCacheCluster)
 	if p.Config().Type == "memorydb" {
 		props := map[string]any{
 			"name":             name,
@@ -225,7 +256,7 @@ func (r *Resolver) cache(p *ir.Persist) error {
 }
 
 func (r *Resolver) topic(t *ir.Topic) error {
-	props := map[string]any{"name": sanitize.SNSTopic(r.App, t.ID)}
+	props := map[string]any{"name": r.uniqueName("sns", t.ID, sanitize.SNSTopic)}
 	r.resolve(t.Key(), KindSNSTopic, t.ID, "aws.sns.Topic", props,
 		ir.Env(EnvTopicARN(t.ID), "arn"), t.Config())
 	return nil
@@ -234,7 +265,7 @@ func (r *Resolver) topic(t *ir.Topic) error {
 func (r *Resolver) staticSite(s *ir.StaticSite) error {
 	bucketKey := ir.Key{Kind: KindS3Bucket, ID: s.ID}
 	bucketProps := map[string]any{
-		"bucket":       sanitize.S3Bucket(r.App, s.ID),
+		"bucket":       r.uniqueName("s3", s.ID, sanitize.S3Bucket),
 		"forceDestroy": true,
 	}
 	r.resolve(s.Key(), KindS3Bucket, s.ID, "aws.s3.BucketV2", bucketProps,

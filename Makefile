@@ -4,7 +4,7 @@
 GO ?= go
 BIN ?= cloudcc
 
-.PHONY: build test fmt vet check golden sdk-test e2e e2e-deploy doctor clean
+.PHONY: build test fmt vet check golden sdk-test e2e e2e-deploy fuzz diff doctor clean
 
 build:              ## Build the cloudcc binary
 	$(GO) build -o $(BIN) ./cmd/cloudcc
@@ -32,6 +32,12 @@ e2e:                ## Provisioning and functional tests against the emulator
 
 e2e-deploy:         ## The same path through `cloudcc deploy`
 	./tests/e2e/deploy.sh
+
+fuzz:               ## Sweep generated programs looking for compiler bugs
+	CLOUDCC_FUZZ_SEEDS=$${SEEDS:-200} $(GO) test ./internal/fuzz -run TestSweep -timeout 30m
+
+diff:               ## Differential test: uncompiled vs compiled behaviour
+	./tests/e2e/differential.sh
 
 doctor: build       ## Check the local toolchain
 	./$(BIN) doctor

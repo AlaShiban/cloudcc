@@ -45,6 +45,9 @@ jobs:
       - name: Unit and golden tests
         run: go test ./... -count=1
 
+      - name: Sweep generated programs
+        run: CLOUDCC_FUZZ_SEEDS=150 go test ./internal/fuzz -run TestSweep -timeout 20m
+
       - name: Prove compilation needs no network
         run: |
           docker pull --quiet golang:${{ env.GO_VERSION }}-bookworm
@@ -125,6 +128,9 @@ jobs:
 
       - name: cloudcc deploy end to end
         run: ./tests/e2e/deploy.sh
+
+      - name: Differential test -- uncompiled vs compiled behaviour
+        run: ./tests/e2e/differential.sh 1 2 3
 
       - name: Upload the work directory on failure
         if: failure()

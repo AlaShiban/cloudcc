@@ -136,6 +136,15 @@ func APIName(app, id string) string {
 	return clamp(keep(join(app, id), isLambdaRune, '-'), 1, 128, "api")
 }
 
+// StatementID: 1-100 characters of [a-zA-Z0-9-_], for a Lambda permission.
+//
+// Pulumi derives this from the resource's logical name when it is not set, and
+// a logical name comes from a capability id -- which may perfectly well
+// contain a dot. AWS rejects that, so the field is always set explicitly.
+func StatementID(app, id, suffix string) string {
+	return clamp(keep(join(join(app, id), suffix), isLambdaRune, '-'), 1, 100, "stmt")
+}
+
 // IAMName: 1-64 characters of [a-zA-Z0-9+=,.@_-].
 func IAMName(app, id, suffix string) string {
 	return clamp(keep(join(join(app, id), suffix), isIAMRune, '-'), 1, 64, "role")

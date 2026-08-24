@@ -167,3 +167,24 @@ func TestDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// A capability id may contain a dot; a Lambda statement id may not. Pulumi
+// derives the statement id from the logical name when it is not set, so an
+// id like "gw.3" produced a deploy-time rejection until this was set
+// explicitly.
+func TestStatementIDStripsWhatAWSRejects(t *testing.T) {
+	valid := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	for _, id := range []string{"gw.3", "pet api", "a/b", "gw-1", "GW_2"} {
+		got := StatementID("petstore", id, "invoke")
+		if !valid.MatchString(got) {
+			t.Errorf("StatementID(petstore, %q) = %q, which AWS would reject", id, got)
+		}
+		if len(got) > 100 {
+			t.Errorf("StatementID(petstore, %q) is %d characters", id, len(got))
+		}
+	}
+	// Sanitising is lossy by nature: "gw.1" and "gw-1" reduce to the same
+	// string. Making every distinct id produce a distinct name is the
+	// resolver's job, because a collision is a property of the whole set of
+	// names in an application -- see TestPhysicalNamesAreUnique.
+}

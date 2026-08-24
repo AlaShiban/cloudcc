@@ -55,6 +55,44 @@ credential; the URL delivered to the shim carries no password, and the managed
 secret's ARN is passed separately so the shim can fetch it. Putting the
 password in the environment would have defeated the point of D21.
 
+## What the program generator found
+
+`internal/fuzz` generates idiomatic Python and checks the compiler against its
+own ground truth. Seven real bugs, none of which the hand-written tests would
+have reached, because each needed a shape nobody thought to write by hand:
+
+1. **Parenthesised string literals were rejected.** Black wraps a long string
+   in parentheses and splits it across lines, so running a formatter could
+   break a program that compiled a moment earlier.
+2. **An empty `__init__.py` was chosen as the entrypoint.** "Shallowest Python
+   file wins" picks a package's empty init and produces a unit containing
+   nothing. The exposed module now wins outright.
+3. **Route paths in concatenated form were silently missed**, because
+   `expose.go` had its own simpler string-literal reader. There is one decoder
+   now — two copies of a parser always drift.
+4. **An unused SDK import survived into the bundle.** The SDK is not installed
+   there, so the unit died on its first import. Every Python file is rewritten
+   now, not only those containing hints.
+5. **Comments between call arguments were read as arguments**, because
+   tree-sitter counts a comment as a named child. A hard compile error on
+   entirely ordinary code.
+6. **A capability id containing a dot produced an invalid Lambda statement id**,
+   which AWS rejects at deploy time.
+7. **A secret configuration value always compiled to `requireSecret`**, so a
+   program that supplied a default still could not deploy, and the failure came
+   back as Pulumi's own message with no hint about how to set the value.
+
+Two of these — 3 and 5 — share a root cause worth naming: reading a Python
+literal is one job, and it had grown two implementations. Bug 6 and the
+`uniqueName` allocator share another: sanitising is lossy, so uniqueness cannot
+be a property of one name in isolation.
+
+**Physical names are allocated, not just sanitised.** `my_bucket` and
+`my-bucket` both reduce to `app-my-bucket`, which would have meant two declared
+stores silently sharing one bucket and each other's data. Collisions are a
+property of the whole set of names in an application, so the resolver tracks
+them and appends a digest when two ids would otherwise land on the same name.
+
 ## Things that turned out to matter more than expected
 
 **A central reference-to-dependency pass.** Every `ir.Ref` inside a resource's
