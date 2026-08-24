@@ -3,22 +3,22 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
 
-export const petApiApi = new aws.apigatewayv2.Api("pet-api", {
+const petApiApi = new aws.apigatewayv2.Api("pet-api", {
     name: "petstore-multi-pet-api",
     protocolType: "HTTP",
 });
 
-export const apiLogs = new aws.cloudwatch.LogGroup("api", {
+const apiLogs = new aws.cloudwatch.LogGroup("api", {
     name: "/aws/lambda/petstore-multi-api",
     retentionInDays: 14,
 });
 
-export const workerLogs = new aws.cloudwatch.LogGroup("worker", {
+const workerLogs = new aws.cloudwatch.LogGroup("worker", {
     name: "/aws/lambda/petstore-multi-worker",
     retentionInDays: 14,
 });
 
-export const petsByOwnerTable = new aws.dynamodb.Table("petsByOwner", {
+const petsByOwnerTable = new aws.dynamodb.Table("petsByOwner", {
     attributes: [
         {
             name: "id",
@@ -30,7 +30,7 @@ export const petsByOwnerTable = new aws.dynamodb.Table("petsByOwner", {
     name: "petstore-multi-petsByOwner",
 });
 
-export const apiRole = new aws.iam.Role("api", {
+const apiRole = new aws.iam.Role("api", {
     assumeRolePolicy: pulumi.jsonStringify({
     Statement: [
         {
@@ -49,7 +49,7 @@ export const apiRole = new aws.iam.Role("api", {
     name: "petstore-multi-api-role",
 });
 
-export const workerRole = new aws.iam.Role("worker", {
+const workerRole = new aws.iam.Role("worker", {
     assumeRolePolicy: pulumi.jsonStringify({
     Statement: [
         {
@@ -68,12 +68,12 @@ export const workerRole = new aws.iam.Role("worker", {
     name: "petstore-multi-worker-role",
 });
 
-export const petAuditBucket = new aws.s3.BucketV2("petAudit", {
+const petAuditBucket = new aws.s3.BucketV2("petAudit", {
     bucket: "petstore-multi-petaudit",
     forceDestroy: true,
 });
 
-export const workerPolicy = new aws.iam.RolePolicy("worker", {
+const workerPolicy = new aws.iam.RolePolicy("worker", {
     name: "petstore-multi-worker-policy",
     policy: pulumi.jsonStringify({
     Statement: [
@@ -112,37 +112,37 @@ export const workerPolicy = new aws.iam.RolePolicy("worker", {
     role: workerRole.id,
 });
 
-export const petstoreSiteBucket = new aws.s3.BucketV2("petstore-site", {
+const petstoreSiteBucket = new aws.s3.BucketV2("petstore-site", {
     bucket: "petstore-multi-petstore-site",
     forceDestroy: true,
 });
 
-export const petstoreSiteIndexHtmlObject = new aws.s3.BucketObject("petstore-site/index.html", {
+const petstoreSiteIndexHtmlObject = new aws.s3.BucketObject("petstore-site/index.html", {
     bucket: petstoreSiteBucket.id,
     contentType: "text/html; charset=utf-8",
     key: "index.html",
     source: new pulumi.asset.FileAsset("static/petstore-site/index.html"),
 });
 
-export const petstoreSiteStyleCssObject = new aws.s3.BucketObject("petstore-site/style.css", {
+const petstoreSiteStyleCssObject = new aws.s3.BucketObject("petstore-site/style.css", {
     bucket: petstoreSiteBucket.id,
     contentType: "text/css; charset=utf-8",
     key: "style.css",
     source: new pulumi.asset.FileAsset("static/petstore-site/style.css"),
 });
 
-export const petstoreSiteWebsite = new aws.s3.BucketWebsiteConfigurationV2("petstore-site", {
+const petstoreSiteWebsite = new aws.s3.BucketWebsiteConfigurationV2("petstore-site", {
     bucket: petstoreSiteBucket.id,
     indexDocument: {
         suffix: "index.html",
     },
 });
 
-export const petEventsTopic = new aws.sns.Topic("petEvents", {
+const petEventsTopic = new aws.sns.Topic("petEvents", {
     name: "petstore-multi-petEvents",
 });
 
-export const apiPolicy = new aws.iam.RolePolicy("api", {
+const apiPolicy = new aws.iam.RolePolicy("api", {
     name: "petstore-multi-api-policy",
     policy: pulumi.jsonStringify({
     Statement: [
@@ -185,7 +185,7 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     LOG_LEVEL: "info",
 };
 
-export const apiFn = new aws.lambda.Function("api", {
+const apiFn = new aws.lambda.Function("api", {
     code: new pulumi.asset.FileArchive("build/api.zip"),
     environment: { variables: apiEnv },
     handler: "cc_lambda_entry.handler",
@@ -196,7 +196,7 @@ export const apiFn = new aws.lambda.Function("api", {
     timeout: 30,
 });
 
-export const petApiIntegration = new aws.apigatewayv2.Integration("pet-api", {
+const petApiIntegration = new aws.apigatewayv2.Integration("pet-api", {
     apiId: petApiApi.id,
     integrationMethod: "POST",
     integrationType: "AWS_PROXY",
@@ -204,19 +204,19 @@ export const petApiIntegration = new aws.apigatewayv2.Integration("pet-api", {
     payloadFormatVersion: "2.0",
 });
 
-export const petApiRoute = new aws.apigatewayv2.Route("pet-api", {
+const petApiRoute = new aws.apigatewayv2.Route("pet-api", {
     apiId: petApiApi.id,
     routeKey: "$default",
     target: pulumi.interpolate`integrations/${petApiIntegration.id}`,
 });
 
-export const petApiStage = new aws.apigatewayv2.Stage("pet-api", {
+const petApiStage = new aws.apigatewayv2.Stage("pet-api", {
     apiId: petApiApi.id,
     autoDeploy: true,
     name: "$default",
 });
 
-export const petApiPermission = new aws.lambda.Permission("pet-api", {
+const petApiPermission = new aws.lambda.Permission("pet-api", {
     action: "lambda:InvokeFunction",
     function: apiFn.name,
     principal: "apigateway.amazonaws.com",
@@ -230,7 +230,7 @@ const workerEnv: { [key: string]: pulumi.Input<string> } = {
     CC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
 };
 
-export const workerFn = new aws.lambda.Function("worker", {
+const workerFn = new aws.lambda.Function("worker", {
     code: new pulumi.asset.FileArchive("build/worker.zip"),
     environment: { variables: workerEnv },
     handler: "cc_lambda_entry.handler",
@@ -241,14 +241,14 @@ export const workerFn = new aws.lambda.Function("worker", {
     timeout: 30,
 });
 
-export const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents-sns", {
+const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents-sns", {
     action: "lambda:InvokeFunction",
     function: workerFn.name,
     principal: "sns.amazonaws.com",
     sourceArn: petEventsTopic.arn,
 });
 
-export const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEvents", {
+const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEvents", {
     endpoint: workerFn.arn,
     protocol: "lambda",
     topic: petEventsTopic.arn,

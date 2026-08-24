@@ -163,12 +163,15 @@ func renderResource(namer *varNamer, res ir.Resource, logicalName string) (strin
 	if err != nil {
 		return "", err
 	}
+	// Plain consts, not exports: exporting a resource makes every one of its
+	// properties a stack output, which buries the handful of bindings a caller
+	// actually needs under pages of provider detail.
 	if tmpl.Func != "" {
 		// A data source is a call, not a construction, so it takes no Pulumi
 		// resource name.
-		return fmt.Sprintf("export const %s = %s(%s);\n\n", name, tmpl.Func, props), nil
+		return fmt.Sprintf("const %s = %s(%s);\n\n", name, tmpl.Func, props), nil
 	}
-	return fmt.Sprintf("export const %s = new %s(%s, %s);\n\n",
+	return fmt.Sprintf("const %s = new %s(%s, %s);\n\n",
 		name, tmpl.Class, quote(logicalName), props), nil
 }
 

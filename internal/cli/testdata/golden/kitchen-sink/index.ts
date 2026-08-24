@@ -8,26 +8,26 @@ import * as aws from "@pulumi/aws";
 const ccConfig = new pulumi.Config("cc");
 const stripeKeySecret = ccConfig.requireSecret("stripe_key");
 
-export const shopApiApi = new aws.apigatewayv2.Api("shop-api", {
+const shopApiApi = new aws.apigatewayv2.Api("shop-api", {
     name: "kitchen-sink-shop-api",
     protocolType: "HTTP",
 });
 
-export const networkZones = aws.getAvailabilityZonesOutput({
+const networkZones = aws.getAvailabilityZonesOutput({
     state: "available",
 });
 
-export const apiLogs = new aws.cloudwatch.LogGroup("api", {
+const apiLogs = new aws.cloudwatch.LogGroup("api", {
     name: "/aws/lambda/kitchen-sink-api",
     retentionInDays: 14,
 });
 
-export const reporterLogs = new aws.cloudwatch.LogGroup("reporter", {
+const reporterLogs = new aws.cloudwatch.LogGroup("reporter", {
     name: "/ecs/kitchen-sink-reporter",
     retentionInDays: 14,
 });
 
-export const catalogueTable = new aws.dynamodb.Table("catalogue", {
+const catalogueTable = new aws.dynamodb.Table("catalogue", {
     attributes: [
         {
             name: "id",
@@ -39,16 +39,16 @@ export const catalogueTable = new aws.dynamodb.Table("catalogue", {
     name: "kitchen-sink-catalogue",
 });
 
-export const reporterRepo = new aws.ecr.Repository("reporter", {
+const reporterRepo = new aws.ecr.Repository("reporter", {
     forceDelete: true,
     name: "kitchen-sink-reporter",
 });
 
-export const clusterCluster = new aws.ecs.Cluster("cluster", {
+const clusterCluster = new aws.ecs.Cluster("cluster", {
     name: "kitchen-sink-cluster",
 });
 
-export const reporterExecRole = new aws.iam.Role("reporter-exec", {
+const reporterExecRole = new aws.iam.Role("reporter-exec", {
     assumeRolePolicy: pulumi.jsonStringify({
     Statement: [
         {
@@ -67,7 +67,7 @@ export const reporterExecRole = new aws.iam.Role("reporter-exec", {
     name: "kitchen-sink-reporter-exec",
 });
 
-export const reporterTaskRole = new aws.iam.Role("reporter-task", {
+const reporterTaskRole = new aws.iam.Role("reporter-task", {
     assumeRolePolicy: pulumi.jsonStringify({
     Statement: [
         {
@@ -83,7 +83,7 @@ export const reporterTaskRole = new aws.iam.Role("reporter-task", {
     name: "kitchen-sink-reporter-task",
 });
 
-export const apiRole = new aws.iam.Role("api", {
+const apiRole = new aws.iam.Role("api", {
     assumeRolePolicy: pulumi.jsonStringify({
     Statement: [
         {
@@ -102,21 +102,21 @@ export const apiRole = new aws.iam.Role("api", {
     name: "kitchen-sink-api-role",
 });
 
-export const itemDocsBucket = new aws.s3.BucketV2("itemDocs", {
+const itemDocsBucket = new aws.s3.BucketV2("itemDocs", {
     bucket: "kitchen-sink-itemdocs",
     forceDestroy: true,
 });
 
-export const signingKeySecret = new aws.secretsmanager.Secret("signingKey", {
+const signingKeySecret = new aws.secretsmanager.Secret("signingKey", {
     name: "kitchen-sink-signingKey",
     recoveryWindowInDays: 0,
 });
 
-export const itemEventsTopic = new aws.sns.Topic("itemEvents", {
+const itemEventsTopic = new aws.sns.Topic("itemEvents", {
     name: "kitchen-sink-itemEvents",
 });
 
-export const networkVpc = new aws.ec2.Vpc("network", {
+const networkVpc = new aws.ec2.Vpc("network", {
     cidrBlock: "10.0.0.0/16",
     enableDnsHostnames: true,
     enableDnsSupport: true,
@@ -125,7 +125,7 @@ export const networkVpc = new aws.ec2.Vpc("network", {
     },
 });
 
-export const reporterWebTargetGroup = new aws.lb.TargetGroup("reporter-web", {
+const reporterWebTargetGroup = new aws.lb.TargetGroup("reporter-web", {
     healthCheck: {
         matcher: "200-399",
         path: "/health",
@@ -137,11 +137,11 @@ export const reporterWebTargetGroup = new aws.lb.TargetGroup("reporter-web", {
     vpcId: networkVpc.id,
 });
 
-export const networkGateway = new aws.ec2.InternetGateway("network", {
+const networkGateway = new aws.ec2.InternetGateway("network", {
     vpcId: networkVpc.id,
 });
 
-export const networkRoutes = new aws.ec2.RouteTable("network", {
+const networkRoutes = new aws.ec2.RouteTable("network", {
     routes: [
         {
             cidrBlock: "0.0.0.0/0",
@@ -151,7 +151,7 @@ export const networkRoutes = new aws.ec2.RouteTable("network", {
     vpcId: networkVpc.id,
 });
 
-export const networkSecurityGroup = new aws.ec2.SecurityGroup("network", {
+const networkSecurityGroup = new aws.ec2.SecurityGroup("network", {
     description: "Managed by cc: traffic between compiled units and their datastores",
     egress: [
         {
@@ -177,7 +177,7 @@ export const networkSecurityGroup = new aws.ec2.SecurityGroup("network", {
     vpcId: networkVpc.id,
 });
 
-export const network0Subnet = new aws.ec2.Subnet("network-0", {
+const network0Subnet = new aws.ec2.Subnet("network-0", {
     availabilityZone: networkZones.names.apply(n => n[0]),
     cidrBlock: "10.0.0.0/24",
     mapPublicIpOnLaunch: true,
@@ -187,12 +187,12 @@ export const network0Subnet = new aws.ec2.Subnet("network-0", {
     vpcId: networkVpc.id,
 });
 
-export const network0RouteAssoc = new aws.ec2.RouteTableAssociation("network-0", {
+const network0RouteAssoc = new aws.ec2.RouteTableAssociation("network-0", {
     routeTableId: networkRoutes.id,
     subnetId: network0Subnet.id,
 });
 
-export const network1Subnet = new aws.ec2.Subnet("network-1", {
+const network1Subnet = new aws.ec2.Subnet("network-1", {
     availabilityZone: networkZones.names.apply(n => n[1]),
     cidrBlock: "10.0.1.0/24",
     mapPublicIpOnLaunch: true,
@@ -202,7 +202,7 @@ export const network1Subnet = new aws.ec2.Subnet("network-1", {
     vpcId: networkVpc.id,
 });
 
-export const reporterWebAlb = new aws.lb.LoadBalancer("reporter-web", {
+const reporterWebAlb = new aws.lb.LoadBalancer("reporter-web", {
     internal: false,
     loadBalancerType: "application",
     name: "kitchen-sink-reporter-web",
@@ -215,7 +215,7 @@ export const reporterWebAlb = new aws.lb.LoadBalancer("reporter-web", {
     ],
 });
 
-export const reporterWebListener = new aws.lb.Listener("reporter-web", {
+const reporterWebListener = new aws.lb.Listener("reporter-web", {
     defaultActions: [
         {
             targetGroupArn: reporterWebTargetGroup.arn,
@@ -227,7 +227,7 @@ export const reporterWebListener = new aws.lb.Listener("reporter-web", {
     protocol: "HTTP",
 });
 
-export const elasticacheSubnetGroup = new aws.elasticache.SubnetGroup("elasticache", {
+const elasticacheSubnetGroup = new aws.elasticache.SubnetGroup("elasticache", {
     name: "kitchen-sink-elasticache",
     subnetIds: [
         network0Subnet.id,
@@ -235,7 +235,7 @@ export const elasticacheSubnetGroup = new aws.elasticache.SubnetGroup("elasticac
     ],
 });
 
-export const itemCacheCache = new aws.elasticache.Cluster("itemCache", {
+const itemCacheCache = new aws.elasticache.Cluster("itemCache", {
     clusterId: "kitchen-sink-itemcache",
     engine: "redis",
     nodeType: "cache.t4g.micro",
@@ -247,7 +247,7 @@ export const itemCacheCache = new aws.elasticache.Cluster("itemCache", {
     subnetGroupName: elasticacheSubnetGroup.name,
 });
 
-export const rdsSubnetGroup = new aws.rds.SubnetGroup("rds", {
+const rdsSubnetGroup = new aws.rds.SubnetGroup("rds", {
     name: "kitchen-sink-rds",
     subnetIds: [
         network0Subnet.id,
@@ -255,7 +255,7 @@ export const rdsSubnetGroup = new aws.rds.SubnetGroup("rds", {
     ],
 });
 
-export const shopdbDb = new aws.rds.Instance("shopdb", {
+const shopdbDb = new aws.rds.Instance("shopdb", {
     allocatedStorage: 20,
     dbName: "shopdb",
     dbSubnetGroupName: rdsSubnetGroup.name,
@@ -284,7 +284,7 @@ const reporterEnv: { [key: string]: pulumi.Input<string> } = {
     CC_TOPIC_ITEMEVENTS_ARN: pulumi.interpolate`${itemEventsTopic.arn}`,
 };
 
-export const reporterTask = new aws.ecs.TaskDefinition("reporter", {
+const reporterTask = new aws.ecs.TaskDefinition("reporter", {
     containerDefinitions: pulumi.jsonStringify([{
     environment: Object.entries(reporterEnv).map(([name, value]) => ({ name, value })),
     image: pulumi.interpolate`${reporterRepo.repositoryUrl}:latest`,
@@ -315,7 +315,7 @@ export const reporterTask = new aws.ecs.TaskDefinition("reporter", {
     taskRoleArn: reporterTaskRole.arn,
 });
 
-export const reporterService = new aws.ecs.Service("reporter", {
+const reporterService = new aws.ecs.Service("reporter", {
     cluster: clusterCluster.id,
     desiredCount: 1,
     launchType: "FARGATE",
@@ -340,7 +340,7 @@ export const reporterService = new aws.ecs.Service("reporter", {
     taskDefinition: reporterTask.arn,
 });
 
-export const reporterPolicy = new aws.iam.RolePolicy("reporter", {
+const reporterPolicy = new aws.iam.RolePolicy("reporter", {
     name: "kitchen-sink-reporter-policy",
     policy: pulumi.jsonStringify({
     Statement: [
@@ -398,7 +398,7 @@ export const reporterPolicy = new aws.iam.RolePolicy("reporter", {
     role: reporterTaskRole.id,
 });
 
-export const apiPolicy = new aws.iam.RolePolicy("api", {
+const apiPolicy = new aws.iam.RolePolicy("api", {
     name: "kitchen-sink-api-policy",
     policy: pulumi.jsonStringify({
     Statement: [
@@ -480,7 +480,7 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CC_TOPIC_ITEMEVENTS_ARN: pulumi.interpolate`${itemEventsTopic.arn}`,
 };
 
-export const apiFn = new aws.lambda.Function("api", {
+const apiFn = new aws.lambda.Function("api", {
     code: new pulumi.asset.FileArchive("build/api.zip"),
     environment: { variables: apiEnv },
     handler: "cc_lambda_entry.handler",
@@ -491,7 +491,7 @@ export const apiFn = new aws.lambda.Function("api", {
     timeout: 30,
 });
 
-export const shopApiIntegration = new aws.apigatewayv2.Integration("shop-api", {
+const shopApiIntegration = new aws.apigatewayv2.Integration("shop-api", {
     apiId: shopApiApi.id,
     integrationMethod: "POST",
     integrationType: "AWS_PROXY",
@@ -499,26 +499,26 @@ export const shopApiIntegration = new aws.apigatewayv2.Integration("shop-api", {
     payloadFormatVersion: "2.0",
 });
 
-export const shopApiRoute = new aws.apigatewayv2.Route("shop-api", {
+const shopApiRoute = new aws.apigatewayv2.Route("shop-api", {
     apiId: shopApiApi.id,
     routeKey: "$default",
     target: pulumi.interpolate`integrations/${shopApiIntegration.id}`,
 });
 
-export const shopApiStage = new aws.apigatewayv2.Stage("shop-api", {
+const shopApiStage = new aws.apigatewayv2.Stage("shop-api", {
     apiId: shopApiApi.id,
     autoDeploy: true,
     name: "$default",
 });
 
-export const shopApiPermission = new aws.lambda.Permission("shop-api", {
+const shopApiPermission = new aws.lambda.Permission("shop-api", {
     action: "lambda:InvokeFunction",
     function: apiFn.name,
     principal: "apigateway.amazonaws.com",
     sourceArn: pulumi.interpolate`${shopApiApi.executionArn}/*/*`,
 });
 
-export const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {
+const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {
     routeTableId: networkRoutes.id,
     subnetId: network1Subnet.id,
 });

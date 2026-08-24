@@ -28,6 +28,9 @@ type compileOptions struct {
 	strict     bool
 	verbose    bool
 	dumpIR     bool
+	// quiet suppresses progress output, for the in-memory recompile that the
+	// deploy staleness check runs.
+	quiet bool
 }
 
 func newCompileCommand() *cobra.Command {
@@ -66,6 +69,18 @@ func newCompileCommand() *cobra.Command {
 type compileResult struct {
 	Ctx    *compiler.Context
 	OutDir string
+}
+
+// compileFingerprint compiles into memory and returns the fingerprint of the
+// result. Nothing is written to disk, so it is safe to call before a deploy
+// just to find out whether the existing output is current.
+func compileFingerprint(cmd *cobra.Command, srcPath string, opts compileOptions) (string, error) {
+	opts.quiet = true
+	result, err := compileInto(cmd, srcPath, opts, afero.NewMemMapFs(), "")
+	if err != nil {
+		return "", err
+	}
+	return Fingerprint(result.Ctx)
 }
 
 func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compileResult, error) {
@@ -108,7 +123,36 @@ func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compi
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, compileErr(err)
 	}
-	out := afero.NewBasePathFs(afero.NewOsFs(), outDir)
+	return compileInto(cmd, srcPath, opts, afero.NewBasePathFs(afero.NewOsFs(), outDir), outDir)
+}
+
+// compileInto runs the whole chain against a given output filesystem. outDir is
+// the real path backing it, or "" for an in-memory run.
+func compileInto(cmd *cobra.Command, srcPath string, opts compileOptions, out afero.Fs, outDir string) (*compileResult, error) {
+	srcRoot, err := filepath.Abs(srcPath)
+	if err != nil {
+		return nil, usageErr("%v", err)
+	}
+	cfgPath := config.FindFile(opts.configPath, srcRoot)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return nil, usageErr("%v", err)
+	}
+	if opts.app != "" {
+		cfg.App = opts.app
+	}
+	if opts.provider != "" {
+		cfg.Provider = opts.provider
+	}
+	if opts.outDir != "" {
+		cfg.OutDir = opts.outDir
+	}
+	if cfg.App == "" {
+		cfg.App = filepath.Base(srcRoot)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, usageErr("%v", err)
+	}
 
 	ctx := compiler.NewContext(cfg, srcRoot, out)
 	ctx.OutDir = outDir
@@ -116,7 +160,9 @@ func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compi
 		ctx.ConfigPath = filepath.ToSlash(rel)
 	}
 	ctx.Diags.Strict = opts.strict
-	ctx.Notice = func(msg string) { fmt.Fprintf(cmd.ErrOrStderr(), "cc: %s\n", msg) }
+	if !opts.quiet {
+		ctx.Notice = func(msg string) { fmt.Fprintf(cmd.ErrOrStderr(), "cc: %s\n", msg) }
+	}
 
 	c, err := compiler.NewCompiler(capabilities.Chain())
 	if err != nil {
@@ -126,10 +172,14 @@ func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compi
 		c.Trace = func(name string) { fmt.Fprintf(cmd.ErrOrStderr(), "cc: %s\n", name) }
 	}
 	if err := c.Compile(ctx); err != nil {
-		reportDiagnostics(cmd, ctx.Diags)
+		if !opts.quiet {
+			reportDiagnostics(cmd, ctx.Diags)
+		}
 		return nil, compileErr(err)
 	}
-	reportDiagnostics(cmd, ctx.Diags)
+	if !opts.quiet {
+		reportDiagnostics(cmd, ctx.Diags)
+	}
 	if ctx.Diags.HasErrors() {
 		return nil, compileErr(fmt.Errorf("%d error(s); no output written", ctx.Diags.ErrorCount()))
 	}
@@ -139,6 +189,9 @@ func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compi
 	}
 	if err := writeState(ctx); err != nil {
 		return nil, compileErr(err)
+	}
+	if opts.quiet {
+		return &compileResult{Ctx: ctx, OutDir: outDir}, nil
 	}
 
 	if opts.dumpIR {

@@ -3,17 +3,17 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
 
-export const petApiApi = new aws.apigatewayv2.Api("pet-api", {
+const petApiApi = new aws.apigatewayv2.Api("pet-api", {
     name: "petstore-pet-api",
     protocolType: "HTTP",
 });
 
-export const mainLogs = new aws.cloudwatch.LogGroup("main", {
+const mainLogs = new aws.cloudwatch.LogGroup("main", {
     name: "/aws/lambda/petstore-main",
     retentionInDays: 14,
 });
 
-export const petsByOwnerTable = new aws.dynamodb.Table("petsByOwner", {
+const petsByOwnerTable = new aws.dynamodb.Table("petsByOwner", {
     attributes: [
         {
             name: "id",
@@ -25,7 +25,7 @@ export const petsByOwnerTable = new aws.dynamodb.Table("petsByOwner", {
     name: "petstore-petsByOwner",
 });
 
-export const mainRole = new aws.iam.Role("main", {
+const mainRole = new aws.iam.Role("main", {
     assumeRolePolicy: pulumi.jsonStringify({
     Statement: [
         {
@@ -44,7 +44,7 @@ export const mainRole = new aws.iam.Role("main", {
     name: "petstore-main-role",
 });
 
-export const mainPolicy = new aws.iam.RolePolicy("main", {
+const mainPolicy = new aws.iam.RolePolicy("main", {
     name: "petstore-main-policy",
     policy: pulumi.jsonStringify({
     Statement: [
@@ -75,7 +75,7 @@ const mainEnv: { [key: string]: pulumi.Input<string> } = {
     CC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
 };
 
-export const mainFn = new aws.lambda.Function("main", {
+const mainFn = new aws.lambda.Function("main", {
     code: new pulumi.asset.FileArchive("build/main.zip"),
     environment: { variables: mainEnv },
     handler: "cc_lambda_entry.handler",
@@ -86,7 +86,7 @@ export const mainFn = new aws.lambda.Function("main", {
     timeout: 30,
 });
 
-export const petApiIntegration = new aws.apigatewayv2.Integration("pet-api", {
+const petApiIntegration = new aws.apigatewayv2.Integration("pet-api", {
     apiId: petApiApi.id,
     integrationMethod: "POST",
     integrationType: "AWS_PROXY",
@@ -94,19 +94,19 @@ export const petApiIntegration = new aws.apigatewayv2.Integration("pet-api", {
     payloadFormatVersion: "2.0",
 });
 
-export const petApiRoute = new aws.apigatewayv2.Route("pet-api", {
+const petApiRoute = new aws.apigatewayv2.Route("pet-api", {
     apiId: petApiApi.id,
     routeKey: "$default",
     target: pulumi.interpolate`integrations/${petApiIntegration.id}`,
 });
 
-export const petApiStage = new aws.apigatewayv2.Stage("pet-api", {
+const petApiStage = new aws.apigatewayv2.Stage("pet-api", {
     apiId: petApiApi.id,
     autoDeploy: true,
     name: "$default",
 });
 
-export const petApiPermission = new aws.lambda.Permission("pet-api", {
+const petApiPermission = new aws.lambda.Permission("pet-api", {
     action: "lambda:InvokeFunction",
     function: mainFn.name,
     principal: "apigateway.amazonaws.com",
