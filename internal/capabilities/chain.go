@@ -6,6 +6,7 @@ import (
 
 	// Language frontends register themselves. Importing them here, where the
 	// chain is assembled, is what makes a language available.
+	_ "github.com/cloudcompiler/cloudcc/internal/lang/node"
 	_ "github.com/cloudcompiler/cloudcc/internal/lang/python"
 )
 

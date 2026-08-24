@@ -15,8 +15,8 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-app.get("/pets/:petId", (req, res) => {
-  const pet = pets.get(req.params.petId);
+app.get("/pets/:petId", async (req, res) => {
+  const pet = await pets.get(req.params.petId);
   if (pet === null) {
     res.status(404).json({ detail: "no such pet" });
     return;
@@ -24,18 +24,18 @@ app.get("/pets/:petId", (req, res) => {
   res.json(pet);
 });
 
-app.put("/pets/:petId", (req, res) => {
-  pets.put(req.params.petId, req.body);
+app.put("/pets/:petId", async (req, res) => {
+  await pets.put(req.params.petId, req.body);
   res.json({ ok: true, id: req.params.petId });
 });
 
-app.delete("/pets/:petId", (req, res) => {
-  pets.delete(req.params.petId);
+app.delete("/pets/:petId", async (req, res) => {
+  await pets.delete(req.params.petId);
   res.json({ ok: true });
 });
 
-app.get("/pets", (req, res) => {
-  res.json({ keys: pets.keys() });
+app.get("/pets", async (req, res) => {
+  res.json({ keys: await pets.keys() });
 });
 
 export { app };

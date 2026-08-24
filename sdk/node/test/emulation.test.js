@@ -34,25 +34,25 @@ test("the SDK never imports an AWS client", () => {
   }
 });
 
-test("persistKv round-trips", () => {
+test("persistKv round-trips", async () => {
   const pets = cloudcc.persistKv("petsByOwner");
-  assert.equal(pets.get("1"), null);
+  assert.equal(await pets.get("1"), null);
 
-  pets.put("1", { name: "rex" });
-  assert.deepEqual(pets.get("1"), { name: "rex" });
-  assert.deepEqual(pets.keys(), ["1"]);
+  await pets.put("1", { name: "rex" });
+  assert.deepEqual(await pets.get("1"), { name: "rex" });
+  assert.deepEqual(await pets.keys(), ["1"]);
 
-  pets.delete("1");
-  assert.equal(pets.get("1"), null);
-  assert.deepEqual(pets.keys(), []);
+  await pets.delete("1");
+  assert.equal(await pets.get("1"), null);
+  assert.deepEqual(await pets.keys(), []);
 });
 
-test("persistKv returns a copy", () => {
+test("persistKv returns a copy", async () => {
   const pets = cloudcc.persistKv("petsByOwner");
-  pets.put("1", { name: "rex" });
-  const got = pets.get("1");
+  await pets.put("1", { name: "rex" });
+  const got = await pets.get("1");
   got.name = "mutated";
-  assert.deepEqual(pets.get("1"), { name: "rex" });
+  assert.deepEqual(await pets.get("1"), { name: "rex" });
 });
 
 test("the same id gives the same store", () => {
@@ -60,68 +60,68 @@ test("the same id gives the same store", () => {
   assert.notEqual(cloudcc.persistKv("a"), cloudcc.persistKv("b"));
 });
 
-test("persistFs round-trips", () => {
+test("persistFs round-trips", async () => {
   const blobs = cloudcc.persistFs("petAudit");
-  assert.deepEqual(blobs.list(), []);
-  assert.equal(blobs.exists("a.txt"), false);
+  assert.deepEqual(await blobs.list(), []);
+  assert.equal(await blobs.exists("a.txt"), false);
 
-  blobs.write("a.txt", Buffer.from("hello"));
-  blobs.write("nested/b.txt", Buffer.from("there"));
+  await blobs.write("a.txt", Buffer.from("hello"));
+  await blobs.write("nested/b.txt", Buffer.from("there"));
 
-  assert.equal(blobs.read("a.txt").toString(), "hello");
-  assert.equal(blobs.exists("a.txt"), true);
-  assert.deepEqual(blobs.list(), ["a.txt", "nested/b.txt"]);
-  assert.deepEqual(blobs.list("nested/"), ["nested/b.txt"]);
+  assert.equal((await blobs.read("a.txt")).toString(), "hello");
+  assert.equal(await blobs.exists("a.txt"), true);
+  assert.deepEqual(await blobs.list(), ["a.txt", "nested/b.txt"]);
+  assert.deepEqual(await blobs.list("nested/"), ["nested/b.txt"]);
 
-  blobs.delete("a.txt");
-  assert.equal(blobs.exists("a.txt"), false);
-  assert.throws(() => blobs.read("a.txt"));
+  await blobs.delete("a.txt");
+  assert.equal(await blobs.exists("a.txt"), false);
+  await assert.rejects(() => blobs.read("a.txt"));
 });
 
-test("persistSecret reads the environment", () => {
+test("persistSecret reads the environment", async () => {
   const secret = cloudcc.persistSecret("api-key");
-  assert.equal(secret.get(), "");
+  assert.equal(await secret.get(), "");
 
   process.env.CLOUDCC_SECRET_API_KEY = "s3cr3t";
-  assert.equal(cloudcc.persistSecret("api-key").get(), "s3cr3t");
+  assert.equal(await cloudcc.persistSecret("api-key").get(), "s3cr3t");
   delete process.env.CLOUDCC_SECRET_API_KEY;
 
-  secret.set("overridden");
-  assert.equal(secret.get(), "overridden");
+  await secret.set("overridden");
+  assert.equal(await secret.get(), "overridden");
 });
 
-test("persistRedis operations", () => {
+test("persistRedis operations", async () => {
   const cache = cloudcc.persistRedis("sessions");
-  assert.equal(cache.get("k"), null);
+  assert.equal(await cache.get("k"), null);
 
-  cache.set("k", "v");
-  assert.equal(cache.get("k"), "v");
+  await cache.set("k", "v");
+  assert.equal(await cache.get("k"), "v");
 
-  cache.set("k", "v2", 60);
-  assert.equal(cache.get("k"), "v2");
+  await cache.set("k", "v2", 60);
+  assert.equal(await cache.get("k"), "v2");
 
-  assert.equal(cache.incr("hits"), 1);
-  assert.equal(cache.incr("hits", 4), 5);
+  assert.equal(await cache.incr("hits"), 1);
+  assert.equal(await cache.incr("hits", 4), 5);
 
-  cache.delete("k");
-  assert.equal(cache.get("k"), null);
+  await cache.delete("k");
+  assert.equal(await cache.get("k"), null);
 });
 
-test("persistOrm gives a local url", () => {
+test("persistOrm gives a local url", async () => {
   const db = cloudcc.persistOrm("maindb", { models: ["Row"] });
-  const url = db.url();
+  const url = await db.url();
   assert.ok(url.startsWith("sqlite://"), url);
   assert.ok(url.endsWith("maindb.db"), url);
 });
 
-test("pubsub fans out in process", () => {
+test("pubsub fans out in process", async () => {
   const topic = cloudcc.pubsubTopic("petEvents");
   const seen = [];
 
   topic.subscribe((m) => seen.push(["first", m.id]));
   topic.subscribe((m) => seen.push(["second", m.id]));
 
-  topic.publish({ id: "1" });
+  await topic.publish({ id: "1" });
   assert.deepEqual(seen, [["first", "1"], ["second", "1"]]);
   assert.equal(topic.subscribers().length, 2);
 });
@@ -159,13 +159,13 @@ test("hint-only functions return quietly", () => {
   assert.equal(cloudcc.embedAssets("./data/*.json"), "./data/*.json");
 });
 
-test("resetLocalState clears directories", () => {
+test("resetLocalState clears directories", async () => {
   const blobs = cloudcc.persistFs("b");
-  blobs.write("a.txt", Buffer.from("x"));
-  assert.equal(blobs.exists("a.txt"), true);
+  await blobs.write("a.txt", Buffer.from("x"));
+  assert.equal(await blobs.exists("a.txt"), true);
 
   cloudcc.resetLocalState();
-  assert.equal(cloudcc.persistFs("b").exists("a.txt"), false);
+  assert.equal(await cloudcc.persistFs("b").exists("a.txt"), false);
 });
 
 test("slug matches the compiler's spelling", () => {

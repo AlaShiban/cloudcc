@@ -7,9 +7,14 @@
  *
  * Their method signatures are the contract the injected `_cloudcc_runtime`
  * clients must match exactly, and a parity test compares the two -- because
- * two implementations of one API drift otherwise. They also mirror the Python
- * SDK's emulations method for method, so a team using both languages meets one
- * API rather than two.
+ * two implementations of one API drift otherwise.
+ *
+ * Every method that reaches a store is asynchronous, even though a Map lookup
+ * needs no await. That is deliberate: the injected client talks to AWS and
+ * cannot be synchronous, so if these were synchronous, compiling a program
+ * would silently change what it does -- `pets.get(id)` would go from returning
+ * a value to returning a promise. Matching the shape here is what makes the
+ * compile behaviour-preserving.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -56,23 +61,23 @@ export class KVStore {
   }
 
   /** Return the item at `key`, or null. */
-  get(key: string): Json | null {
+  async get(key: string): Promise<Json | null> {
     const raw = this.#items.get(String(key));
     return raw === undefined ? null : (JSON.parse(raw) as Json);
   }
 
   /** Store `value` at `key`. */
-  put(key: string, value: Json): void {
+  async put(key: string, value: Json): Promise<void> {
     this.#items.set(String(key), JSON.stringify(value));
   }
 
   /** Remove `key` if present. */
-  delete(key: string): void {
+  async delete(key: string): Promise<void> {
     this.#items.delete(String(key));
   }
 
   /** Every key currently stored, sorted. */
-  keys(): string[] {
+  async keys(): Promise<string[]> {
     return [...this.#items.keys()].sort();
   }
 }
@@ -91,19 +96,19 @@ export class Bucket {
   }
 
   /** Return the bytes stored at `key`, throwing when absent. */
-  read(key: string): Buffer {
+  async read(key: string): Promise<Buffer> {
     return readFileSync(this.#path(key));
   }
 
   /** Store `data` at `key`. */
-  write(key: string, data: Buffer | string): void {
+  async write(key: string, data: Buffer | string): Promise<void> {
     const path = this.#path(key);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, data);
   }
 
   /** Remove `key` if present. */
-  delete(key: string): void {
+  async delete(key: string): Promise<void> {
     const path = this.#path(key);
     if (existsSync(path)) {
       unlinkSync(path);
@@ -111,13 +116,13 @@ export class Bucket {
   }
 
   /** Whether `key` is present. */
-  exists(key: string): boolean {
+  async exists(key: string): Promise<boolean> {
     const path = this.#path(key);
     return existsSync(path) && statSync(path).isFile();
   }
 
   /** Every key under `prefix`, sorted. */
-  list(prefix = ""): string[] {
+  async list(prefix = ""): Promise<string[]> {
     const base = join(localRoot(), "fs", this.id);
     if (!existsSync(base)) {
       return [];
@@ -151,7 +156,7 @@ export class Secret {
    * Return the secret's value. Locally this reads `CLOUDCC_SECRET_<ID>` from
    * the environment, so a test can supply one without a cloud account.
    */
-  get(): string {
+  async get(): Promise<string> {
     if (this.#value !== null) {
       return this.#value;
     }
@@ -159,7 +164,7 @@ export class Secret {
   }
 
   /** Replace the secret's value. */
-  set(value: string): void {
+  async set(value: string): Promise<void> {
     this.#value = String(value);
   }
 }
@@ -178,7 +183,7 @@ export class OrmSession {
   }
 
   /** The database connection URL. */
-  url(): string {
+  async url(): Promise<string> {
     const root = join(localRoot(), "orm");
     mkdirSync(root, { recursive: true });
     return `sqlite://${join(root, `${this.id}.db`)}`;
@@ -195,7 +200,7 @@ export class Redis {
   }
 
   /** Return the value at `key`, or null. */
-  get(key: string): string | null {
+  async get(key: string): Promise<string | null> {
     return this.#items.get(String(key)) ?? null;
   }
 
@@ -204,17 +209,17 @@ export class Redis {
    * emulation ignores `ex`: nothing here is long-lived enough for expiry to be
    * observable.
    */
-  set(key: string, value: string, ex?: number): void {
+  async set(key: string, value: string, ex?: number): Promise<void> {
     this.#items.set(String(key), String(value));
   }
 
   /** Remove `key` if present. */
-  delete(key: string): void {
+  async delete(key: string): Promise<void> {
     this.#items.delete(String(key));
   }
 
   /** Increment `key` and return the new value. */
-  incr(key: string, amount = 1): number {
+  async incr(key: string, amount = 1): Promise<number> {
     const next = Number(this.#items.get(String(key)) ?? "0") + amount;
     this.#items.set(String(key), String(next));
     return next;
@@ -234,7 +239,7 @@ export class Topic {
   }
 
   /** Deliver `message` to every subscriber. */
-  publish(message: Json): void {
+  async publish(message: Json): Promise<void> {
     for (const fn of [...this.#subscribers]) {
       fn(message);
     }

@@ -1,0 +1,9 @@
+echo "packaging execution unit {{.ID}} (container)"
+if command -v docker >/dev/null 2>&1; then
+  docker build --quiet --tag "cloudcc-{{.ID}}:latest" "{{.ID}}" >/dev/null
+  echo "  built image cloudcc-{{.ID}}:latest"
+  echo "  push it after \`pulumi up\` with bin/push-images.sh"
+else
+  echo "  docker is not installed; skipping the image build for {{.ID}}" >&2
+  echo "  install it with: brew install --cask docker" >&2
+fi

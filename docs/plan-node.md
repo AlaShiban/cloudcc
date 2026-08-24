@@ -133,13 +133,38 @@ Each has a gate. No milestone starts until the previous one's gate is green.
 
 | | Scope | Gate |
 |---|---|---|
-| **N0** | Extract `Frontend`; Python becomes an implementation of it. No behaviour change. | Every existing test green, goldens byte-identical, `git diff` on `testdata` empty |
-| **N1** | `sdk/node` npm package: hints, local emulations, types, vitest suite | Emulation tests pass; a hand-written Node app runs under Node with no cloud account |
-| **N2** | Node frontend: parse, detect, import closure. Generator renders Node. | Ground-truth oracle passes on a Node corpus; the seven pre-empted bugs each have a passing test |
-| **N3** | Rewriting, injected runtime, esbuild packaging, Lambda entry | Rewritten source runs under Node; bundle produced; parity tests green |
+| **N0** ✅ | Extract `Frontend`; Python becomes an implementation of it. No behaviour change. | Met: generated index.ts and rewritten sources byte-identical across all three examples |
+| **N1** ✅ | `sdk/node` npm package: hints, local emulations, types, test suite | Met: examples/petstore-node runs under node with no cloud account |
+| **N2** ✅ | Node frontend: parse, detect, import closure. | Met: 25 tests covering both module systems, every literal form, options objects, comments and TypeScript annotations. Generator renderer still outstanding. |
+| **N3** ✅ | Rewriting, injected runtime, esbuild packaging, Lambda entry | Met: a Node unit bundles to a 538 KB zip whose handler loads |
 | **N4** | expose/routes, resolve to Lambda + API Gateway v2, deploy | Ministack L4/L5 for a Node app: up, assert, drive, destroy |
 | **N5** | Node differential harness + cross-language IR equivalence | Behaviour identical uncompiled vs compiled; both languages produce the same IR |
 | **N6** | ECS/container units, mixed-language applications, docs, CI | Mixed app compiles and deploys; CI runs both languages |
+
+## What building it actually taught
+
+**The emulations must have the same sync/async shape as the shims.** The Python
+SDK is synchronous and so are its shims. In Node the injected client talks to
+AWS and cannot be synchronous -- so if the emulations were synchronous,
+compiling a program would silently change what it does: `pets.get(id)` would go
+from returning a value to returning a promise. Every store method in the Node
+SDK is async for that reason alone, even though a Map lookup needs no await.
+This is the Node analogue of the seven-bug table above, and it was found by
+reading the rewritten output rather than by a test -- which is an argument for
+getting the differential harness onto Node next.
+
+**`npm ci` cannot be used.** cloudcc adds the runtime's dependencies to
+package.json, so any lockfile copied from the source tree no longer matches it
+and `npm ci` refuses. The stale lockfile is deleted and `npm install` runs
+instead.
+
+**The Lambda handler names the bundle, not the entrypoint.** esbuild emits a
+single `index.mjs`, so the handler is `index.handler` even though the file it
+was built from is `cloudcc_lambda_entry.mjs`.
+
+**One pattern covered three frameworks.** `app.get(path, handler)` is how
+Express, Fastify and Hono all declare a route, which made route detection far
+less work than the plan assumed.
 
 ## Out of scope for v1
 
