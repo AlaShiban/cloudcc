@@ -1,0 +1,67 @@
+# Every library mega-app declares something with, grouped the way the example
+# is. Unpinned: this tree is a specification, not something CI installs.
+
+# --- web frameworks -------------------------------------------------------
+fastapi
+flask
+django
+uvicorn
+
+# --- ORMs -----------------------------------------------------------------
+sqlalchemy
+sqlmodel
+peewee
+tortoise-orm
+
+# --- database drivers -----------------------------------------------------
+psycopg[binary]
+psycopg-pool
+pymysql
+mysqlclient
+asyncpg
+# sqlite3 is in the standard library, and is deliberately not persistable.
+
+# --- other stores ---------------------------------------------------------
+redis
+pymongo
+boto3
+cassandra-driver
+clickhouse-driver
+
+# --- messaging ------------------------------------------------------------
+celery
+pika
+aiokafka
+kombu
+
+# --- task queues ----------------------------------------------------------
+rq
+dramatiq
+
+# --- caching --------------------------------------------------------------
+cachetools
+dogpile.cache
+
+# --- serialization --------------------------------------------------------
+pydantic
+marshmallow
+msgspec
+
+# --- configuration --------------------------------------------------------
+python-dotenv
+pydantic-settings
+dynaconf
+
+# --- logging --------------------------------------------------------------
+structlog
+loguru
+
+# --- CLI ------------------------------------------------------------------
+click
+typer
+# argparse is in the standard library.
+
+# --- the compiler's own SDK ----------------------------------------------
+# Compile-time only: it is stripped from every generated bundle, and it never
+# imports boto3.
+cloudcompiler

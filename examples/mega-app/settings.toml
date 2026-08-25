@@ -1,0 +1,13 @@
+# Read by Dynaconf in mega/settings.py, and by the compiler at compile time --
+# the key set here is what becomes configuration, and this file travels with
+# every unit that imports the module, so the uncompiled and compiled programs
+# read the same defaults and differ only in the overrides.
+
+[default]
+retry_limit = 3
+batch_size = 100
+maintenance_window = "sun 03:00"
+
+[production]
+retry_limit = 5
+batch_size = 500

@@ -120,6 +120,14 @@ name.
    `internal/runtime/py/rewrite.go`.
 5. Map it in `internal/provider/aws`, and add it to `typeSupport`.
 6. Add it to `examples/kitchen-sink` and regenerate the golden trees.
+7. Move its row in `examples/mega-app/coverage.yaml` from `proposed` to
+   `supported`. `internal/sdkdetect/coverage_test.go` fails until you do, which
+   is deliberate: it is the reminder to record what the library became.
+
+`examples/mega-app` is the other half of that table -- every library category
+cloudcc should support, written as a working program, with the shim contract in
+the comments. It does not compile, and it is the place to argue about a mapping
+before implementing one.
 
 Steps 1 and 4 are two implementations of one API, which is why
 `sdk/python/tests/test_shim_parity.py` compares them method by method. Steps 2

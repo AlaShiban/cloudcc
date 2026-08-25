@@ -1,0 +1,82 @@
+# mega-app: one program that exercises every library category cloudcc should
+# support. See README.md -- most of this does not compile yet, on purpose.
+app: mega-app
+provider: aws
+
+execution_units:
+  api:
+    type: lambda
+  checkout:
+    type: lambda
+  admin:
+    # Django expects a long-lived process with connection pooling, so it gets a
+    # container. A compiler that saw Django on `type: lambda` should say what
+    # that costs rather than quietly agree.
+    type: ecs
+  worker:
+    # Pinned by the Kafka consumer loop in worker.py: a consumer group cannot
+    # be expressed as a Lambda event source without giving up the offset
+    # semantics that were the reason to choose Kafka.
+    type: ecs
+  ops:
+    # PROPOSED: run-to-completion. Not yet a supported type -- see ops.py.
+    # `cloudcc run ops -- backfill --since 2026-01-01`
+    type: task
+
+exposed:
+  storefront:
+    type: apigateway
+  checkout-api:
+    type: apigateway
+  admin-web:
+    type: alb
+
+persisted:
+  # Supported today. The client's type chose the capability; this section
+  # chooses between variants of it, which is a configuration decision rather
+  # than a code change.
+  itemCache:
+    type: memorydb          # rather than elasticache: worker.py subscribes to
+                            # a Redis channel, and a cache that evicts under
+                            # memory pressure is the wrong resource for that.
+  megaDb:
+    type: rds_postgres
+  receipts:
+    type: s3
+  orders:
+    type: dynamodb
+  orderEvents:
+    type: sns
+
+  # PROPOSED below this line: none of these types exist yet. They are written
+  # out because a type the compiler cannot resolve must be a clean error naming
+  # the alternatives, never a silent substitution (D9, D15).
+  itemDocs:
+    type: documentdb        # PyMongo. `atlas` should also be offered: DocumentDB
+                            # is Mongo-compatible, not Mongo.
+  eventMetrics:
+    type: keyspaces         # cassandra-driver
+  analytics:
+    type: self_hosted_ecs   # clickhouse-driver. Deliberately has NO default:
+                            # there is no managed ClickHouse on AWS, and both
+                            # answers cost something the compiler must not
+                            # choose on the author's behalf.
+  workQueue:
+    type: amazonmq_rabbit   # pika, kombu (amqp://)
+  auditQueue:
+    type: amazonmq_rabbit
+  shipmentStream:
+    type: msk_serverless    # aiokafka
+  taskBroker:
+    type: elasticache       # Celery's broker...
+  taskResults:
+    type: elasticache       # ...and its result backend. One client, two
+                            # resources -- the only such case in the table.
+  actorBroker:
+    type: elasticache       # dramatiq
+
+config:
+  log_level:
+    value: info
+  django_secret_key:
+    secret: true
