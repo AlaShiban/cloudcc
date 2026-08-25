@@ -189,3 +189,42 @@ would close it.
   since valkey-py is wire-compatible and redis-py works against it, but if
   someone imports the real `valkey` package the returned client will be a
   `redis.Redis`. Worth a distinct library identifier if Valkey use grows.
+
+---
+
+## The library roadmap: `examples/mega-app`
+
+Added 2026-08-25. A specification written as a program: every library category
+cloudcc should support -- five ORMs, five drivers, five stores, five brokers,
+three task queues, three serializers, three config libraries, three loggers,
+three CLI frameworks, three web frameworks and boto3 -- used the way it should
+be used, with the shim contract written as a comment next to each declaration
+and the unresolved design questions marked `open question:`.
+
+It does not compile, on purpose. `examples/kitchen-sink` is the counterpart
+that does.
+
+`examples/mega-app/coverage.yaml` is the machine-readable half, and
+`internal/sdkdetect/coverage_test.go` checks it against the compiler in both
+directions: a row claiming support must resolve to the stated capability and
+library, and a row claiming a library is unsupported must not resolve. So
+implementing one fails the test until the row moves to `supported` -- the table
+cannot rot. Both mutations were checked (renaming a supported library, dropping
+an ambiguity flag) and each fails as intended.
+
+Six positions the example argues, and the work each implies, are in its README.
+The three findings worth carrying forward regardless of what gets built next:
+
+- **`create_engine` is ambiguous.** SQLAlchemy and SQLModel spell it the same
+  way, and `connect` is claimed by PyMySQL, mysqlclient and sqlite3 at once.
+  Detection matches the trailing name, so it cannot tell them apart -- and
+  returning a nearly-right client is worse than returning none. Resolving the
+  import module is a prerequisite for four of the proposed rows.
+- **A module named only by a configuration string is invisible.** Tortoise's
+  `models=["mega.async_models"]`, Django's `ROOT_URLCONF`, Celery's `include=`.
+  Import-graph analysis will not find them, and the unit fails at startup
+  rather than at compile time.
+- **The codec has to live on the channel.** Pydantic, Marshmallow and msgspec
+  can all carry what goes between units, but only the first two are recoverable
+  from the type alone -- which is the argument for `Topic[T]`, and for making a
+  publisher/subscriber format mismatch a compile error.

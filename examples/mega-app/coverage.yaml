@@ -1,0 +1,557 @@
+# The library coverage table for mega-app.
+#
+# Every library the example uses, what it should become, and whether the
+# compiler knows about it today. This file is checked by
+# internal/sdkdetect/coverage_test.go, which is what keeps it from becoming a
+# stale wish list:
+#
+#   status: supported  the constructors must resolve, to this capability, this
+#                      library identifier and a type the provider supports.
+#   status: proposed   the constructors must NOT resolve, and the capability /
+#                      type pair must not already be supported. Implementing
+#                      one fails this test until the row is moved to
+#                      `supported`, which is the point.
+#   status: rejected   the compiler should refuse the call with an explanation.
+#                      Same check as `proposed`; the difference is intent.
+#   status: none       nothing is declared: no hint, no resource. The library
+#                      is either configured by the injected runtime or simply
+#                      left alone. Constructors must not resolve.
+#
+# `needs_module_resolution: true` marks a constructor name that is ambiguous.
+# Detection matches the final attribute of the call, so `create_engine` from
+# sqlmodel is indistinguishable from SQLAlchemy's, and `connect` is claimed by
+# three libraries at once. Any two rows sharing a constructor must both carry
+# the flag -- the test enforces that, so a new ambiguity cannot be added
+# quietly.
+
+libraries:
+  # =========================================================================
+  # ORMs
+  # =========================================================================
+  - library: sqlalchemy
+    category: orm
+    constructors: [create_engine]
+    capability: persist_orm
+    type: rds_postgres
+    type_from_url: true
+    needs_module_resolution: true
+    status: supported
+    note: >-
+      The URL scheme picks Postgres or MySQL; cloudcc.yaml overrides it. Flagged
+      ambiguous because sqlmodel spells its constructor the same way, so today a
+      SQLModel engine would be classified as this one.
+
+  - library: sqlalchemy-async
+    category: orm
+    constructors: [create_async_engine]
+    capability: persist_orm
+    type: rds_postgres
+    type_from_url: true
+    status: supported
+    note: >-
+      A separate library identifier because the shim must return an AsyncEngine.
+      Returning a sync Engine compiles cleanly and fails on the first await.
+
+  - library: django-orm
+    category: orm
+    constructors: [DjangoDatabase]
+    capability: persist_orm
+    type: rds_postgres
+    status: proposed
+    note: >-
+      Django's client is a dict in settings.DATABASES, which carries no type, so
+      the SDK supplies a Mapping subclass to wrap. Lazy connection setup means
+      the password can resolve on first query.
+
+  - library: sqlmodel
+    category: orm
+    constructors: [create_engine]
+    capability: persist_orm
+    type: rds_postgres
+    needs_module_resolution: true
+    status: proposed
+    note: >-
+      Same constructor name as SQLAlchemy's, so today a SQLModel engine would be
+      classified as SQLAlchemy -- nearly right, and the returned type would be
+      the wrong one. Fixing this means resolving the import module, not just the
+      trailing name. In exchange, `models` can be discovered from
+      SQLModel.metadata rather than declared.
+
+  - library: peewee
+    category: orm
+    constructors: [PostgresqlDatabase, MySQLDatabase]
+    capability: persist_orm
+    type: rds_postgres
+    status: proposed
+    note: >-
+      Constructs without connecting and exposes init(); the password cannot be a
+      callable, so the shim resolves the secret inside a connect() override.
+
+  - library: tortoise
+    category: orm
+    constructors: [TortoiseConfig]
+    capability: persist_orm
+    type: rds_postgres
+    status: proposed
+    note: >-
+      No client exists until `await Tortoise.init()`, but the user awaits that,
+      not persist(). What is wrapped is the config, which is pure data.
+
+  # =========================================================================
+  # Database drivers
+  # =========================================================================
+  - library: psycopg
+    category: driver
+    constructors: [ConnectionPool]
+    capability: persist_orm
+    type: rds_postgres
+    status: proposed
+    note: >-
+      The pool is lazy; a bare psycopg.connect() opens a socket at import, which
+      is the wrong shape for a Lambda. Open question: whether a rotating
+      password can be re-read per connection without rebuilding the pool.
+
+  - library: pymysql
+    category: driver
+    constructors: [connect]
+    capability: persist_orm
+    type: rds_mysql
+    needs_module_resolution: true
+    status: proposed
+    note: Opens a socket in the constructor; there is no lazy object to prefer.
+
+  - library: mysqlclient
+    category: driver
+    constructors: [connect]
+    capability: persist_orm
+    type: rds_mysql
+    needs_module_resolution: true
+    status: proposed
+    note: >-
+      Must be distinct from pymysql: the exception classes differ, so code
+      catching MySQLdb.OperationalError would silently stop catching anything.
+
+  - library: asyncpg
+    category: driver
+    constructors: [create_pool]
+    capability: persist_orm
+    type: rds_postgres
+    status: proposed
+    note: >-
+      The best fit in the whole table: the pool is awaitable rather than a
+      coroutine, and asyncpg accepts an async password provider.
+
+  - library: sqlite3
+    category: driver
+    constructors: [connect]
+    capability: persist_orm
+    type: rds_postgres
+    needs_module_resolution: true
+    status: rejected
+    note: >-
+      A SQLite file cannot be shared safely between instances, and one on a
+      Lambda's disk vanishes with the instance. persist() must refuse and name
+      the three real alternatives. Unwrapped sqlite3 is left entirely alone.
+
+  # =========================================================================
+  # Other stores
+  # =========================================================================
+  - library: redis-py
+    category: store
+    constructors: [Redis, StrictRedis]
+    capability: persist_redis
+    type: elasticache
+    status: supported
+    note: >-
+      cloudcc.yaml chooses ElastiCache or MemoryDB. A program that calls
+      .pubsub() should be steered away from an evicting cache.
+
+  - library: redis-py
+    category: store
+    constructors: [Valkey]
+    capability: persist_redis
+    type: elasticache
+    status: supported
+    note: >-
+      Mapped to redis-py because valkey-py is wire-compatible. If a program
+      imports the real valkey package the shim hands back a redis.Redis, which
+      is nearly right -- this deserves its own library identifier if Valkey use
+      grows.
+
+  - library: pymongo
+    category: store
+    constructors: [MongoClient]
+    capability: persist_document
+    type: documentdb
+    status: proposed
+    note: >-
+      Lazy by design, so a clean fit. DocumentDB is Mongo-compatible rather than
+      Mongo, so `type: atlas` should also exist and the differential harness
+      matters more here than anywhere else.
+
+  - library: boto3-dynamodb
+    category: store
+    constructors: [Table]
+    capability: persist_kv
+    type: dynamodb
+    status: proposed
+    note: >-
+      The same table cloudcc.KVStore() provisions, declared through the AWS SDK.
+      The id and the physical table name are separate, which is the point.
+
+  - library: cassandra-driver
+    category: store
+    constructors: [Cluster]
+    capability: persist_wide_column
+    type: keyspaces
+    status: proposed
+    note: >-
+      Cluster is the parameters object; connect() opens the sockets. The shim
+      installs the SigV4 auth provider, which is the setup everyone writes once
+      and badly.
+
+  - library: clickhouse-driver
+    category: store
+    constructors: [Client]
+    capability: persist_columnar
+    type: self_hosted_ecs
+    status: proposed
+    note: >-
+      No managed AWS equivalent, so this capability must have NO default type.
+      Mapping it to Redshift because both are columnar is exactly the silent
+      substitution D9 and D15 forbid.
+
+  - library: pathlib
+    category: store
+    constructors: [Path, PosixPath]
+    capability: persist_fs
+    type: s3
+    status: supported
+    note: >-
+      The compiled program gets a cloudpathlib.S3Path, which has the same API.
+      Where they differ is .bucket/.key, which is what cloudcc.location() is
+      proposed for.
+
+  # =========================================================================
+  # SDK-provided: capabilities the ecosystem has no standard client for
+  # =========================================================================
+  - library: ""
+    sdk_provided: true
+    category: store
+    constructors: [KVStore]
+    capability: persist_kv
+    type: dynamodb
+    status: supported
+
+  - library: ""
+    sdk_provided: true
+    category: messaging
+    constructors: [Topic]
+    capability: pubsub
+    type: sns
+    status: supported
+    note: >-
+      Proposed extension: Topic[T], where the type parameter is the wire codec
+      and both ends read it from the topic's intent. See mega/wire.py.
+
+  - library: ""
+    sdk_provided: true
+    category: config
+    constructors: [Secret]
+    capability: persist_secret
+    type: secretsmanager
+    status: supported
+
+  # =========================================================================
+  # Messaging
+  # =========================================================================
+  - library: celery
+    category: messaging
+    constructors: [Celery]
+    capability: pubsub
+    type: sqs
+    status: proposed
+    note: >-
+      The only client that declares two resources: a broker and a result
+      backend, with different lifetimes. Needs a way to give each an id.
+
+  - library: pika
+    category: messaging
+    constructors: [ConnectionParameters]
+    capability: message_broker
+    type: amazonmq_rabbit
+    status: proposed
+    note: >-
+      The parameters object is wrapped rather than BlockingConnection, so the
+      program keeps control of its own connection lifetime.
+
+  - library: aiokafka
+    category: messaging
+    constructors: [AIOKafkaProducer, AIOKafkaConsumer]
+    capability: stream
+    type: msk_serverless
+    status: proposed
+    note: >-
+      The clearest case of the library declaring the service: partitions,
+      offsets and consumer groups have no SNS equivalent. A consumer loop also
+      pins its unit to a container.
+
+  - library: kombu
+    category: messaging
+    constructors: [Connection]
+    capability: message_broker
+    type: amazonmq_rabbit
+    status: proposed
+    note: >-
+      Lazy, and its URL scheme picks the transport the way a SQLAlchemy URL
+      picks the engine.
+
+  # =========================================================================
+  # Task queues
+  # =========================================================================
+  - library: celery-tasks
+    category: task_queue
+    constructors: []
+    capability: task_queue
+    type: sqs
+    status: proposed
+    note: >-
+      Declared by @app.task rather than by a constructor. The compiler derives
+      the worker unit from the task functions and type-checks .delay() against
+      the signature -- the bug no unit test catches, because the two sides are
+      never in the same test.
+
+  - library: rq
+    category: task_queue
+    constructors: [Queue]
+    capability: task_queue
+    type: elasticache
+    status: proposed
+    note: >-
+      Declares no resource of its own: it takes an already-persisted redis
+      client, so it must reuse that cluster rather than provision a second.
+      Defaults to pickle, which must be replaced or refused.
+
+  - library: dramatiq
+    category: task_queue
+    constructors: [RedisBroker, RabbitmqBroker]
+    capability: task_queue
+    type: elasticache
+    status: proposed
+    note: The broker is global process state; set_broker stays where it is.
+
+  # =========================================================================
+  # Caching
+  # =========================================================================
+  - library: dogpile
+    category: caching
+    constructors: [make_region]
+    capability: persist_redis
+    type: elasticache
+    status: proposed
+    note: >-
+      A region is unconfigured until configure(), and the backend arguments are
+      a dict -- everything the shim needs to supply. Should reuse an
+      already-persisted client rather than provision a second cluster.
+
+  - library: cachetools
+    category: caching
+    constructors: [TTLCache, LRUCache]
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      A dict with an eviction policy. Nothing to provision -- but a module-level
+      cache in a unit that runs on many instances is correct code with
+      surprising behaviour, and the compiler is the only thing that knows both
+      the code and the scaling configuration. A lint, not an error.
+
+  # =========================================================================
+  # Serialization: the wire format between units. See mega/wire.py.
+  # =========================================================================
+  - library: pydantic
+    category: wire
+    constructors: []
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      Usable as a codec: recoverable from the type alone, so both ends of a
+      channel derive the same pair. model_dump_json / model_validate_json.
+
+  - library: msgspec
+    category: wire
+    constructors: []
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      The best default: decode(data, type=T) needs only the type, and it is the
+      cheapest of the three.
+
+  - library: marshmallow
+    category: wire
+    constructors: []
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      Usable, but the schema is a separate object and one type may have several,
+      so a channel using it must name the schema explicitly.
+
+  # =========================================================================
+  # Configuration: nothing to shim, everything to declare
+  # =========================================================================
+  - library: pydantic-settings
+    category: config
+    constructors: [BaseSettings]
+    capability: config
+    type: ""
+    status: proposed
+    note: >-
+      The field set is the contract: non-secret fields become config values,
+      SecretStr fields become managed secrets, and a field with no default and
+      no configured value is a compile error rather than a KeyError in
+      production.
+
+  - library: dynaconf
+    category: config
+    constructors: [Dynaconf]
+    capability: config
+    type: ""
+    status: proposed
+    note: >-
+      settings_files are read at compile time to learn the keys and copied into
+      the bundle; envvar_prefix is what tells the compiler MEGA_RETRY_LIMIT and
+      retry_limit are the same key.
+
+  - library: python-dotenv
+    category: config
+    constructors: [load_dotenv]
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      Left exactly as written. Compiled it finds no file and does nothing, which
+      is correct: the values are already in os.environ. Erasing it would break
+      the uncompiled run.
+
+  # =========================================================================
+  # Logging: configured by the runtime before user code loads
+  # =========================================================================
+  - library: logging
+    category: logging
+    constructors: []
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      The runtime installs a JSON handler on stdout at the configured level,
+      with the request, unit and trace ids attached, before any user module is
+      imported.
+
+  - library: structlog
+    category: logging
+    constructors: []
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      The processor chain is the application's choice; only the final renderer
+      differs by environment. cloudcc.log_renderer() is proposed so the chain is
+      written once instead of behind an `if IS_LAMBDA`.
+
+  - library: loguru
+    category: logging
+    constructors: []
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      The runtime replaces the default sink so a loguru line and a stdlib line
+      are the same shape -- only if loguru is importable, since the runtime must
+      not require a logging library the program did not ask for.
+
+  # =========================================================================
+  # Web frameworks: declared by expose(), not by persist()
+  # =========================================================================
+  - library: fastapi
+    category: web
+    constructors: []
+    capability: expose
+    type: apigateway
+    status: supported
+    note: >-
+      One ASGI object and decorator-based routes, so the route table is
+      discoverable without running anything.
+
+  - library: flask
+    category: web
+    constructors: []
+    capability: expose
+    type: apigateway
+    status: supported
+    note: WSGI rather than ASGI, so the generated entry needs a different adapter.
+
+  - library: django
+    category: web
+    constructors: []
+    capability: expose
+    type: alb
+    status: proposed
+    note: >-
+      The application comes from a call after settings are configured, and the
+      routes live in urlpatterns named by ROOT_URLCONF rather than on
+      decorators. Until that module is resolved, the honest fallback is one
+      proxy route plus a note saying so. Django also wants a container.
+
+  # =========================================================================
+  # AWS SDK: preconfigured rather than declared
+  # =========================================================================
+  - library: boto3
+    category: cloud
+    constructors: []
+    capability: ""
+    type: ""
+    status: none
+    note: >-
+      A compiled unit already has a role, a region and rotating credentials, so
+      a plain boto3 client just works. The work is on the uncompiled side, where
+      the SDK points it at the local emulator. The cloudcc SDK itself must never
+      import boto3 -- a test enforces that.
+
+  # =========================================================================
+  # CLI: a unit of a different shape
+  # =========================================================================
+  - library: typer
+    category: cli
+    constructors: []
+    capability: execution_unit
+    type: task
+    status: proposed
+    note: >-
+      Run-to-completion units: `cloudcc run ops -- backfill --since ...` starts
+      the task with the unit's own role instead of copying credentials onto a
+      laptop. Typer exposes its command tree statically, so --help costs
+      nothing.
+
+  - library: click
+    category: cli
+    constructors: []
+    capability: execution_unit
+    type: task
+    status: proposed
+    note: >-
+      Same treatment as Typer, which is built on it. A program migrating
+      between them has both, so both trees must be read.
+
+  - library: argparse
+    category: cli
+    constructors: []
+    capability: execution_unit
+    type: task
+    status: proposed
+    note: >-
+      Builds its parser imperatively, so the command tree is only known by
+      running it. Arguments pass through unexamined and --help costs a
+      container start.
