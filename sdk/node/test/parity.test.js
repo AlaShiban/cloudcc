@@ -16,7 +16,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,17 @@ import * as cloudcc from "../dist/index.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const SHIM_DIR = join(here, "..", "..", "..", "internal", "lang", "node", "templates", "_cloudcc_runtime");
+
+// This suite reaches out of the package and into the compiler's template tree,
+// so it only runs from a checkout. Saying so beats a bare ENOENT from the first
+// readFileSync, which reads like a broken test rather than a missing tree.
+test("the compiler's shim templates are reachable", () => {
+  assert.ok(
+    existsSync(SHIM_DIR),
+    `${SHIM_DIR} not found. The parity suite compares this package against the ` +
+      `compiler's injected shims, so it has to run from a cloudcc checkout.`,
+  );
+});
 
 /** SDK class -> [shim module, shim class]. Named alike on purpose; the mapping
  *  is explicit anyway so a rename cannot pass silently. */

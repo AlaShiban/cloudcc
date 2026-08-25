@@ -18,28 +18,40 @@ export function target(id) {
 }
 
 /**
- * The password for `id`, fetched once and cached.
+ * How to authenticate to `id`, decided synchronously.
  *
- * This is async, which is why the clients below are handed a password
- * *provider* rather than a password: it lets connect() stay synchronous, and
- * a synchronous connect is what keeps a compiled program's bindings the same
+ * Returns an object to spread into a driver's options: either `{ password }`
+ * with a value or an async provider, or `{}` when there is no password to
+ * supply. The distinction matters -- handing a driver an empty string is not
+ * the same as saying nothing, and Postgres rejects the former outright rather
+ * than falling back to PGPASSWORD or .pgpass.
+ *
+ * The provider form is async, which is why callers are handed a *provider*
+ * rather than a password: it lets connect() stay synchronous, and a
+ * synchronous connect is what keeps a compiled program's bindings the same
  * shape as an uncompiled one's.
  */
-export function password(id) {
-  const { secretArn } = target(id);
-  let cached = null;
-  return async () => {
-    if (cached !== null) {
-      return cached;
-    }
-    if (!secretArn) {
-      return "";
-    }
-    const client = new SecretsManagerClient(common());
-    const out = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
-    cached = JSON.parse(out.SecretString).password;
-    return cached;
-  };
+export function credentials(id) {
+  const { url, secretArn } = target(id);
+
+  if (secretArn) {
+    let cached = null;
+    return {
+      password: async () => {
+        if (cached === null) {
+          const client = new SecretsManagerClient(common());
+          const out = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+          cached = JSON.parse(out.SecretString).password;
+        }
+        return cached;
+      },
+    };
+  }
+
+  // No managed secret: the URL may carry the credential itself, and if it does
+  // not, saying nothing lets the driver use its own resolution.
+  const inUrl = decodeURIComponent(new URL(url).password || "");
+  return inUrl === "" ? {} : { password: inUrl };
 }
 
 /** The URL split into the parts a driver wants, password excluded. */

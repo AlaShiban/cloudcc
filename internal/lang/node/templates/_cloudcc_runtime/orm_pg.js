@@ -5,11 +5,13 @@
 
 import { Pool } from "pg";
 
-import { parts, password } from "./orm_url.js";
+import { credentials, parts } from "./orm_url.js";
 
 export function connect(id) {
   const { host, port, user, database } = parts(id);
   // pg accepts a function for `password`, which is what lets the managed
-  // credential be fetched lazily without making connect() async.
-  return new Pool({ host, port, user, database, password: password(id) });
+  // credential be fetched lazily without making connect() async. When there is
+  // no password to give, the key is absent rather than empty -- pg treats an
+  // empty string as a credential and fails, where absence lets it fall back.
+  return new Pool({ host, port, user, database, ...credentials(id) });
 }
