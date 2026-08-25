@@ -8,7 +8,7 @@ from pathlib import Path
 
 import cloudcompiler as cloudcc
 
-from shared.store import pets, events, summarize
+from shared.store import events, read_pet, summarize
 
 cloudcc.execution_unit(id="worker")
 
@@ -17,7 +17,7 @@ audit = cloudcc.persist(Path("./petAudit"), id="petAudit")
 
 def on_pet_event(message: dict):
     pet_id = message.get("id")
-    pet = pets.get(pet_id) or {}
+    pet = read_pet(pet_id) or {}
     audit.write(f"{pet_id}.txt", summarize(pet).encode("utf-8"))
     return {"audited": pet_id}
 

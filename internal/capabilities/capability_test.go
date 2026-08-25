@@ -22,7 +22,7 @@ func TestPersistIntentIsSharedBetweenUnits(t *testing.T) {
 		"api.py":             "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\nfrom shared.store import pets\n",
 		"worker.py":          "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\nfrom shared.store import pets\n",
 		"shared/__init__.py": "",
-		"shared/store.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n",
+		"shared/store.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"petsByOwner\")\n",
 	})
 
 	stores := ctx.Graph.IntentsOfKind(config.KindPersistKV)
@@ -82,7 +82,7 @@ func TestClientTypeIsADefaultThatConfigOverrides(t *testing.T) {
 func TestSameIDUnderTwoPersistKindsIsAnError(t *testing.T) {
 	ctx := harnessAllowingDiags(t, map[string]string{
 		"app.py": "import cloudcompiler as cloudcc\n" +
-			"a = cloudcc.persist(cloudcc.KVStore(), id=\"thing\")\n" +
+			"a = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"thing\")\n" +
 			"b = cloudcc.persist(Path(\"./data\"), id=\"thing\")\n",
 	})
 	if !containsSubstr(diagStrings(ctx), "each id names one store") {
@@ -262,7 +262,7 @@ func TestOnlyCapabilityPluginsCreateIntents(t *testing.T) {
 	// The two IR layers stay separate until the provider resolver runs (D7):
 	// nothing in this package may add a concrete resource.
 	root := t.TempDir()
-	write(t, root, "app.py", "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"a\")\n")
+	write(t, root, "app.py", "import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"a\")\n")
 	ctx := compileWith(t, root, IntentChain())
 	if got := len(ctx.Graph.Resources()); got != 0 {
 		t.Errorf("capability plugins created %d concrete resources; only resolve:aws may", got)

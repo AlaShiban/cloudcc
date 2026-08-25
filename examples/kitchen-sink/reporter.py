@@ -18,7 +18,8 @@ def health():
 
 @app.get("/summary")
 def summary():
-    return {"items": len(catalogue.keys()), "documents": len(docs.list())}
+    stored = catalogue.scan(ProjectionExpression="id").get("Items", [])
+    return {"items": len(stored), "documents": len(docs.list())}
 
 
 def on_item_event(message: dict):

@@ -32,20 +32,20 @@ from django.urls import path
 
 import cloudcompiler as cloudcc
 
-from mega.orm import admin_db
 from mega.storage import recent
 
 cloudcc.execution_unit(id="admin")
 
-# `admin_db` is the persisted DjangoDatabase from mega/orm.py. Uncompiled it
-# describes a local Postgres; compiled it resolves to the provisioned one, with
-# the password fetched on first query rather than stored here -- which matters
-# because Django renders DATABASES on its own error pages.
+# DATABASES is empty, and that is the decision rather than an omission. The
+# Django ORM is synchronous by default and issues queries on attribute access,
+# so the blocking call is invisible at the call site -- see the note at the
+# bottom of mega/orm.py. Django stays as a web framework; its data access here
+# goes through the SQLAlchemy engine, explicitly.
 django_settings.configure(
     DEBUG=False,
     ALLOWED_HOSTS=["*"],
     ROOT_URLCONF=__name__,
-    DATABASES={"default": admin_db},
+    DATABASES={},
     INSTALLED_APPS=["django.contrib.contenttypes", "django.contrib.auth"],
     SECRET_KEY=cloudcc.config_value("django_secret_key", secret=True),
 )

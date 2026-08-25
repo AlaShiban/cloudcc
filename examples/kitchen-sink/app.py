@@ -34,16 +34,17 @@ def get_item(item_id: str):
     cached = cache.get(item_id)
     if cached is not None:
         return json.loads(cached)
-    item = catalogue.get(item_id)
-    if item is None:
+    stored = catalogue.get_item(Key={"id": item_id}).get("Item")
+    if stored is None:
         raise HTTPException(status_code=404, detail="no such item")
+    item = json.loads(stored["item"])
     cache.set(item_id, json.dumps(item), ex=60)
     return item
 
 
 @app.put("/items/{item_id}")
 def put_item(item_id: str, item: dict):
-    catalogue.put(item_id, item)
+    catalogue.put_item(Item={"id": item_id, "item": json.dumps(item)})
     cache.delete(item_id)
     docs.write(f"{item_id}.json", json.dumps(item).encode("utf-8"))
     events.publish({"action": "upserted", "id": item_id})

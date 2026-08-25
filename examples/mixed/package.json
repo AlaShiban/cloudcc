@@ -1,1 +1,9 @@
-{"name":"mixed","private":true,"type":"module","dependencies":{"express":"^4.21.2"}}
+{
+  "name": "mixed",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "express": "^4.21.2",
+    "@aws-sdk/client-dynamodb": "^3.700.0"
+  }
+}

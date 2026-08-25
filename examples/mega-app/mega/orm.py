@@ -1,6 +1,6 @@
-"""Relational access through an ORM -- five of them, one database each.
+"""Relational access through an ORM -- four of them, one database each.
 
-A real application uses one. This file uses five so that every mapping is
+A real application uses one. This file uses four so that every mapping is
 written down somewhere, and so the shape of the problem is visible: an ORM is
 declared by wrapping *the object that holds the connection settings*, and the
 shim hands back an object of the same type pointed at the provisioned database.
@@ -20,7 +20,6 @@ a different treatment, and saying so is better than shipping a bundle that
 fails on its first query.
 """
 
-from django.db import connections as django_connections  # noqa: F401
 from peewee import PostgresqlDatabase
 from sqlalchemy import create_engine
 from sqlmodel import create_engine as create_sqlmodel_engine
@@ -53,41 +52,7 @@ engine = cloudcc.persist(
 
 
 # ---------------------------------------------------------------------------
-# 2. Django ORM -- proposed
-# ---------------------------------------------------------------------------
-#
-# Django has no client object. Its "client" is a dict in settings.DATABASES,
-# and `django.db.connections` reads it lazily on first query -- which is the
-# best possible news, because lazy is exactly what the shim needs.
-#
-# There is nothing in Django's own API worth wrapping (a bare dict carries no
-# type, so the compiler could not tell a database config from any other
-# mapping), so the SDK supplies the typed thing to wrap. It is a Mapping, so
-# Django accepts it unchanged.
-#
-# shim: returns a mapping whose HOST, PORT, NAME, USER and PASSWORD are
-# resolved from the provisioned RDS instance. PASSWORD is computed on first
-# access rather than stored, so `settings.DATABASES` never holds the secret --
-# which matters more here than elsewhere, because Django prints DATABASES in
-# its own debug pages.
-#
-# open question: `django.db.backends.postgresql` calls `get_connection_params`
-# on every new connection, so a lazily-resolved password is fine. Confirm that
-# Django never copies the dict at startup in a way that would freeze the value
-# before the secret is available.
-admin_db = cloudcc.persist(
-    cloudcc.DjangoDatabase(
-        engine="django.db.backends.postgresql",
-        name="mega_admin",
-        host="localhost",
-    ),
-    id="adminDb",
-    models=["auth.User", "catalogue.Product"],
-)
-
-
-# ---------------------------------------------------------------------------
-# 3. SQLModel -- proposed
+# 2. SQLModel -- proposed
 # ---------------------------------------------------------------------------
 #
 # SQLModel is SQLAlchemy underneath, and `sqlmodel.create_engine` returns a
@@ -108,7 +73,7 @@ checkout_engine = cloudcc.persist(
 
 
 # ---------------------------------------------------------------------------
-# 4. Peewee -- proposed
+# 3. Peewee -- proposed
 # ---------------------------------------------------------------------------
 #
 # Peewee's Database object is constructed with the connection settings but does
@@ -135,7 +100,7 @@ reporting_db = cloudcc.persist(
 
 
 # ---------------------------------------------------------------------------
-# 5. Tortoise ORM -- proposed
+# 4. Tortoise ORM -- proposed
 # ---------------------------------------------------------------------------
 #
 # Tortoise is the awkward one: there is no object at all until
@@ -159,3 +124,23 @@ tortoise_config = cloudcc.persist(
     ),
     id="asyncDb",
 )
+
+
+# ---------------------------------------------------------------------------
+# Deliberately absent: the Django ORM
+# ---------------------------------------------------------------------------
+#
+# Django's ORM is synchronous by default, and its queryset attribute access
+# issues queries implicitly -- `order.customer.name` is a round trip that does
+# not look like one. In a unit that can serve requests concurrently, that is a
+# design cloudcc should not make easier to reach for: the blocking call is
+# invisible at the call site, so the cost of it lands on whoever is debugging
+# tail latency rather than on whoever wrote it.
+#
+# So there is no `persist` mapping for it, and there is no plan for one. Django
+# itself remains supported as a *web framework* -- see admin.py -- with its
+# data access through one of the four ORMs above.
+#
+# This is the same shape of decision as Sequelize on the Node side: a library
+# is left out because of a property of its API, and the way back in is to fix
+# that property, not to add a table entry.

@@ -10,7 +10,7 @@ from _cloudcc_runtime import fs as _cloudcc_fs
 from pathlib import Path
 
 
-from shared.store import pets, events, summarize
+from shared.store import events, read_pet, summarize
 
 None
 
@@ -19,7 +19,7 @@ audit = _cloudcc_fs.connect("petAudit")
 
 def on_pet_event(message: dict):
     pet_id = message.get("id")
-    pet = pets.get(pet_id) or {}
+    pet = read_pet(pet_id) or {}
     audit.write(f"{pet_id}.txt", summarize(pet).encode("utf-8"))
     return {"audited": pet_id}
 

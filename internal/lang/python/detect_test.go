@@ -24,7 +24,7 @@ func detect(t *testing.T, src string) ([]sdkdetect.Hint, *diag.Diagnostics) {
 func TestDetectModuleAlias(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
-pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="petsByOwner")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -55,14 +55,14 @@ func TestDetectPlainImport(t *testing.T) {
 }
 
 func TestDetectFromImport(t *testing.T) {
-	hints, _ := detect(t, "from cloudcompiler import persist, KVStore\npets = persist(KVStore(), id=\"a\")\n")
+	hints, _ := detect(t, "from cloudcompiler import persist, Topic\npets = persist(Topic(), id=\"a\")\n")
 	if len(hints) != 1 || hints[0].ID() != "a" {
 		t.Fatalf("hints = %v", hints)
 	}
 }
 
 func TestDetectFromImportAliased(t *testing.T) {
-	hints, _ := detect(t, "from cloudcompiler import persist as pk, KVStore\npets = pk(KVStore(), id=\"a\")\n")
+	hints, _ := detect(t, "from cloudcompiler import persist as pk, Topic\npets = pk(Topic(), id=\"a\")\n")
 	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersist || hints[0].ID() != "a" {
 		t.Fatalf("hints = %v", hints)
 	}
@@ -72,10 +72,10 @@ func TestUnrelatedCallsIgnored(t *testing.T) {
 	hints, d := detect(t, `
 import cloudcompiler as cloudcc
 import other
-other.persist(other.KVStore(), id="not-ours")
+other.persist(other.Table("t"), id="not-ours")
 cloudcc.not_a_capability("x")
 print("hello")
-pets = cloudcc.persist(cloudcc.KVStore(), id="ours")
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="ours")
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -86,7 +86,7 @@ pets = cloudcc.persist(cloudcc.KVStore(), id="ours")
 }
 
 func TestNoSDKImportMeansNoHints(t *testing.T) {
-	hints, _ := detect(t, "persist(KVStore(), id=\"x\")\n")
+	hints, _ := detect(t, "persist(Topic(), id=\"x\")\n")
 	if len(hints) != 0 {
 		t.Fatalf("hints = %v", hints)
 	}
@@ -163,15 +163,15 @@ func TestNonLiteralArgumentIsAPreciseError(t *testing.T) {
 	_, d := detect(t, `
 import cloudcompiler as cloudcc
 name = "petsByOwner"
-pets = cloudcc.persist(cloudcc.KVStore(), id=name)
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id=name)
 `)
 	items := d.Items()
 	if len(items) != 1 {
 		t.Fatalf("got %d diagnostics, want 1: %v", len(items), items)
 	}
 	got := items[0].String()
-	// The offending argument starts at line 4, column 46.
-	if !strings.HasPrefix(got, "app.py:4:46: error: id must be") {
+	// The offending argument starts at line 4, column 66.
+	if !strings.HasPrefix(got, "app.py:4:66: error: id must be") {
 		t.Errorf("diagnostic = %q", got)
 	}
 	if !strings.Contains(got, "string literal") || !strings.Contains(got, "the variable name") {
@@ -180,7 +180,7 @@ pets = cloudcc.persist(cloudcc.KVStore(), id=name)
 }
 
 func TestFStringRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(cloudcc.KVStore(), id=f\"pets-{env}\")\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=f\"pets-{env}\")\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "f-string") {
 		t.Fatalf("diagnostics = %v", items)
@@ -188,7 +188,7 @@ func TestFStringRejected(t *testing.T) {
 }
 
 func TestUnknownKeywordRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(cloudcc.KVStore(), id=\"a\", nope=1)\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"a\", nope=1)\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "no parameter") {
 		t.Fatalf("diagnostics = %v", items)
@@ -201,7 +201,7 @@ func TestMissingRequiredArgRejected(t *testing.T) {
 	// about what to provision.
 	for name, src := range map[string]struct{ code, want string }{
 		"no client": {"x = cloudcc.persist()", "requires the client argument"},
-		"no id":     {"x = cloudcc.persist(cloudcc.KVStore())", "requires the id argument"},
+		"no id":     {`x = cloudcc.persist(boto3.resource("dynamodb").Table("t"))`, "requires the id argument"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, d := detect(t, "import cloudcompiler as cloudcc\n"+src.code+"\n")
@@ -214,7 +214,7 @@ func TestMissingRequiredArgRejected(t *testing.T) {
 }
 
 func TestTooManyPositionalArgsRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(cloudcc.KVStore(), \"a\", \"b\")\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), \"a\", \"b\")\n")
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "at most 1 positional") {
 		t.Fatalf("diagnostics = %v", items)
@@ -247,10 +247,10 @@ def handler():
 }
 
 func TestSpanCoversTheWholeCall(t *testing.T) {
-	src := "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n"
+	src := "import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"petsByOwner\")\n"
 	hints, _ := detect(t, src)
 	h := hints[0]
-	if got, want := src[h.Span[0]:h.Span[1]], `cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")`; got != want {
+	if got, want := src[h.Span[0]:h.Span[1]], `cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="petsByOwner")`; got != want {
 		t.Errorf("span text = %q, want %q", got, want)
 	}
 }
@@ -258,7 +258,7 @@ func TestSpanCoversTheWholeCall(t *testing.T) {
 func TestHintsSortedByOffset(t *testing.T) {
 	hints, _ := detect(t, `
 import cloudcompiler as cloudcc
-a = cloudcc.persist(cloudcc.KVStore(), id="a")
+a = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="a")
 b = cloudcc.persist(Path("./data"), id="b")
 c = cloudcc.persist(cloudcc.Topic(), id="c")
 `)
@@ -307,7 +307,7 @@ func TestParenthesizedStringLiteral(t *testing.T) {
 import cloudcompiler as cloudcc
 
 pets = cloudcc.persist(
-    cloudcc.KVStore(),
+    boto3.resource("dynamodb").Table("t"),
     id=(
         "pets"
         "ByOwner"
@@ -323,7 +323,7 @@ pets = cloudcc.persist(
 }
 
 func TestParenthesizedSingleString(t *testing.T) {
-	hints, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(cloudcc.KVStore(), id=(\"a\"))\n")
+	hints, d := detect(t, "import cloudcompiler as cloudcc\nx = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=(\"a\"))\n")
 	if d.HasErrors() || len(hints) != 1 || hints[0].ID() != "a" {
 		t.Fatalf("hints = %v, diagnostics = %v", hints, d.Items())
 	}
@@ -331,7 +331,7 @@ func TestParenthesizedSingleString(t *testing.T) {
 
 // A parenthesised expression that is not a constant must still be rejected.
 func TestParenthesizedNonLiteralStillRejected(t *testing.T) {
-	_, d := detect(t, "import cloudcompiler as cloudcc\nname = \"x\"\ny = cloudcc.persist(cloudcc.KVStore(), id=(name))\n")
+	_, d := detect(t, "import cloudcompiler as cloudcc\nname = \"x\"\ny = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=(name))\n")
 	if !d.HasErrors() {
 		t.Fatal("a parenthesised variable is still not a literal")
 	}
@@ -388,7 +388,7 @@ func TestCommentInsideAParenthesizedString(t *testing.T) {
 import cloudcompiler as cloudcc
 
 pets = cloudcc.persist(
-    cloudcc.KVStore(),
+    boto3.resource("dynamodb").Table("t"),
     id=(
         # split for the line limit
         "pets"

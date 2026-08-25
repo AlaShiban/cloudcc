@@ -101,7 +101,7 @@ starts skipping, that is a signal, not noise.
 
 | Capability | AWS target | Provisioning (L4) | Functional (L5) |
 |---|---|---|---|
-| `persist(KVStore())` | DynamoDB | yes | yes, through the running app |
+| `persist(boto3…Table())` | DynamoDB | yes | yes, through the running app |
 | `persist(Path(...))` | S3 | yes | yes, through the running app |
 | `persist(Secret())` | Secrets Manager | yes | yes, through the running app |
 | `pubsub` | SNS + subscription | yes | publish reaches the subscriber |

@@ -2,8 +2,12 @@
 
 **A specification written as a program.** It uses every library category
 cloudcc should support, the way it should support them, and says in comments
-what the shim would do. Most of it does not compile today, and that is the
+what the shim would do. Some of it does not compile today, and that is the
 point: this is the target, written out in enough detail to argue with.
+
+It has been through one round of review, and five things were cut rather than
+implemented. They are worth reading as decisions, not omissions: the reasoning
+is at the bottom of the file each one used to live in.
 
 `examples/kitchen-sink` is the counterpart that *does* compile. If you want to
 see what works now, read that one.
@@ -17,13 +21,12 @@ unresolved design question say so under `open question:`.
 
 | File | Category | Libraries |
 |---|---|---|
-| `mega/orm.py` | ORMs | SQLAlchemy, Django ORM, SQLModel, Peewee, Tortoise |
-| `mega/drivers.py` | DB drivers | psycopg, PyMySQL, mysqlclient, asyncpg, sqlite3 |
-| `mega/nosql.py` | Other stores | redis-py, PyMongo, boto3 DynamoDB, Cassandra, ClickHouse |
+| `mega/orm.py` | ORMs | SQLAlchemy, SQLModel, Peewee, Tortoise |
+| `mega/drivers.py` | DB drivers | psycopg, PyMySQL, mysqlclient, asyncpg |
+| `mega/nosql.py` | Other stores | redis-py, boto3 DynamoDB, PyMongo |
 | `mega/storage.py` | Files | pathlib |
 | `mega/messaging.py` | Pub/sub | `cloudcc.Topic`, Celery, Pika, aiokafka, kombu |
 | `mega/jobs.py` | Task queues | Celery, RQ, Dramatiq |
-| `mega/caching.py` | Caching | redis-py, cachetools, dogpile.cache |
 | `mega/wire.py` | Serialization | Pydantic, Marshmallow, msgspec |
 | `mega/settings.py` | Configuration | python-dotenv, pydantic-settings, Dynaconf |
 | `mega/logs.py` | Logging | logging, structlog, loguru |
@@ -44,6 +47,14 @@ the row is updated. It also checks that every `.py` file here parses.
 
 Six positions, each of which shows up repeatedly in the code:
 
+**0. cloudcc supplies no objects for data stores.** A store is declared by
+wrapping the client library you would have used anyway — a `boto3` DynamoDB
+`Table`, a `redis.Redis`, a `pathlib.Path`. A supplied class is a dialect
+nobody else speaks, its methods have to be kept in step with the shim's
+forever, and it makes the code unliftable. The cost is that an uncompiled run
+needs a real endpoint for its stores, which was already true of every store
+except the one this rule removed.
+
 **1. `persist` is synchronous and returns the library's own type.** Every
 mapping in `mega/orm.py` and `mega/drivers.py` is judged against that, and the
 question it reduces to for each library is *can the password be supplied late?*
@@ -63,11 +74,14 @@ alone, which is why the topic is written `Topic[OrderPlaced]` and why a
 marshmallow channel has to name its schema. A publisher and a subscriber
 disagreeing about the format should be a compile error.
 
-**4. The library often declares the service, not just the capability.** For
-storage the library picks a capability and `cloudcc.yaml` picks the variant.
-For messaging that inverts: a program written against Kafka's ordering
-guarantees cannot run on SNS, and a Kafka consumer loop pins its unit to a
-container.
+**4. A topic declares its requirements, and the compiler picks the service.**
+For a store, the library picks the capability and `cloudcc.yaml` picks the
+variant. A topic has no library to ask, and the variants are not
+interchangeable — SNS cannot replay, SQS cannot fan out, FIFO costs throughput.
+So `Topic[T]` carries the decisions that change its behaviour (subscribers,
+ordering, delivery, replay, retention, size) and the compiler resolves them to
+SNS, SQS, their FIFO forms or Kinesis — or fails naming the constraint to
+relax. Reaching for aiokafka or pika is how you take that decision back.
 
 **5. No silent substitutions.** ClickHouse has no managed AWS equivalent, so
 `persist_columnar` has no default type and the error names the two real
@@ -76,24 +90,43 @@ three things the author might have meant. Mapping either to something
 approximate produces a program that compiles, deploys, and behaves differently
 — the failure this project exists to prevent.
 
-**6. Some categories need no capability at all.** Logging, cachetools, boto3
-and python-dotenv declare nothing. What they need is for the environment to be
-correct before user code runs, which is the injected runtime's job, and in two
-cases a *lint* — an in-process cache in a horizontally scaled unit, or a raw
-boto3 call to a service the unit's role does not cover.
+**6. Some categories need no client, only a correct environment.** boto3 and
+python-dotenv declare nothing at all: what they need is for the environment to
+be right before user code runs, which is the injected runtime's job. Logging is
+the near miss — no client to declare, but a *destination* to choose, so it gets
+a `logging.type` in `cloudcc.yaml` with `cloudwatch` as the only working value
+and vendors refused rather than ignored.
+
+## What was cut in review, and why
+
+- **`cloudcc.KVStore`** — the last SDK-supplied data store. Replaced by a
+  `boto3` DynamoDB `Table`. See the top of `mega/nosql.py`.
+- **The Django ORM** — synchronous by default, and queries issued on attribute
+  access, so the blocking call is invisible at the call site. Django stays as a
+  web framework. See the bottom of `mega/orm.py`.
+- **`sqlite3` persistence** — there is no correct cloud resource for it.
+- **Cassandra and ClickHouse** — Keyspaces is compatible in the way DocumentDB
+  is compatible, and ClickHouse has no managed AWS service at all. A capability
+  whose local emulation and deployed resource differ in ways the differential
+  harness cannot catch is worse than no capability. See the bottom of
+  `mega/nosql.py`.
+- **The whole caching category** — `redis-py` already covers it, `cachetools`
+  is a dict with an eviction policy, and `dogpile.cache` would have meant a
+  second way to declare the cluster that already exists.
 
 ## What is new here beyond the current design
 
-- **`Topic[T]`** — a typed topic whose parameter is the wire codec.
-- **`cloudcc.DjangoDatabase` / `cloudcc.TortoiseConfig`** — typed objects for
-  ORMs whose "client" is otherwise an untyped dict.
+- **`Topic[T](...)`** — a typed topic that carries its own requirements, whose
+  type parameter is the wire codec.
+- **`cloudcc.TortoiseConfig`** — a typed object for an ORM whose "client" is
+  otherwise an untyped dict.
 - **`cloudcc.location(store)`** — the physical bucket and prefix of a persisted
   store, for the AWS APIs that need to name it. Without it, code reaches for
   `S3Path.bucket`, which does not exist on the local `Path` and so breaks the
   uncompiled run.
-- **`cloudcc.log_renderer()`** — the environment-appropriate final processor
-  for a structlog chain, so the chain is written once instead of behind an
-  `if IS_LAMBDA`.
+- **`cloudcc.log_renderer()`** — the final processor for a structlog chain that
+  matches the configured destination, so the chain is written once instead of
+  behind an `if IS_LAMBDA`, and a vendor integration has one place to reach.
 - **`execution_unit(type="task")`** — run-to-completion units, and
   `cloudcc run ops -- backfill --since ...`, so operational commands run with
   the unit's own role instead of credentials on a laptop.
@@ -109,7 +142,8 @@ boto3 call to a service the unit's role does not cover.
 
 ## Running it
 
-You cannot, yet. `pip install -r requirements.txt` and the uncompiled program
-would run — that is the property the whole design protects — but several of the
-declarations use SDK types that do not exist. Treat it as a document with a
-parser.
+Not yet, in one piece. `pip install -r requirements.txt` and most of it would
+run uncompiled — that is the property the whole design protects — but several
+declarations still use SDK types that do not exist, and the stores now need
+real local endpoints (a DynamoDB, a Redis, a Postgres, a Mongo) because they
+hold real clients. Treat it as a document with a parser.

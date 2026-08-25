@@ -142,6 +142,19 @@ if lsof -ti:8099 >/dev/null 2>&1; then
   fail "port 8099 is already in use; a server from an earlier run is still up (lsof -ti:8099 | xargs kill)"
 fi
 
+# Which module holds the application, and what the binding is called, are
+# facts the compiler already worked out -- so ask it rather than assume. This
+# branch used to run `uvicorn app:app`, which is right for petstore and wrong
+# for every program whose entry is not called app.py.
+PY_ENTRY="$("$WORK/cloudcc" --dump-ir "$REPO_ROOT/examples/$EXAMPLE" 2>/dev/null \
+  | jq -r --arg unit "$UNIT" \
+      '[.intents[] | select(.key.kind=="execution_unit") | select(.payload.id==$unit)][0]
+       | "\(.payload.entrypoints[0]):\(.payload.asgi_app)"' 2>/dev/null || true)"
+if [ -z "$PY_ENTRY" ] || [ "$PY_ENTRY" = "null:null" ]; then
+  PY_ENTRY="app.py:app"
+fi
+PY_TARGET="$(printf '%s' "${PY_ENTRY%%:*}" | sed 's/\.py$//' | tr '/' '.'):${PY_ENTRY##*:}"
+
 log "starting the compiled application against the emulator"
 if [ -f "$UNIT_DIR/package.json" ]; then
   # The unit's manifest names its entry module, and the generated Lambda entry
@@ -175,7 +188,7 @@ else
     exec env CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
       PYTHONPATH="$UNIT_DIR" \
       uv run --quiet --with fastapi --with uvicorn --with boto3 \
-        python -m uvicorn app:app --host 127.0.0.1 --port 8099 --log-level warning
+        python -m uvicorn "$PY_TARGET" --host 127.0.0.1 --port 8099 --log-level warning
   ) &
 fi
 APP_PID=$!

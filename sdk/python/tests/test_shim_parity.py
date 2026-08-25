@@ -8,11 +8,14 @@ autocomplete against the SDK honest about what the compiled program will do.
 
 Most capabilities are not in this list, and that is the point of the design
 rather than a gap in the test. A program that hands ``persist`` a
-``redis.Redis``, a SQLAlchemy engine or a ``pathlib.Path`` gets back an object
-of that same type once compiled -- a real Redis client, a real Engine, a
-cloudpathlib S3Path -- so there is no second implementation to keep in step.
-Only the three capabilities with no standard client need a class here, and only
-those three can drift.
+``redis.Redis``, a SQLAlchemy engine, a ``pathlib.Path`` or a boto3 ``Table``
+gets back an object of that same type once compiled -- a real Redis client, a
+real Engine, a cloudpathlib S3Path, a real Table -- so there is no second
+implementation to keep in step.
+
+The list shrank by one when the key/value store stopped being a class this SDK
+supplies. That is the direction of travel: every pair removed from here is a
+pair that can no longer drift.
 """
 
 import inspect
@@ -38,7 +41,6 @@ SHIM_DIR = (
 #: emulation class -> (shim module, shim class). Both sides are named the same
 #: on purpose; the mapping is explicit anyway so a rename cannot pass silently.
 PAIRS = [
-    (_emulation.KVStore, "kv", "KVStore"),
     (_emulation.Secret, "secret", "Secret"),
     (_emulation.Topic, "pubsub", "Topic"),
     (_emulation.Gateway, "expose", "Gateway"),
@@ -47,7 +49,7 @@ PAIRS = [
 #: Shims that return the library's own type rather than a class of ours. There
 #: is nothing to compare method-by-method; what matters is that they still
 #: offer connect(), which the entrypoint test below checks.
-TYPE_PRESERVING = ["fs", "orm", "redis_"]
+TYPE_PRESERVING = ["fs", "kv", "orm", "redis_"]
 
 
 def load_shim(module_name):

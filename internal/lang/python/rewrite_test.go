@@ -45,7 +45,7 @@ func assertParses(t *testing.T, src string) {
 }
 
 func TestRewritePersistKV(t *testing.T) {
-	got := rewritten(t, "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n")
+	got := rewritten(t, "import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"petsByOwner\")\n")
 
 	if strings.Contains(got, "cloudcompiler") {
 		t.Errorf("the SDK import should be removed:\n%s", got)
@@ -63,7 +63,7 @@ func TestRewriteLeavesApplicationCodeAlone(t *testing.T) {
 import cloudcompiler as cloudcc
 
 app = FastAPI()
-pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="petsByOwner")
 
 
 @app.get("/pets/{pet_id}")
@@ -130,7 +130,7 @@ func TestImportsGoAfterTheDocstring(t *testing.T) {
 
 import cloudcompiler as cloudcc
 
-pets = cloudcc.persist(cloudcc.KVStore(), id="a")
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="a")
 `)
 	if !strings.HasPrefix(got, `"""Module docstring."""`) {
 		t.Errorf("the docstring must stay first:\n%s", got)
@@ -147,7 +147,7 @@ func TestFutureImportsStayFirst(t *testing.T) {
 
 import cloudcompiler as cloudcc
 
-pets = cloudcc.persist(cloudcc.KVStore(), id="a")
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="a")
 `)
 	future := strings.Index(got, "from __future__ import annotations")
 	shim := strings.Index(got, "from _cloudcc_runtime")
@@ -157,8 +157,8 @@ pets = cloudcc.persist(cloudcc.KVStore(), id="a")
 }
 
 func TestFromImportFormIsRewritten(t *testing.T) {
-	got := rewritten(t, "from cloudcompiler import persist, KVStore\npets = persist(KVStore(), id=\"a\")\n")
-	if !strings.Contains(got, `pets = _cloudcc_kv.connect("a")`) || strings.Contains(got, "cloudcompiler") {
+	got := rewritten(t, "from cloudcompiler import persist, Topic\npets = persist(Topic(), id=\"a\")\n")
+	if !strings.Contains(got, `pets = _cloudcc_pubsub.connect("a")`) || strings.Contains(got, "cloudcompiler") {
 		t.Errorf("from-import form was not rewritten:\n%s", got)
 	}
 }
@@ -166,7 +166,7 @@ func TestFromImportFormIsRewritten(t *testing.T) {
 func TestSeveralHintsInOneFile(t *testing.T) {
 	got := rewritten(t, `import cloudcompiler as cloudcc
 
-pets = cloudcc.persist(cloudcc.KVStore(), id="pets")
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="pets")
 blobs = cloudcc.persist(Path("./data"), id="blobs")
 events = cloudcc.persist(cloudcc.Topic(), id="events")
 level = cloudcc.config_value("log_level")
@@ -192,7 +192,7 @@ level = cloudcc.config_value("log_level")
 }
 
 func TestRewriteIsDeterministic(t *testing.T) {
-	src := "import cloudcompiler as cloudcc\na = cloudcc.persist(cloudcc.KVStore(), id=\"a\")\nb = cloudcc.persist(Path(\"./data\"), id=\"b\")\nc = cloudcc.persist(cloudcc.Topic(), id=\"c\")\n"
+	src := "import cloudcompiler as cloudcc\na = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"a\")\nb = cloudcc.persist(Path(\"./data\"), id=\"b\")\nc = cloudcc.persist(cloudcc.Topic(), id=\"c\")\n"
 	first := rewritten(t, src)
 	for i := 0; i < 10; i++ {
 		if got := rewritten(t, src); got != first {

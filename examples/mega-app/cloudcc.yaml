@@ -31,10 +31,20 @@ exposed:
   admin-web:
     type: alb
 
+# Where logs go. `cloudwatch` is the only value that works; `datadog` and
+# `honeycomb` are recognised and refused, so choosing one is an error rather
+# than a key that is silently dropped.
+#
+# The seam for a vendor is the destination, not the call sites: nothing in
+# mega/logs.py changes when this does.
+logging:
+  type: cloudwatch
+  retention_days: 14
+
 persisted:
-  # Supported today. The client's type chose the capability; this section
-  # chooses between variants of it, which is a configuration decision rather
-  # than a code change.
+  # The client's type chose the capability; this section chooses between
+  # variants of it, which is a configuration decision rather than a code
+  # change.
   itemCache:
     type: memorydb          # rather than elasticache: worker.py subscribes to
                             # a Redis channel, and a cache that evicts under
@@ -44,23 +54,25 @@ persisted:
   receipts:
     type: s3
   orders:
-    type: dynamodb
-  orderEvents:
-    type: sns
+    type: dynamodb          # declared by wrapping a boto3 Table, not by an
+                            # object cloudcc supplies.
 
-  # PROPOSED below this line: none of these types exist yet. They are written
-  # out because a type the compiler cannot resolve must be a clean error naming
-  # the alternatives, never a silent substitution (D9, D15).
+  # Topics are deliberately NOT typed here. Their backing is chosen by the
+  # compiler from the requirements declared in the code -- ordering, delivery,
+  # replay -- because those are not interchangeable and picking by hand means
+  # knowing which service satisfies which. See mega/messaging.py.
+  #
+  #   orderEvents  -> SNS + a queue per subscriber
+  #   refundEvents -> SQS FIFO
+  #   auditEvents  -> Kinesis Data Stream
+  #
+  # Naming a type here is still allowed, and it is checked rather than
+  # obeyed: a type that cannot satisfy the declared requirements is an error.
+
+  # PROPOSED below this line: none of these types exist yet.
   itemDocs:
-    type: documentdb        # PyMongo. `atlas` should also be offered: DocumentDB
-                            # is Mongo-compatible, not Mongo.
-  eventMetrics:
-    type: keyspaces         # cassandra-driver
-  analytics:
-    type: self_hosted_ecs   # clickhouse-driver. Deliberately has NO default:
-                            # there is no managed ClickHouse on AWS, and both
-                            # answers cost something the compiler must not
-                            # choose on the author's behalf.
+    type: documentdb        # PyMongo. `atlas` should also be offered:
+                            # DocumentDB is Mongo-compatible, not Mongo.
   workQueue:
     type: amazonmq_rabbit   # pika, kombu (amqp://)
   auditQueue:

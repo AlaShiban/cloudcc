@@ -1,4 +1,4 @@
-"""Relational access without an ORM -- the five raw drivers.
+"""Relational access without an ORM -- the four raw drivers.
 
 Same resource as mega/orm.py, different objects to hand back. The interesting
 difference is *lifetime*: an ORM engine is a lazy handle, whereas most of these
@@ -13,8 +13,6 @@ category is governed by one preference:
     documentation says so, because the reader deserves to know a socket is
     being opened on their behalf.
 """
-
-import sqlite3
 
 import asyncpg
 import MySQLdb
@@ -105,29 +103,3 @@ async_pool = cloudcc.persist(
     asyncpg.create_pool("postgresql://localhost/mega_async"),
     id="asyncDb",
 )
-
-
-# ---------------------------------------------------------------------------
-# 5. sqlite3 -- deliberately NOT persistable
-# ---------------------------------------------------------------------------
-#
-# There is no correct cloud resource for this. A SQLite file needs POSIX byte
-# range locks that no object store provides, and a database on a Lambda's
-# ephemeral disk vanishes with the instance -- so a `persist`ed sqlite3
-# connection would be either broken or a lie.
-#
-# So the compiler should *reject* it, with a message that says which of the
-# three real answers the author wants:
-#
-#     persist() cannot make a sqlite3 connection durable: a SQLite file cannot
-#     be shared safely between instances.
-#       - for a database, use sqlalchemy.create_engine("postgresql://...")
-#       - for a file that must survive, persist a pathlib.Path
-#       - for a local cache, leave this call unwrapped -- it already works
-#
-# Unwrapped, sqlite3 is left completely alone, and that is a supported and
-# useful thing to do: a read-only lookup table built during init and thrown
-# away with the instance is a good use of it. cloudcc has no opinion about
-# code that does not claim to be infrastructure.
-lookup = sqlite3.connect(":memory:")
-lookup.execute("CREATE TABLE IF NOT EXISTS postcode (code TEXT, region TEXT)")

@@ -29,9 +29,12 @@ Two rules follow from the hints being read rather than run:
 * Calls belong at module level, where the compiler can see the shape of the
   program. ``execution_unit`` in particular must be a module-level call.
 
-Where the ecosystem has no standard client -- a key/value store, a pub/sub
-topic, a secret -- this package supplies a typed one, wrapped by the same verb
-as everything else.
+This package supplies no client for a data store. A store is declared by
+wrapping the library you already use -- ``redis.Redis``, ``pathlib.Path``,
+``boto3.resource("dynamodb").Table(...)`` -- because a class of ours would be a
+dialect nobody else speaks, and its methods would have to be kept in step with
+the injected runtime's forever. The two things it does supply, a pub/sub topic
+and a secret, are not stores: neither has a client to wrap.
 
 This package never imports boto3. Cloud access only ever appears in the
 ``_cloudcc_runtime`` package the compiler injects into the compiled copy.
@@ -43,7 +46,6 @@ from typing import Any, TypeVar
 
 from ._emulation import (
     Gateway,
-    KVStore,
     Secret,
     Topic,
     local_root,
@@ -57,7 +59,6 @@ __all__ = [
     "config_value",
     "static_unit",
     "embed_assets",
-    "KVStore",
     "Topic",
     "Secret",
     "Gateway",
@@ -79,17 +80,17 @@ def persist(client: T, *, id: str, models: list | None = None) -> T:
     Pass the client you already use. The compiler reads its type to decide
     what to provision:
 
-    ==========================================  =========================
-    what you pass                               what it becomes
-    ==========================================  =========================
-    ``redis.Redis(...)``                        ElastiCache (or MemoryDB)
-    ``sqlalchemy.create_engine("postgresql…")`` RDS Postgres
-    ``sqlalchemy.create_engine("mysql…")``      RDS MySQL
-    ``pathlib.Path(...)``                       S3
-    ``cloudcc.KVStore()``                       DynamoDB
-    ``cloudcc.Topic()``                         SNS
-    ``cloudcc.Secret()``                        Secrets Manager
-    ==========================================  =========================
+    ============================================  =========================
+    what you pass                                 what it becomes
+    ============================================  =========================
+    ``redis.Redis(...)``                          ElastiCache (or MemoryDB)
+    ``sqlalchemy.create_engine("postgresql…")``   RDS Postgres
+    ``sqlalchemy.create_engine("mysql…")``        RDS MySQL
+    ``pathlib.Path(...)``                         S3
+    ``boto3.resource("dynamodb").Table(...)``     DynamoDB
+    ``cloudcc.Topic()``                           SNS, SQS or Kinesis
+    ``cloudcc.Secret()``                          Secrets Manager
+    ============================================  =========================
 
     The library you reached for supplies the default; ``cloudcc.yaml`` still
     chooses between variants of it, so asking for MemoryDB instead of

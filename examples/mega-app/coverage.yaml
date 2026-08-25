@@ -52,17 +52,6 @@ libraries:
       A separate library identifier because the shim must return an AsyncEngine.
       Returning a sync Engine compiles cleanly and fails on the first await.
 
-  - library: django-orm
-    category: orm
-    constructors: [DjangoDatabase]
-    capability: persist_orm
-    type: rds_postgres
-    status: proposed
-    note: >-
-      Django's client is a dict in settings.DATABASES, which carries no type, so
-      the SDK supplies a Mapping subclass to wrap. Lazy connection setup means
-      the password can resolve on first query.
-
   - library: sqlmodel
     category: orm
     constructors: [create_engine]
@@ -141,21 +130,6 @@ libraries:
       The best fit in the whole table: the pool is awaitable rather than a
       coroutine, and asyncpg accepts an async password provider.
 
-  - library: sqlite3
-    category: driver
-    constructors: [connect]
-    capability: persist_orm
-    type: rds_postgres
-    needs_module_resolution: true
-    status: rejected
-    note: >-
-      A SQLite file cannot be shared safely between instances, and one on a
-      Lambda's disk vanishes with the instance. persist() must refuse and name
-      the three real alternatives. Unwrapped sqlite3 is left entirely alone.
-
-  # =========================================================================
-  # Other stores
-  # =========================================================================
   - library: redis-py
     category: store
     constructors: [Redis, StrictRedis]
@@ -194,32 +168,14 @@ libraries:
     constructors: [Table]
     capability: persist_kv
     type: dynamodb
-    status: proposed
+    status: supported
     note: >-
-      The same table cloudcc.KVStore() provisions, declared through the AWS SDK.
-      The id and the physical table name are separate, which is the point.
-
-  - library: cassandra-driver
-    category: store
-    constructors: [Cluster]
-    capability: persist_wide_column
-    type: keyspaces
-    status: proposed
-    note: >-
-      Cluster is the parameters object; connect() opens the sockets. The shim
-      installs the SigV4 auth provider, which is the setup everyone writes once
-      and badly.
-
-  - library: clickhouse-driver
-    category: store
-    constructors: [Client]
-    capability: persist_columnar
-    type: self_hosted_ecs
-    status: proposed
-    note: >-
-      No managed AWS equivalent, so this capability must have NO default type.
-      Mapping it to Redshift because both are columnar is exactly the silent
-      substitution D9 and D15 forbid.
+      The key/value store, declared by wrapping the client you would have used
+      anyway. This replaced a cloudcc.KVStore class: cloudcc does not supply
+      objects for data stores, because a supplied class is a dialect nobody else
+      speaks and its methods have to be kept in step with the shim's forever.
+      The id and the physical table name are separate, which is the point --
+      the string in .Table() is what the uncompiled run talks to.
 
   - library: pathlib
     category: store
@@ -233,16 +189,12 @@ libraries:
       proposed for.
 
   # =========================================================================
-  # SDK-provided: capabilities the ecosystem has no standard client for
+  # SDK-provided: the two capabilities that are not data stores
+  #
+  # There is deliberately nothing else here. A store is declared by wrapping a
+  # real client library; a topic and a secret are not stores, and neither has a
+  # client to wrap.
   # =========================================================================
-  - library: ""
-    sdk_provided: true
-    category: store
-    constructors: [KVStore]
-    capability: persist_kv
-    type: dynamodb
-    status: supported
-
   - library: ""
     sdk_provided: true
     category: messaging
@@ -251,8 +203,11 @@ libraries:
     type: sns
     status: supported
     note: >-
-      Proposed extension: Topic[T], where the type parameter is the wire codec
-      and both ends read it from the topic's intent. See mega/wire.py.
+      Topic[T] carries the decisions that change its behaviour -- subscribers,
+      ordering, delivery, replay, retention, message size -- and the compiler
+      picks a backing service that satisfies the whole set or fails naming the
+      constraint to relax. `sns` is the resolution for the default set, not a
+      configured choice. The type parameter is the wire codec: see mega/wire.py.
 
   - library: ""
     sdk_provided: true
@@ -343,32 +298,6 @@ libraries:
   # =========================================================================
   # Caching
   # =========================================================================
-  - library: dogpile
-    category: caching
-    constructors: [make_region]
-    capability: persist_redis
-    type: elasticache
-    status: proposed
-    note: >-
-      A region is unconfigured until configure(), and the backend arguments are
-      a dict -- everything the shim needs to supply. Should reuse an
-      already-persisted client rather than provision a second cluster.
-
-  - library: cachetools
-    category: caching
-    constructors: [TTLCache, LRUCache]
-    capability: ""
-    type: ""
-    status: none
-    note: >-
-      A dict with an eviction policy. Nothing to provision -- but a module-level
-      cache in a unit that runs on many instances is correct code with
-      surprising behaviour, and the compiler is the only thing that knows both
-      the code and the scaling configuration. A lint, not an error.
-
-  # =========================================================================
-  # Serialization: the wire format between units. See mega/wire.py.
-  # =========================================================================
   - library: pydantic
     category: wire
     constructors: []
@@ -442,13 +371,15 @@ libraries:
   - library: logging
     category: logging
     constructors: []
-    capability: ""
-    type: ""
-    status: none
+    capability: logging
+    type: cloudwatch
+    status: proposed
     note: >-
-      The runtime installs a JSON handler on stdout at the configured level,
-      with the request, unit and trace ids attached, before any user module is
-      imported.
+      No client to declare, but a destination to choose. `logging.type` in
+      cloudcc.yaml, with cloudwatch the only working value and datadog and
+      honeycomb recognised and refused rather than ignored. The runtime
+      installs a handler on stdout at the configured level, with the request,
+      unit and trace ids attached, before any user module is imported.
 
   - library: structlog
     category: logging

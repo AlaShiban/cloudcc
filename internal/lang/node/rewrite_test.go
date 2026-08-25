@@ -39,8 +39,8 @@ func rewritten(t *testing.T, src string) string {
 }
 
 func TestPersistIsRewrittenToARuntimeConnect(t *testing.T) {
-	got := rewritten(t, "import { persist, KVStore } from \"@cloudcompiler/sdk\";\n"+
-		"const pets = persist(new KVStore(), { id: \"petsByOwner\" });\n")
+	got := rewritten(t, "import { DynamoDBClient } from \"@aws-sdk/client-dynamodb\";\nimport { persist } from \"@cloudcompiler/sdk\";\n"+
+		"const pets = persist(new DynamoDBClient({}), { id: \"petsByOwner\" });\n")
 
 	if !strings.Contains(got, `_cloudccKv.connect("petsByOwner")`) {
 		t.Errorf("the call was not rewritten:\n%s", got)
@@ -55,10 +55,10 @@ func TestPersistIsRewrittenToARuntimeConnect(t *testing.T) {
 // used the import.
 func TestTheSDKImportIsAlwaysRemoved(t *testing.T) {
 	for name, src := range map[string]string{
-		"used":   "import { persist, KVStore } from \"@cloudcompiler/sdk\";\nconst p = persist(new KVStore(), { id: \"a\" });\n",
+		"used":   "import { DynamoDBClient } from \"@aws-sdk/client-dynamodb\";\nimport { persist } from \"@cloudcompiler/sdk\";\nconst p = persist(new DynamoDBClient({}), { id: \"a\" });\n",
 		"unused": "import { persist } from \"@cloudcompiler/sdk\";\n\nexport const VALUE = 1;\n",
-		"require": "const { persist, KVStore } = require(\"@cloudcompiler/sdk\");\n" +
-			"const p = persist(new KVStore(), { id: \"a\" });\n",
+		"require": "const { DynamoDBClient } = require(\"@aws-sdk/client-dynamodb\");\nconst { persist } = require(\"@cloudcompiler/sdk\");\n" +
+			"const p = persist(new DynamoDBClient({}), { id: \"a\" });\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := rewrittenAt(t, "app.js", src)
@@ -81,8 +81,8 @@ func TestRuntimeImportsReachUpFromSubdirectories(t *testing.T) {
 		"src/a/b/deep.js": `"../../../_cloudcc_runtime/kv.js"`,
 	} {
 		t.Run(path, func(t *testing.T) {
-			src := "import { persist, KVStore } from \"@cloudcompiler/sdk\";\n" +
-				"const pets = persist(new KVStore(), { id: \"pets\" });\n"
+			src := "import { DynamoDBClient } from \"@aws-sdk/client-dynamodb\";\nimport { persist } from \"@cloudcompiler/sdk\";\n" +
+				"const pets = persist(new DynamoDBClient({}), { id: \"pets\" });\n"
 			got := rewrittenAt(t, path, src)
 			if !strings.Contains(got, want) {
 				t.Errorf("a file at %s should import the runtime as %s:\n%s", path, want, got)
@@ -94,8 +94,8 @@ func TestRuntimeImportsReachUpFromSubdirectories(t *testing.T) {
 // The same reach-up applies to CommonJS, which resolves require() the same way.
 func TestRequireAlsoReachesUp(t *testing.T) {
 	got := rewrittenAt(t, "src/store.cjs",
-		"const { persist, KVStore } = require(\"@cloudcompiler/sdk\");\n"+
-			"const pets = persist(new KVStore(), { id: \"pets\" });\n")
+		"const { DynamoDBClient } = require(\"@aws-sdk/client-dynamodb\");\nconst { persist } = require(\"@cloudcompiler/sdk\");\n"+
+			"const pets = persist(new DynamoDBClient({}), { id: \"pets\" });\n")
 	if !strings.Contains(got, `require("../_cloudcc_runtime/kv.js")`) {
 		t.Errorf("a CommonJS module in a subdirectory should reach up:\n%s", got)
 	}
