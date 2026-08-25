@@ -130,16 +130,25 @@ part that matters: the `Program`/`Expectations` types and the oracle.
 
 ---
 
-## 6. N6 — containers, mixed-language applications
+## 6. ~~N6 — containers, mixed-language applications~~ — DONE
 
-**Scope:** ECS/container units for Node, mixed-language applications, docs.
+`examples/mixed` is a Node API beside a Python worker sharing one DynamoDB
+table. It deploys and passes every L4 and L5 assertion, and runs in CI.
 
-**Gate:** a mixed app compiles and deploys.
+It compiled correctly on the first attempt, which is the language seam doing
+what it was extracted to do. Three smaller things did surface:
 
-The architecture already supports this — a frontend is chosen *per execution
-unit* from its entrypoint's extension, so a Python worker beside a Node API is
-not a special case. It has simply never been tested. `docs/plan-node.md:53`
-notes this explicitly.
+- A Python unit's bundle carried `package.json`. Non-source files travel with
+  every unit by design, but a *language manifest* is consumed by the compiler
+  and regenerated per unit, so another language's is dead weight. Now excluded.
+- A generated unit manifest had no `main`, so nothing in the bundle said how to
+  load the unit. `petstore-node` only appeared to work because its *source*
+  manifest happened to declare one. Now set from the unit's entrypoint.
+- `ministack.sh` assumed the HTTP unit was called `main`. It takes the unit
+  name as a second argument now.
+
+Still not done under this heading: **ECS/container units for Node.** The plan
+groups them with N6 and the gate did not require them, so they are untested.
 
 ---
 
@@ -148,8 +157,8 @@ notes this explicitly.
 1. ~~CI Node job~~ — done
 2. ~~Prove the shims run~~ — done, and it found a bug
 3. ~~N4~~ — done
-4. **N5**, which needs **§5** (the Node generator) first
-5. **N6**
+4. ~~N5~~ — done
+5. ~~N6~~ — done, except Node container units (see §6)
 
 The managed-secret branch §4 leaves open is still open: `petstore-node` has no
 database, so N4 did not exercise it. An example with a `persist`ed pg client

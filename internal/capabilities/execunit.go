@@ -97,7 +97,7 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 		// Everything that is not Python source -- templates, data files,
 		// manifests -- travels with every unit, because deciding which unit
 		// reads a data file is not something static analysis can do.
-		files = union(files, p.sharedAssets(ctx))
+		files = union(files, p.sharedAssets(ctx, unit.Language))
 		// Files claimed by cloudcc.embed_assets travel with the units that bundle
 		// the module which claimed them.
 		for _, declaring := range config.SortedKeys(ctx.Embedded) {
@@ -145,7 +145,27 @@ func (p *ExecUnitsPlugin) defaultEntrypoint(ctx *compiler.Context) string {
 // A file claimed by cloudcc.embed_assets is deliberately excluded: claiming it is
 // how a program says which unit owns it, so shipping it to every unit as well
 // would make the hint pointless.
-func (p *ExecUnitsPlugin) sharedAssets(ctx *compiler.Context) []string {
+// sharedAssets returns the files that travel with a unit of the given
+// language: everything that is not source, minus the dependency manifests
+// belonging to *other* languages.
+//
+// That exclusion matters once one application holds units in more than one
+// language. A Python bundle has no use for package.json, and shipping it is at
+// best dead weight and at worst a puzzle for whoever opens the bundle. A
+// unit's own manifest is read by the compiler and regenerated per unit, so it
+// does not need to travel either -- but it is left in, because a program may
+// legitimately read its own package.json at runtime.
+func (p *ExecUnitsPlugin) sharedAssets(ctx *compiler.Context, language string) []string {
+	foreign := map[string]bool{}
+	for _, other := range lang.Names() {
+		if other == language {
+			continue
+		}
+		if manifest := ctx.Files.ManifestPath(other); manifest != "" {
+			foreign[manifest] = true
+		}
+	}
+
 	embedded := map[string]bool{}
 	for _, paths := range ctx.Embedded {
 		for _, path := range paths {
@@ -158,6 +178,9 @@ func (p *ExecUnitsPlugin) sharedAssets(ctx *compiler.Context) []string {
 			continue
 		}
 		if _, claimed := ctx.ClaimedFiles[f.Path]; claimed {
+			continue
+		}
+		if foreign[f.Path] {
 			continue
 		}
 		out = append(out, f.Path)

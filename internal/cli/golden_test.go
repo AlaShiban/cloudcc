@@ -19,7 +19,10 @@ var update = flag.Bool("update", false, "rewrite the golden output trees")
 // topic with a publisher and a subscriber.
 // kitchen-sink is the coverage example: every capability, both compute types,
 // both gateway types, a VPC, secrets, and embedded assets.
-var examples = []string{"petstore", "petstore-multi", "kitchen-sink"}
+// mixed holds units in two languages sharing one store, which is the case the
+// language seam exists for and the only one where a regression in it shows up
+// as something other than a Python change.
+var examples = []string{"petstore", "petstore-multi", "kitchen-sink", "mixed", "petstore-node"}
 
 func repoRoot(t *testing.T) string {
 	t.Helper()

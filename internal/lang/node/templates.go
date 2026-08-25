@@ -131,7 +131,11 @@ func unitFiles(u *ir.ExecUnit, opts lang.UnitOptions) (map[string][]byte, error)
 		}
 	}
 
-	manifest, err := MergeManifest(opts.Manifest, deps)
+	// The unit's manifest names the unit's own entry. Without this it carries
+	// whatever "main" the source declared, which points at a module that may
+	// not even be in this bundle -- and for a program that declared none, it
+	// says nothing at all about how to load the unit.
+	manifest, err := MergeManifest(opts.Manifest, deps, u.Entrypoint())
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +148,7 @@ func unitFiles(u *ir.ExecUnit, opts lang.UnitOptions) (map[string][]byte, error)
 // A version the user pinned is never replaced: they chose it, and a compiler
 // quietly upgrading a dependency is a debugging session nobody asked for. The
 // result is written with sorted keys so the output stays byte-deterministic.
-func MergeManifest(existing []byte, add map[string]string) ([]byte, error) {
+func MergeManifest(existing []byte, add map[string]string, entry string) ([]byte, error) {
 	manifest := map[string]any{}
 	if len(bytes.TrimSpace(existing)) > 0 {
 		if err := json.Unmarshal(existing, &manifest); err != nil {
@@ -174,6 +178,9 @@ func MergeManifest(existing []byte, add map[string]string) ([]byte, error) {
 	// The SDK is compile-time only and is not installed in a bundle.
 	delete(deps, Package)
 	manifest["dependencies"] = deps
+	if entry != "" {
+		manifest["main"] = entry
+	}
 
 	out, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

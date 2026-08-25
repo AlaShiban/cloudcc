@@ -13,6 +13,9 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 EXAMPLE="${1:-petstore}"
+# The unit that serves HTTP. Most examples leave it undeclared and get "main";
+# one that names its units has to say which one to drive.
+UNIT="${2:-main}"
 WORK="${CLOUDCC_E2E_WORKDIR:-$(mktemp -d "${TMPDIR:-/tmp}/cloudcc-e2e-XXXXXX")}"
 OUT="$WORK/compiled"
 STACK="ministack"
@@ -118,13 +121,14 @@ log "table: $CLOUDCC_KV_PETSBYOWNER_TABLE"
 # exports a Lambda handler rather than the app -- so the unit directory, with
 # its node_modules and its entry module, is the thing to run. A Python unit's
 # build/main is the unpacked bundle and is exactly right.
-if [ -f "$OUT/main/package.json" ]; then
-  UNIT_DIR="$OUT/main"
-elif [ -d "$OUT/build/main" ]; then
-  UNIT_DIR="$OUT/build/main"
+if [ -f "$OUT/$UNIT/package.json" ]; then
+  UNIT_DIR="$OUT/$UNIT"
+elif [ -d "$OUT/build/$UNIT" ]; then
+  UNIT_DIR="$OUT/build/$UNIT"
 else
-  UNIT_DIR="$OUT/main"
+  UNIT_DIR="$OUT/$UNIT"
 fi
+[ -d "$UNIT_DIR" ] || fail "unit $UNIT has no directory in the compiled output; pass the unit name as the second argument"
 
 # The compiled unit is served the same way whatever language it is in, but the
 # server is language-specific: uvicorn for Python, and for Node a launcher this

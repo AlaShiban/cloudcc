@@ -159,6 +159,12 @@ jobs:
       - name: Provisioning and functional tests (Node)
         run: ./tests/e2e/ministack.sh petstore-node
 
+      # One application, two languages, one store. The architecture has always
+      # claimed to support this -- a frontend is chosen per execution unit --
+      # but nothing checked it until there was an example that deploys.
+      - name: Provisioning and functional tests (mixed languages)
+        run: ./tests/e2e/ministack.sh mixed api
+
       - name: cloudcc deploy end to end
         run: ./tests/e2e/deploy.sh
 
