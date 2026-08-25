@@ -49,6 +49,9 @@ jobs:
       - name: Sweep generated programs
         run: CLOUDCC_FUZZ_SEEDS=150 go test ./internal/fuzz -run TestSweep -timeout 20m
 
+      - name: Sweep generated Node programs
+        run: CLOUDCC_FUZZ_SEEDS=150 go test ./internal/fuzz -run TestNodeSweep -timeout 20m
+
       - name: Prove compilation needs no network
         run: |
           docker pull --quiet golang:${{ env.GO_VERSION }}-bookworm
@@ -161,6 +164,12 @@ jobs:
 
       - name: Differential test -- uncompiled vs compiled behaviour
         run: ./tests/e2e/differential.sh 1 2 3
+
+      # The same comparison for Node. Both languages run the program as written
+      # against the SDK's emulations, then compiled against the emulator, and
+      # require identical responses.
+      - name: Differential test -- Node
+        run: CLOUDCC_DIFF_LANG=node ./tests/e2e/differential.sh 1 2 3
 
       - name: Upload the work directory on failure
         if: failure()

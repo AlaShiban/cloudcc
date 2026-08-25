@@ -19,6 +19,7 @@ import (
 // manifest is what the harness needs to drive a program.
 type manifest struct {
 	Seed        int64       `json:"seed"`
+	Language    string      `json:"language"`
 	App         string      `json:"app"`
 	Unit        string      `json:"unit"`
 	EntryModule string      `json:"entry_module"`
@@ -30,13 +31,22 @@ type manifest struct {
 func main() {
 	seed := flag.Int64("seed", 1, "generator seed")
 	out := flag.String("out", "", "directory to write the program into")
+	language := flag.String("lang", "python", "language to generate: python or node")
 	flag.Parse()
 
 	if *out == "" {
 		fail("-out is required")
 	}
 
-	p := fuzz.Generate(*seed, fuzz.Options{Behavioural: true})
+	var p *fuzz.Program
+	switch *language {
+	case "python":
+		p = fuzz.Generate(*seed, fuzz.Options{Behavioural: true})
+	case "node":
+		p = fuzz.GenerateNode(*seed, fuzz.Options{Behavioural: true})
+	default:
+		fail("-lang must be python or node, not %q", *language)
+	}
 
 	for rel, content := range p.Files {
 		abs := filepath.Join(*out, filepath.FromSlash(rel))
@@ -53,6 +63,7 @@ func main() {
 
 	data, err := json.MarshalIndent(manifest{
 		Seed:        p.Seed,
+		Language:    *language,
 		App:         p.Name,
 		Unit:        p.PrimaryUnit,
 		EntryModule: p.EntryModule,
