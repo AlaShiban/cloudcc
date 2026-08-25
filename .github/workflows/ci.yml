@@ -8,6 +8,7 @@ on:
 env:
   GO_VERSION: "1.26"
   PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
 
 jobs:
   # Compilation must need no network. Rather than asserting that, this job
@@ -72,6 +73,22 @@ jobs:
         working-directory: sdk/python
         run: uv run --with pytest --with-editable . python -m pytest tests -q
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The Node SDK's tests import from dist/, so they need a build first.
+      # Among them is the parity test, which is the only thing holding the SDK
+      # classes and their injected shims together -- a drift there produces a
+      # program that runs locally and fails once compiled, which is precisely
+      # the failure this project exists to prevent.
+      - name: Node SDK suite
+        working-directory: sdk/node
+        run: |
+          npm ci
+          npm run build
+          npm test
+
   integration:
     name: provisioning + functional (emulator)
     runs-on: ubuntu-latest
@@ -122,6 +139,13 @@ jobs:
         run: |
           go build -o cloudcc ./cmd/cloudcc
           ./cloudcc doctor
+
+      # Runs the injected Node client shims against a real Redis and Postgres.
+      # Everything else about them is checked without connecting, which proved
+      # not to be enough: this caught the pg shim handing over an empty
+      # password where it should have said nothing at all.
+      - name: Node client shims against real servers
+        run: ./tests/e2e/node-clients.sh
 
       - name: Provisioning and functional tests
         run: ./tests/e2e/ministack.sh
