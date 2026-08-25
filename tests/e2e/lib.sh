@@ -31,6 +31,71 @@ pass() { printf '\033[1;32m ok\033[0m %s\n' "$*"; }
 
 aws_local() { aws --endpoint-url "$MINISTACK_ENDPOINT" --region "$AWS_REGION" "$@"; }
 
+# ---------------------------------------------------------------- the program
+#
+# Which module holds the application, what the binding is called, and which
+# language it is in are all facts the compiler already worked out. Asking it
+# beats guessing: the harness used to hardcode `uvicorn app:app`, which is
+# right for one example and wrong for every program whose entry is not app.py.
+
+# unit_field <cloudcc-binary> <src> <unit> <jq-expr-on-.payload>
+unit_field() {
+  local bin="$1" src="$2" unit="$3" expr="$4"
+  "$bin" --dump-ir "$src" 2>/dev/null \
+    | jq -r --arg unit "$unit" \
+        "[.intents[] | select(.key.kind==\"execution_unit\") | select(.payload.id==\$unit)][0] | $expr" \
+    2>/dev/null || true
+}
+
+# unit_language prints "python" or "node".
+unit_language() { unit_field "$1" "$2" "$3" '.payload.language // "python"'; }
+
+# unit_target prints what a server needs to load the unit:
+#   python -> "package.module:appvar"   (a dotted module, as uvicorn wants)
+#   node   -> "relative/file.js:appvar"
+unit_target() {
+  local entry app
+  entry="$(unit_field "$1" "$2" "$3" '.payload.entrypoints[0]')"
+  app="$(unit_field "$1" "$2" "$3" '.payload.asgi_app')"
+  [ -n "$entry" ] && [ "$entry" != "null" ] || return 1
+  [ -n "$app" ] && [ "$app" != "null" ] || return 1
+  if [ "$(unit_language "$1" "$2" "$3")" = "node" ]; then
+    printf '%s:%s' "$entry" "$app"
+    return 0
+  fi
+  printf '%s:%s' "$(printf '%s' "${entry%.py}" | tr '/' '.')" "$app"
+}
+
+# ------------------------------------------------------------------ the store
+#
+# A program as written now holds a real client -- a boto3 Table, a
+# DynamoDBClient -- rather than a class the SDK supplied, so "run it as
+# written" means running it against a real store. The emulator is already up
+# for the compiled half, so it serves both, under the *local* name the program
+# wrote rather than the physical one the compiler chose.
+
+reset_local_table() {
+  aws_local dynamodb delete-table --table-name "$1" >/dev/null 2>&1 || true
+  aws_local dynamodb create-table --table-name "$1" \
+    --attribute-definitions AttributeName=id,AttributeType=S \
+    --key-schema AttributeName=id,KeyType=HASH \
+    --billing-mode PAY_PER_REQUEST >/dev/null \
+    || fail "could not create the local table $1 in the emulator"
+}
+
+ensure_local_bucket() {
+  aws_local s3api create-bucket --bucket "$1" >/dev/null 2>&1 || true
+}
+
+# The environment a program as written needs to reach the emulator.
+# AWS_ENDPOINT_URL is the AWS SDKs' own variable, honoured by boto3 and by the
+# JavaScript v3 clients, so nothing cloudcc-specific is involved.
+local_aws_env() {
+  printf 'AWS_ENDPOINT_URL=%s;AWS_REGION=%s;AWS_DEFAULT_REGION=%s;AWS_ACCESS_KEY_ID=%s;AWS_SECRET_ACCESS_KEY=%s' \
+    "$MINISTACK_ENDPOINT" "$AWS_REGION" "$AWS_REGION" \
+    "${AWS_ACCESS_KEY_ID:-cloudcc-local}" "${AWS_SECRET_ACCESS_KEY:-cloudcc-local}"
+}
+
 # require_endpoint aborts unless something is answering at the emulator.
 require_endpoint() {
   if ! curl -sf -m 5 -o /dev/null "$MINISTACK_ENDPOINT" 2>/dev/null; then

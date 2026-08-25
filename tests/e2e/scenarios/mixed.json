@@ -1,0 +1,15 @@
+{
+  "description": "A Node API beside a Python worker, sharing one table.",
+  "unit": "api",
+  "tables": ["pets"],
+  "requests": [
+    {"method": "GET", "path": "/health"},
+    {"method": "GET", "path": "/pets"},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "PUT", "path": "/pets/1", "body": {"name": "rex", "species": "dog"}},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "GET", "path": "/pets"},
+    {"method": "DELETE", "path": "/pets/1"},
+    {"method": "GET", "path": "/pets"}
+  ]
+}

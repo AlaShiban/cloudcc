@@ -1,0 +1,17 @@
+{
+  "description": "The one-file FastAPI example: a boto3 Table behind an HTTP API.",
+  "unit": "main",
+  "tables": ["pets"],
+  "requests": [
+    {"method": "GET", "path": "/health"},
+    {"method": "GET", "path": "/pets"},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "PUT", "path": "/pets/1", "body": {"name": "rex", "species": "dog", "age": 3}},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "PUT", "path": "/pets/2", "body": {"name": "mia", "species": "cat", "age": 2}},
+    {"method": "GET", "path": "/pets"},
+    {"method": "DELETE", "path": "/pets/1"},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "GET", "path": "/pets"}
+  ]
+}

@@ -11,7 +11,29 @@
 | **L5 functional** | Run the compiled application against those resources; assert HTTP responses *and* datastore state | emulator | `./tests/e2e/ministack.sh` |
 | **Python** | SDK emulations, and their signature parity with the injected shims | none | `cd sdk/python && uv run --with pytest --with-editable . python -m pytest tests` |
 | **Generated corpus** | Twenty generated programs compiled and checked against the generator's own ground truth | none | `go test ./internal/fuzz` |
+| **Examples** | Every example run uncompiled and compiled; every response must match, and each app's architecture diagram must match the deployed stack | emulator | `./tests/e2e/examples.sh` |
 | **Differential** | The same generated program run uncompiled and compiled; every response must match | emulator | `./tests/e2e/differential.sh` |
+
+## Examples, twice
+
+`tests/e2e/examples.sh` runs every example as written -- against real stores in
+the emulator, because a program now holds a real client -- then compiles it,
+deploys it, runs the compiled copy, and replays the same requests against both.
+Every response must match byte for byte.
+
+It overlaps the differential harness deliberately, and neither replaces the
+other: the generator covers twenty spellings of an import and would never have
+written `examples/mixed`; the examples cover the code a newcomer copies.
+
+Every example is accounted for. `kitchen-sink` and `mega-app` cannot deploy,
+and each says why out loud rather than being left out of a loop -- a suite that
+silently covers four of six reads exactly like a suite that covers six.
+
+It also checks each application's **architecture diagram** against the stack
+Pulumi actually created: same services, same count. Writing that check was
+worth it twice over -- the first version compared nothing at all and passed,
+and the second undercounted by two because a topic's Mermaid shape opens with
+`>` and the character class missed it.
 
 ```bash
 go test ./...                              # L1 + L2

@@ -172,6 +172,14 @@ jobs:
       - name: Provisioning and functional tests (mixed languages)
         run: ./tests/e2e/ministack.sh mixed api
 
+      # Every example, run as written and again after compiling, with the same
+      # requests replayed against both. The generated-program harness below
+      # covers more shapes; this covers the code a newcomer actually reads, and
+      # it checks that each application's architecture diagram matches the
+      # resources the stack really created.
+      - name: Every example, uncompiled vs compiled
+        run: ./tests/e2e/examples.sh
+
       - name: cloudcc deploy end to end
         run: ./tests/e2e/deploy.sh
 

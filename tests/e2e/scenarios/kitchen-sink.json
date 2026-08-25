@@ -1,0 +1,4 @@
+{
+  "description": "Every capability at once: Lambda and Fargate, RDS, ElastiCache, S3, DynamoDB, SNS, Secrets Manager.",
+  "skip": "needs RDS, ElastiCache, ECS and an ALB. The community emulator implements none of them, so `pulumi up` would fail on the first database rather than tell us anything about the compiler. It is covered by the golden trees instead, which compare the whole compiled output byte for byte."
+}

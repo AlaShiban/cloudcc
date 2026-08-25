@@ -1,0 +1,4 @@
+{
+  "description": "The library roadmap, written as a program.",
+  "skip": "a specification rather than an application: several declarations use SDK types that do not exist yet, so it does not compile. That is deliberate -- see examples/mega-app/README.md. Its coverage table is checked by internal/sdkdetect/coverage_test.go, and every file in it is checked to parse."
+}

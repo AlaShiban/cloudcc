@@ -1,0 +1,13 @@
+{
+  "description": "Two units sharing a module, a table and a topic; the api unit serves.",
+  "unit": "api",
+  "tables": ["pets"],
+  "requests": [
+    {"method": "GET", "path": "/health"},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "PUT", "path": "/pets/1", "body": {"name": "rex", "species": "dog"}},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "DELETE", "path": "/pets/1"},
+    {"method": "GET", "path": "/pets/1"}
+  ]
+}
