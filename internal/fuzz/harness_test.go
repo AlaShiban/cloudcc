@@ -59,7 +59,25 @@ func build(t *testing.T, p *fuzz.Program) compiled {
 	if err := json.Unmarshal(stdout.Bytes(), &dump); err != nil {
 		t.Fatalf("seed %d: --dump-ir is not valid JSON: %v", p.Seed, err)
 	}
-	return compiled{srcDir: srcDir, outDir: outDir, dump: dump, stderr: stderr.String()}
+	// out_dir holds a folder per application, so the generated program's
+	// output is one level down -- under the app name its cloudcc.yaml declared.
+	return compiled{
+		srcDir: srcDir,
+		outDir: filepath.Join(outDir, appNameOf(p.Config)),
+		dump:   dump,
+		stderr: stderr.String(),
+	}
+}
+
+// appNameOf reads `app:` out of a generated cloudcc.yaml. The generator always
+// writes one, and it is what names the output folder.
+func appNameOf(cfg string) string {
+	for _, line := range strings.Split(cfg, "\n") {
+		if rest, ok := strings.CutPrefix(line, "app:"); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }
 
 // render prints a whole generated program, so a failure carries the program

@@ -210,19 +210,29 @@ for example in "${EXAMPLES[@]}"; do
   log "compiling and deploying"
   CURRENT_SRC="$src"
   "$WORK/cloudcc" "$src" -o "$out" >/dev/null
+  # `-o` names the shared root; the artefacts are under the app's own folder.
+  app_out_dir="$(app_out "$out" "$src")"
   CURRENT_OUT="$out"
 
   # Every application gets both diagrams, and the architecture one is only
   # worth having if it matches what was actually deployed -- so check it names
   # the resources the stack is about to create rather than merely existing.
-  for diagram in topology.mmd topology.dot architecture.mmd architecture.dot; do
-    [ -s "$out/$diagram" ] || fail "$example: no $diagram was written"
+  for diagram in topology.mmd topology.dot architecture.mmd architecture.dot architecture.py; do
+    [ -s "$app_out_dir/$diagram" ] || fail "$example: no $diagram was written"
   done
-  pass "$example: both diagrams written"
+  # The icon diagram is a program, so "it was written" is a weak claim: check
+  # it at least parses. Whether it renders is checked in the offline job, where
+  # the package is installed.
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import sys; compile(open(sys.argv[1]).read(), sys.argv[1], 'exec')" \
+      "$app_out_dir/architecture.py" \
+      || fail "$example: architecture.py is not valid Python"
+  fi
+  pass "$example: every diagram written, and architecture.py parses"
 
   "$WORK/cloudcc" deploy "$src" -o "$out" --stack ministack >/dev/null
 
-  bindings="$(cd "$out" && PULUMI_BACKEND_URL="file://$out/.pulumi-state" \
+  bindings="$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
     PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
     pulumi stack output --json --stack ministack \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' \
@@ -231,9 +241,9 @@ for example in "${EXAMPLES[@]}"; do
   # A Node unit's build/<unit> holds only the bundled index.mjs, which exports a
   # Lambda handler rather than the app, so the unit directory is what to serve.
   # A Python unit's build/<unit> is the unpacked bundle and is exactly right.
-  unit_dir="$out/$unit"
-  if [ "$language" != "node" ] && [ -d "$out/build/$unit" ]; then
-    unit_dir="$out/build/$unit"
+  unit_dir="$app_out_dir/$unit"
+  if [ "$language" != "node" ] && [ -d "$app_out_dir/build/$unit" ]; then
+    unit_dir="$app_out_dir/build/$unit"
   fi
 
   log "running the compiled copy against the emulator"
@@ -253,7 +263,7 @@ for example in "${EXAMPLES[@]}"; do
   # (aws_dynamodb_petsByOwner). What is comparable is the service word in each,
   # plus the count -- and the count is what catches a resource that exists and
   # is not drawn.
-  deployed_types="$(cd "$out" && PULUMI_BACKEND_URL="file://$out/.pulumi-state" \
+  deployed_types="$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
     PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
     pulumi stack export --stack ministack 2>/dev/null \
     | jq -r '.deployment.resources // [] | .[] | .urn' \
@@ -263,7 +273,7 @@ for example in "${EXAMPLES[@]}"; do
   # opener instead looks tidier and is wrong: a topic's shape opens with ">",
   # which an obvious-looking character class quietly misses -- and the check
   # then reports two resources missing from a diagram that has them all.
-  drawn_count="$(grep -E '^    aws_' "$out/architecture.mmd" \
+  drawn_count="$(grep -E '^    aws_' "$app_out_dir/architecture.mmd" \
     | grep -vcE '\-\->|\-\.\->' || true)"
 
   # A check that compared nothing passes for the wrong reason, which is worse
@@ -274,7 +284,7 @@ for example in "${EXAMPLES[@]}"; do
 
   missing=0
   for service in $(printf '%s\n' "$deployed_types" | cut -d: -f2 | cut -d/ -f1 | sort -u); do
-    grep -q "aws_${service}" "$out/architecture.mmd" \
+    grep -q "aws_${service}" "$app_out_dir/architecture.mmd" \
       || { warn "$example: $service is deployed but appears nowhere in architecture.mmd"; missing=$((missing + 1)); }
   done
   if [ "$deployed_count" != "$drawn_count" ]; then

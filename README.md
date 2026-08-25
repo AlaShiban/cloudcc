@@ -37,19 +37,26 @@ hints rewritten into real AWS clients. Your own tree is never modified.
 
 ```
 compiled/
-├── index.ts                  # the infrastructure, one const per resource
-├── Pulumi.yaml               # project; Pulumi.<app>.yaml is created once and kept
-├── cloudcc.yaml              # every decision this compile made, including defaults
-├── topology.mmd / .dot       # what the program declared -- the capability layer
-├── architecture.mmd / .dot   # what it compiled to -- every resource that will exist
-├── bin/package.sh            # installs dependencies and zips each unit
-├── main/                     # your code, rewritten
-│   ├── app.py                #   cloudcc.persist(...) -> _cloudcc_kv.connect(...)
-│   ├── _cloudcc_runtime/     #   the injected clients; the only place boto3 appears
-│   ├── cloudcc_lambda_entry.py
-│   └── requirements.txt      #   yours, plus what the shims need
-└── .cloudcc-state.json       # fingerprint, so `cloudcc deploy` can refuse stale output
+└── petstore/                 # one folder per application, so out_dir is shareable
+    ├── index.ts              # the infrastructure, one const per resource
+    ├── Pulumi.yaml           # project; Pulumi.<app>.yaml is created once and kept
+    ├── cloudcc.yaml          # every decision this compile made, including defaults
+    ├── topology.mmd / .dot   # what the program declared -- the capability layer
+    ├── architecture.mmd/.dot # what it compiled to -- every resource that will exist
+    ├── architecture.py       # the same, as a `diagrams` program, with AWS icons
+    ├── bin/package.sh        # installs dependencies and zips each unit
+    ├── main/                 # your code, rewritten
+    │   ├── app.py            #   cloudcc.persist(...) -> _cloudcc_kv.connect(...)
+    │   ├── _cloudcc_runtime/ #   the injected clients; the only place boto3 appears
+    │   ├── cloudcc_lambda_entry.py
+    │   └── requirements.txt  #   yours, plus what the shims need
+    └── .cloudcc-state.json   # fingerprint, so `cloudcc deploy` can refuse stale output
 ```
+
+`out_dir` holds **a folder per application**. `compiled/` with one app's
+`index.ts` in it is fine until a second app is compiled beside it, at which
+point the two overwrite each other and the first anyone hears of it is a deploy
+that replaces the wrong stack.
 
 ## Install
 
@@ -254,20 +261,33 @@ Routes registered on a FastAPI `APIRouter` are not discovered. They are still
 served — the gateway forwards everything to your unit — but they will not show
 up in the topology, and `cloudcc` says so.
 
-### Two diagrams, every compile
+### Diagrams, every compile
 
-Both are written for every application, because they answer different
-questions. `topology` is the handful of capability nodes the program declared —
-the picture to reason about. `architecture` is every resource that will exist
-in the account, roles and log groups and VPC plumbing included — the picture to
-review before a deploy, and the one to hand to somebody asking what this costs.
+Two layers, three notations, no flags. `topology` is the handful of capability
+nodes the program declared — the picture to reason about. `architecture` is
+every resource that will exist in the account, roles and log groups and VPC
+plumbing included — the picture to review before a deploy.
+
+| | |
+|---|---|
+| `topology.mmd` / `.dot` | the declared capabilities, in Mermaid and Graphviz |
+| `architecture.mmd` / `.dot` | every resolved resource, in Mermaid and Graphviz |
+| `architecture.py` | the same, as a [`diagrams`](https://pypi.org/project/diagrams) program — AWS icons, clustered by execution unit |
 
 ```console
 $ cloudcc diagram ./app --view architecture --format mermaid
+$ pip install diagrams && python compiled/myapp/architecture.py
 ```
 
-Both are rendered from the program's own edges rather than a structure built
-for drawing, so neither can show something that was not compiled or omit
+`architecture.py` is worth having as a *file* rather than only an image: it is
+the one output someone can edit — move a cluster, drop the IAM noise, annotate
+it for a review — without hand-drawing anything, and it diffs in a pull request
+like the rest of the compiled tree. A PNG is rendered during the compile when
+`diagrams` and graphviz are both installed, and skipped with a one-line note
+when they are not. Nothing is downloaded to draw a picture nobody asked for.
+
+All three are rendered from the program's own edges rather than a structure
+built for drawing, so none can show something that was not compiled or omit
 something that was. Rendering is entirely local (D12).
 
 ## Further reading

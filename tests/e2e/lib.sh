@@ -31,6 +31,25 @@ pass() { printf '\033[1;32m ok\033[0m %s\n' "$*"; }
 
 aws_local() { aws --endpoint-url "$MINISTACK_ENDPOINT" --region "$AWS_REGION" "$@"; }
 
+# app_name reads `app:` out of a source tree's cloudcc.yaml.
+#
+# out_dir holds a folder per application, so the artefacts of a compile with
+# `-o out` are at out/<app>. `-o` still names the parent -- it is the shared
+# root, not one app's output -- which is why the two paths are different and
+# why this helper exists.
+app_name() {
+  local src="$1"
+  local name=""
+  if [ -f "$src/cloudcc.yaml" ]; then
+    name="$(sed -n 's/^app:[[:space:]]*//p' "$src/cloudcc.yaml" | head -1 | tr -d '"'"'"' \r')"
+  fi
+  [ -n "$name" ] || name="$(basename "$src")"
+  printf '%s' "$name"
+}
+
+# app_out prints where a compile with `-o <out>` put <src>'s artefacts.
+app_out() { printf '%s/%s' "$1" "$(app_name "$2")"; }
+
 # ---------------------------------------------------------------- the program
 #
 # Which module holds the application, what the binding is called, and which

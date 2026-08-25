@@ -79,12 +79,36 @@ func Write(p *ir.Program, out afero.Fs, outDir string, opts Options) (Result, er
 	}
 	result.Files = append(result.Files, dotFile)
 
+	// Diagram as code, in the notation the ecosystem already uses for this,
+	// and the only one of the three that renders with the provider's own icons.
+	// Written for the resource layer only: the capability layer has no icons to
+	// draw with, and inventing some would claim something the program never
+	// said.
+	if opts.View == Resources {
+		if err := afero.WriteFile(out, PythonFile, Python(p, opts), 0o644); err != nil {
+			return result, err
+		}
+		result.Files = append(result.Files, PythonFile)
+	}
+
 	if outDir == "" {
 		result.Notice = "no PNG rendered: the output is in memory"
 		return result, nil
 	}
+	if opts.View == Resources {
+		if notice := renderWithDiagrams(outDir); notice != "" {
+			result.Notice = notice
+		} else {
+			result.Files = append(result.Files, ArchPNGFile(opts.App))
+			return result, nil
+		}
+	}
+
 	dotBin, err := exec.LookPath("dot")
 	if err != nil {
+		if result.Notice != "" {
+			return result, nil
+		}
 		result.Notice = "no PNG rendered: graphviz is not installed (brew install graphviz)"
 		return result, nil
 	}
@@ -108,6 +132,35 @@ func Write(p *ir.Program, out afero.Fs, outDir string, opts Options) (Result, er
 	}
 	result.Files = append(result.Files, png)
 	return result, nil
+}
+
+// renderWithDiagrams runs the generated program, returning a notice when it
+// could not.
+//
+// Only an interpreter that already has the package is used. Downloading thirty
+// megabytes in the middle of a compile, to produce a picture nobody asked for
+// on this run, is not a thing a compiler should do quietly -- so a missing
+// package is a one-line note saying how to get the image, exactly as a missing
+// graphviz has always been (D12).
+func renderWithDiagrams(outDir string) string {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		return "no icon diagram rendered: python3 is not installed"
+	}
+	if err := exec.Command(python, "-c", "import diagrams").Run(); err != nil {
+		return "no icon diagram rendered: the diagrams package is not installed " +
+			"(pip install diagrams); " + PythonFile + " was still written"
+	}
+	cmd := exec.Command(python, PythonFile)
+	cmd.Dir = outDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		// Almost always a missing graphviz, which diagrams needs too.
+		return fmt.Sprintf("no icon diagram rendered: %s failed (%v: %s)",
+			PythonFile, err, trim(stderr.String()))
+	}
+	return ""
 }
 
 func trim(s string) string {

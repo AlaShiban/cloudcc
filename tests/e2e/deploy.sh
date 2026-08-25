@@ -45,6 +45,7 @@ pass "an uncompiled output is refused"
 
 log "compiling"
 "$cloudcc_bin" "$SRC" -o "$OUT" >/dev/null
+APP_OUT="$(app_out "$OUT" "$SRC")"
 
 log "checking that stale output is refused"
 printf '\n\n@app.get("/added-after-compiling")\ndef added():\n    return {}\n' >> "$SRC/app.py"
@@ -81,7 +82,7 @@ if skip_unless_service dynamodb; then
 fi
 
 log "checking the exported bindings"
-eval "$(cd "$OUT" && PULUMI_BACKEND_URL="file://$OUT/.pulumi-state" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
+eval "$(cd "$APP_OUT" && PULUMI_BACKEND_URL="file://$APP_OUT/.pulumi-state" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
         pulumi stack output --json --stack ministack \
         | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "export \(.key)=\(.value|@sh)"')"
 [ -n "${CLOUDCC_KV_PETSBYOWNER_TABLE:-}" ] || fail "the stack did not export CLOUDCC_KV_PETSBYOWNER_TABLE"

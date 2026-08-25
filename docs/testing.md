@@ -29,6 +29,13 @@ Every example is accounted for. `kitchen-sink` and `mega-app` cannot deploy,
 and each says why out loud rather than being left out of a loop -- a suite that
 silently covers four of six reads exactly like a suite that covers six.
 
+The icon diagram gets its own check in the offline job: CI installs `diagrams`,
+which turns `TestEveryMappedClassExists` from a skip into a real test of every
+class name in the mapping, and then renders a compiled example for real. Both
+ways that program can be wrong are silent from Go's side -- a class that does
+not exist, and a call site the imports did not bind -- and each produces no
+picture rather than an error.
+
 It also checks each application's **architecture diagram** against the stack
 Pulumi actually created: same services, same count. Writing that check was
 worth it twice over -- the first version compared nothing at all and passed,

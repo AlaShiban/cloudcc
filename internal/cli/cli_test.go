@@ -25,6 +25,10 @@ func run(t *testing.T, args ...string) (string, string, int) {
 	return stdout.String(), stderr.String(), code
 }
 
+// appOut is where a compile with `-o out` puts one application: out_dir holds
+// a folder per app, so nothing is read from the root any more.
+func appOut(out, app string) string { return filepath.Join(out, app) }
+
 func writeApp(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -51,7 +55,7 @@ func TestBareInvocationCompiles(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
 	}
-	if _, err := os.Stat(filepath.Join(out, "index.ts")); err != nil {
+	if _, err := os.Stat(filepath.Join(appOut(out, "demo"), "index.ts")); err != nil {
 		t.Errorf("nothing was generated: %v", err)
 	}
 }
@@ -283,7 +287,7 @@ func TestStateFileRecordsTheFingerprint(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
 
-	data, err := os.ReadFile(filepath.Join(out, StateFile))
+	data, err := os.ReadFile(filepath.Join(appOut(out, "demo"), StateFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,14 +309,14 @@ func TestChangingSourceChangesTheFingerprint(t *testing.T) {
 	})
 	out := t.TempDir()
 	run(t, src, "-o", out, "--app", "demo")
-	before := readState(t, out).Fingerprint
+	before := readState(t, appOut(out, "demo")).Fingerprint
 
 	if err := os.WriteFile(filepath.Join(src, "app.py"),
 		[]byte("import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"other\")\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	run(t, src, "-o", out, "--app", "demo")
-	after := readState(t, out).Fingerprint
+	after := readState(t, appOut(out, "demo")).Fingerprint
 
 	if before == after {
 		t.Error("changing the source must change the fingerprint, or stale output cannot be detected")

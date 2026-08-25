@@ -45,7 +45,7 @@ func newDiagramCommand() *cobra.Command {
 			switch toStdout {
 			case "":
 				fmt.Fprintf(cmd.ErrOrStderr(), "cloudcc: wrote %s and %s to %s\n",
-					mermaidFile, dotFile, result.Ctx.Config.OutDir)
+					mermaidFile, dotFile, result.Ctx.Config.AppOutDir())
 			case "mermaid":
 				cmd.OutOrStdout().Write(topology.Mermaid(result.Ctx.Graph, opts))
 			case "dot":

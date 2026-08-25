@@ -198,6 +198,8 @@ for seed in "${SEEDS[@]}"; do
   # ------------------------------------------------------------ B: compiled
   log "compiling"
   "$WORK/cloudcc" "$src" -o "$out" >/dev/null
+  # `-o` names the shared root; the artefacts are under the app's own folder.
+  app_out_dir="$(app_out "$out" "$src")"
 
   log "deploying to the emulator"
   CURRENT_OUT="$out"
@@ -205,7 +207,7 @@ for seed in "${SEEDS[@]}"; do
 
   # The compiled unit reads its bindings from the stack, exactly as it would
   # in a real deployment.
-  bindings="$(cd "$out" && PULUMI_BACKEND_URL="file://$out/.pulumi-state" \
+  bindings="$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
     PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
     pulumi stack output --json --stack ministack \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"')"
@@ -216,7 +218,7 @@ for seed in "${SEEDS[@]}"; do
     eval "$bindings"
     set +a
     export CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT"
-    serve "$out/$unit" "$target" "$PORT_B" "compiled" \
+    serve "$app_out_dir/$unit" "$target" "$PORT_B" "compiled" \
       --with fastapi --with uvicorn --with boto3
     replay "$PORT_B" "$manifest" "$case_dir/compiled.txt"
     stop_app

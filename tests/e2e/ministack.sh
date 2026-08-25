@@ -51,6 +51,10 @@ log "building cloudcc"
 log "compiling examples/$EXAMPLE"
 "$WORK/cloudcc" "$REPO_ROOT/examples/$EXAMPLE" -o "$OUT"
 
+# out_dir holds a folder per application, so `-o` names the shared root and the
+# artefacts are one level down. Everything below reads the app's own directory.
+OUT="$(app_out "$OUT" "$REPO_ROOT/examples/$EXAMPLE")"
+
 [ -f "$OUT/index.ts" ]      || fail "no index.ts was generated"
 [ -x "$OUT/bin/package.sh" ] || fail "bin/package.sh is missing or not executable"
 pass "compiled"

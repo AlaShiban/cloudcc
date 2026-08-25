@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"flag"
+	"github.com/cloudcompiler/cloudcc/internal/config"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,8 +34,12 @@ func repoRoot(t *testing.T) string {
 	return filepath.Dir(filepath.Dir(wd)) // internal/cli -> repo root
 }
 
-// compileExample runs the CLI exactly as a user would and returns the output
-// directory.
+// compileExample runs the CLI exactly as a user would and returns the
+// application's output directory.
+//
+// That is `-o` plus the app name: out_dir holds a folder per application, so
+// two apps compiled into one tree do not overwrite each other. The examples'
+// app names match their directory names, which is why one argument does here.
 func compileExample(t *testing.T, name, outDir string, extraArgs ...string) string {
 	t.Helper()
 	root := repoRoot(t)
@@ -48,7 +53,21 @@ func compileExample(t *testing.T, name, outDir string, extraArgs ...string) stri
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("compiling %s failed: %v\nstderr:\n%s", name, err, stderr.String())
 	}
-	return outDir
+	return filepath.Join(outDir, appNameOf(t, name))
+}
+
+// appNameOf reads the app name from an example's cloudcc.yaml, since that is
+// what names the output folder.
+func appNameOf(t *testing.T, example string) string {
+	t.Helper()
+	cfg, err := config.Load(filepath.Join(repoRoot(t), "examples", example, "cloudcc.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.App == "" {
+		return example
+	}
+	return cfg.App
 }
 
 // snapshot reads a directory tree into path -> content, skipping installed
@@ -444,7 +463,7 @@ func TestUserDockerfileWins(t *testing.T) {
 		t.Fatalf("compile failed: %v\n%s", err, stderr.String())
 	}
 
-	got := readFile(t, filepath.Join(outDir, "reporter", "Dockerfile"))
+	got := readFile(t, filepath.Join(outDir, "kitchen-sink", "reporter", "Dockerfile"))
 	if got != mine {
 		t.Errorf("a user-supplied Dockerfile must be used as written, got:\n%s", got)
 	}
@@ -502,7 +521,7 @@ y = cloudcc.persist(boto3.resource("dynamodb").Table("t"), id="my-table")
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
 
-	index := readFile(t, filepath.Join(out, "index.ts"))
+	index := readFile(t, filepath.Join(out, "demo", "index.ts"))
 	for _, class := range []string{"aws.s3.BucketV2", "aws.dynamodb.Table"} {
 		field := "bucket"
 		if class == "aws.dynamodb.Table" {
@@ -549,7 +568,7 @@ func TestSecretWithADefaultDoesNotBlockDeployment(t *testing.T) {
 	if _, stderr, code := run(t, src, "-o", out, "--app", "demo"); code != ExitOK {
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
-	index := readFile(t, filepath.Join(out, "index.ts"))
+	index := readFile(t, filepath.Join(out, "demo", "index.ts"))
 
 	if !strings.Contains(index, `getSecret("with_default") ?? "fallback"`) {
 		t.Errorf("a secret with a default should fall back to it:\n%s", index)

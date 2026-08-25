@@ -13,6 +13,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -209,6 +210,21 @@ func (a *App) setSection(kind, id string, rc ResourceConfig) {
 	case IsPersistKind(kind):
 		assign(&a.Persisted)
 	}
+}
+
+// AppOutDir is where this application's compiled output goes: a directory
+// named after the app, under out_dir.
+//
+// The nesting is what makes out_dir shareable. `compiled/` holding one app's
+// index.ts is fine until the second app is compiled beside it, at which point
+// the two silently overwrite each other -- and the first anyone hears of it is
+// a deploy that replaces the wrong stack. A folder per app costs one path
+// segment and removes the whole class.
+func (a *App) AppOutDir() string {
+	if a.App == "" {
+		return a.OutDir
+	}
+	return filepath.Join(a.OutDir, a.App)
 }
 
 // LogDestination resolves where this application's logs go: the builtin

@@ -92,6 +92,21 @@ jobs:
           npm run build
           npm test
 
+      # The icon diagram is generated as a Python program, and the two ways it
+      # can be wrong are both silent: a class name that is not in the diagrams
+      # package, and a call site the imports did not bind. Installing the
+      # package makes TestEveryMappedClassExists run instead of skip, and
+      # rendering a real example proves the program executes.
+      - name: Architecture diagram, rendered
+        run: |
+          sudo apt-get update && sudo apt-get install -y graphviz
+          uv venv /tmp/diagrams-venv
+          uv pip install --python /tmp/diagrams-venv/bin/python diagrams
+          PATH="/tmp/diagrams-venv/bin:$PATH" go test ./internal/topology
+          go run ./cmd/cloudcc ./examples/petstore -o /tmp/diagram-check
+          cd /tmp/diagram-check/petstore && /tmp/diagrams-venv/bin/python architecture.py
+          test -s petstore-architecture.png
+
   integration:
     name: provisioning + functional (emulator)
     runs-on: ubuntu-latest
@@ -131,6 +146,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
 
       - uses: pulumi/actions@v6
+
 
       - name: Install graphviz
         run: sudo apt-get update && sudo apt-get install -y graphviz

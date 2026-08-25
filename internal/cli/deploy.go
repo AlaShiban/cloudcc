@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/cloudcompiler/cloudcc/internal/config"
@@ -47,7 +48,7 @@ func newDeployCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			absOut, err := filepath.Abs(cfg.OutDir)
+			absOut, err := filepath.Abs(cfg.AppOutDir())
 			if err != nil {
 				return usageErr("%v", err)
 			}
@@ -144,9 +145,29 @@ func loadDeployConfig(sourcePath, configPath, appName, outDir string) (*config.A
 	}
 	if cfg.App == "" {
 		// Fall back to the name the last compile recorded.
+		// The app name is what decides the output folder, so it cannot be read
+		// from inside one. Look for a state file in each child of out_dir; a
+		// single match is unambiguous, and more than one means the user has to
+		// say which app they meant.
 		if abs, aerr := filepath.Abs(cfg.OutDir); aerr == nil {
-			if st, serr := deploy.ReadState(abs); serr == nil && st.App != "" {
-				cfg.App = st.App
+			if entries, rerr := os.ReadDir(abs); rerr == nil {
+				var found []string
+				for _, e := range entries {
+					if !e.IsDir() {
+						continue
+					}
+					if st, serr := deploy.ReadState(filepath.Join(abs, e.Name())); serr == nil && st.App != "" {
+						found = append(found, st.App)
+					}
+				}
+				if len(found) == 1 {
+					cfg.App = found[0]
+				} else if len(found) > 1 {
+					sort.Strings(found)
+					return nil, usageErr(
+						"%s holds several compiled applications (%s); say which one with --app",
+						cfg.OutDir, strings.Join(found, ", "))
+				}
 			}
 		}
 	}

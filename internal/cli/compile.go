@@ -116,7 +116,7 @@ func runCompile(cmd *cobra.Command, srcPath string, opts compileOptions) (*compi
 		return nil, usageErr("%v", err)
 	}
 
-	outDir, err := filepath.Abs(cfg.OutDir)
+	outDir, err := filepath.Abs(cfg.AppOutDir())
 	if err != nil {
 		return nil, usageErr("%v", err)
 	}
@@ -202,7 +202,7 @@ func compileInto(cmd *cobra.Command, srcPath string, opts compileOptions, out af
 		cmd.OutOrStdout().Write(data)
 	}
 
-	fmt.Fprintf(cmd.ErrOrStderr(), "cloudcc: compiled %s into %s\n", cfg.App, cfg.OutDir)
+	fmt.Fprintf(cmd.ErrOrStderr(), "cloudcc: compiled %s into %s\n", cfg.App, cfg.AppOutDir())
 	return &compileResult{Ctx: ctx, OutDir: outDir}, nil
 }
 
