@@ -111,17 +111,69 @@ eval "$(pulumi stack output --json --stack "$STACK" \
 [ -n "${CLOUDCC_KV_PETSBYOWNER_TABLE:-}" ] || fail "the stack did not export CLOUDCC_KV_PETSBYOWNER_TABLE"
 log "table: $CLOUDCC_KV_PETSBYOWNER_TABLE"
 
-UNIT_DIR="$OUT/build/main"
-[ -d "$UNIT_DIR" ] || UNIT_DIR="$OUT/main"
+# Which directory to serve the unit from depends on the language, and the
+# manifest is what says which.
+#
+# A Node unit's build/main holds only esbuild's bundled index.mjs, which
+# exports a Lambda handler rather than the app -- so the unit directory, with
+# its node_modules and its entry module, is the thing to run. A Python unit's
+# build/main is the unpacked bundle and is exactly right.
+if [ -f "$OUT/main/package.json" ]; then
+  UNIT_DIR="$OUT/main"
+elif [ -d "$OUT/build/main" ]; then
+  UNIT_DIR="$OUT/build/main"
+else
+  UNIT_DIR="$OUT/main"
+fi
+
+# The compiled unit is served the same way whatever language it is in, but the
+# server is language-specific: uvicorn for Python, and for Node a launcher this
+# script writes. That asymmetry is only apparent -- uvicorn is a harness-supplied
+# runner too, not part of the application, and neither one is in the bundle.
+# A server left over from an earlier run answers the health check and every
+# assertion after it, silently testing the wrong process against a stack that
+# no longer exists. That produced a genuinely baffling failure once; refusing
+# to start is much easier to read than the results of not doing so.
+if lsof -ti:8099 >/dev/null 2>&1; then
+  fail "port 8099 is already in use; a server from an earlier run is still up (lsof -ti:8099 | xargs kill)"
+fi
 
 log "starting the compiled application against the emulator"
-(
-  cd "$UNIT_DIR"
-  CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
-  PYTHONPATH="$UNIT_DIR" \
-  uv run --quiet --with fastapi --with uvicorn --with boto3 \
-    python -m uvicorn app:app --host 127.0.0.1 --port 8099 --log-level warning
-) &
+if [ -f "$UNIT_DIR/package.json" ]; then
+  # The unit's manifest names its entry module, and the generated Lambda entry
+  # takes the app off the same export. Reading it from the manifest keeps this
+  # from hardcoding a filename the compiler chose.
+  ENTRY="$(jq -r '.main // "index.js"' "$UNIT_DIR/package.json")"
+  cat > "$UNIT_DIR/cloudcc_e2e_serve.mjs" <<SERVE
+// Written by tests/e2e/ministack.sh. Serves the compiled unit over HTTP so the
+// same functional assertions can be made against it as against a Python one.
+const m = await import("./$ENTRY");
+const app = m.app ?? m.default;
+if (!app) {
+  console.error("the compiled entry exports neither app nor default");
+  process.exit(1);
+}
+app.listen(8099, "127.0.0.1", () => console.log("listening"));
+SERVE
+  # exec, so that $! is the server itself: backgrounding a subshell makes $!
+  # the subshell's pid, and killing that leaves the server running to poison
+  # the next run.
+  (
+    cd "$UNIT_DIR"
+    exec env CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
+      node cloudcc_e2e_serve.mjs
+  ) &
+else
+  # exec, for the same reason as above -- this branch leaked a uvicorn on every
+  # run before, which only went unnoticed because CI starts from a clean host.
+  (
+    cd "$UNIT_DIR"
+    exec env CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
+      PYTHONPATH="$UNIT_DIR" \
+      uv run --quiet --with fastapi --with uvicorn --with boto3 \
+        python -m uvicorn app:app --host 127.0.0.1 --port 8099 --log-level warning
+  ) &
+fi
 APP_PID=$!
 
 wait_for_http "http://127.0.0.1:8099/health" 45 \

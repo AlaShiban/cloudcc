@@ -25,17 +25,28 @@ with an explanation instead.
 
 ---
 
-## 2. N4 — deploy a Node app to the emulator
+## 2. ~~N4 — deploy a Node app to the emulator~~ — DONE
 
-From `docs/plan-node.md`. N0–N3 are met; this is the first unmet gate.
+`./tests/e2e/ministack.sh petstore-node` provisions 11 resources (DynamoDB,
+Lambda, API Gateway v2) and passes every L4 and L5 assertion, including the
+DynamoDB round trip, and destroy removes the table. It runs in CI beside the
+Python one.
 
-**Scope:** `expose`/routes for Node, resolve to Lambda + API Gateway v2, deploy.
+Almost all of it already worked: `expose` and route discovery resolve for Node
+unchanged, which is the language seam doing its job. The only Python assumption
+left in the harness was L5, which ran `uvicorn app:app`. A Node unit is now
+served by a small launcher the harness writes — the same role uvicorn plays,
+and equally not part of the bundle. Which directory to serve from is decided by
+the manifest, because a Node unit's `build/main` holds only esbuild's bundled
+`index.mjs`, which exports a Lambda handler rather than the app.
 
-**Gate:** ministack L4/L5 for a Node app — up, assert, drive, destroy. The
-existing `tests/e2e/ministack.sh` is the model; it is Python-only today.
-
-This gate matters more than its position in the list suggests, because of §4
-below: it is what would turn a pile of reasoning into evidence.
+**A pre-existing harness bug surfaced doing this**, and it is worth knowing
+about: both branches backgrounded a *subshell*, so `$!` was the subshell and
+cleanup left the real server running. On a clean CI host that never showed,
+but locally it meant the next run's health check passed against a stale server
+pointed at a destroyed stack — which produces a `ResourceNotFoundException`
+from deep inside a shim and looks exactly like a product bug. Both branches now
+`exec`, and the harness refuses to start when port 8099 is already held.
 
 ---
 
@@ -128,9 +139,13 @@ notes this explicitly.
 
 1. ~~CI Node job~~ — done
 2. ~~Prove the shims run~~ — done, and it found a bug
-3. **N4** — deploy a Node app; also covers the managed-secret branch §4 leaves open
-4. **N5**, which needs **§5** first
+3. ~~N4~~ — done
+4. **N5**, which needs **§5** (the Node generator) first
 5. **N6**
+
+The managed-secret branch §4 leaves open is still open: `petstore-node` has no
+database, so N4 did not exercise it. An example with a `persist`ed pg client
+would close it.
 
 ---
 

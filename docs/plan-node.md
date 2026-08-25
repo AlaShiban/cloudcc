@@ -137,7 +137,7 @@ Each has a gate. No milestone starts until the previous one's gate is green.
 | **N1** ✅ | `sdk/node` npm package: hints, local emulations, types, test suite | Met: examples/petstore-node runs under node with no cloud account |
 | **N2** ✅ | Node frontend: parse, detect, import closure. | Met: 25 tests covering both module systems, every literal form, options objects, comments and TypeScript annotations. Generator renderer still outstanding. |
 | **N3** ✅ | Rewriting, injected runtime, esbuild packaging, Lambda entry | Met: a Node unit bundles to a 538 KB zip whose handler loads |
-| **N4** | expose/routes, resolve to Lambda + API Gateway v2, deploy | Ministack L4/L5 for a Node app: up, assert, drive, destroy |
+| **N4** ✅ | expose/routes, resolve to Lambda + API Gateway v2, deploy | Met: `./tests/e2e/ministack.sh petstore-node` provisions 11 resources and passes every L4 and L5 assertion, including the DynamoDB round trip, and destroy removes the table |
 | **N5** | Node differential harness + cross-language IR equivalence | Behaviour identical uncompiled vs compiled; both languages produce the same IR |
 | **N6** | ECS/container units, mixed-language applications, docs, CI | Mixed app compiles and deploys; CI runs both languages |
 

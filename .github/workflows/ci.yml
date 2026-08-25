@@ -150,6 +150,12 @@ jobs:
       - name: Provisioning and functional tests
         run: ./tests/e2e/ministack.sh
 
+      # The same gate for a Node application: the harness is parameterised by
+      # example, and everything below the language frontend is shared, so this
+      # is the check that the seam actually holds.
+      - name: Provisioning and functional tests (Node)
+        run: ./tests/e2e/ministack.sh petstore-node
+
       - name: cloudcc deploy end to end
         run: ./tests/e2e/deploy.sh
 
