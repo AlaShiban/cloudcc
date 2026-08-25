@@ -3,10 +3,12 @@
 Where the work stands and what is left, written so a future session can pick it
 up without re-deriving any of it.
 
-State at time of writing: `main` is ahead of `origin/main` and **nothing has
-been pushed**. The Go suite, the Python SDK tests (29) and the Node SDK tests
-(33) all pass locally; the differential harness reports identical behaviour on
-seeds 1–3; and the Node client shims connect to real servers.
+**Every milestone in `docs/plan-node.md` (N0–N6) is now met, and CI is green.**
+
+What is left is in "Smaller things noticed but not done" at the bottom, plus
+whatever the next round of sweeping turns up. The generators are the tool for
+that: `CLOUDCC_FUZZ_SEEDS=500 go test ./internal/fuzz -run TestSweep` and the
+same for `TestNodeSweep`.
 
 ---
 
@@ -147,8 +149,16 @@ what it was extracted to do. Three smaller things did surface:
 - `ministack.sh` assumed the HTTP unit was called `main`. It takes the unit
   name as a second argument now.
 
-Still not done under this heading: **ECS/container units for Node.** The plan
-groups them with N6 and the gate did not require them, so they are untested.
+ECS/container units for Node are done too. A Node unit configured as `ecs`
+behind an ALB now generates a container entry that calls `listen()` -- the unit's
+own module only *exports* the app, since a module that listened on import could
+not also be wrapped for Lambda, so this is the container's counterpart to the
+Lambda entry and to uvicorn. Verified by building the generated image and
+running it: it serves.
+
+Before that fix the Dockerfile ran the unit's module directly, so the image
+built, started, and served nothing -- a failure that looks like a networking
+problem.
 
 ---
 
@@ -158,7 +168,7 @@ groups them with N6 and the gate did not require them, so they are untested.
 2. ~~Prove the shims run~~ — done, and it found a bug
 3. ~~N4~~ — done
 4. ~~N5~~ — done
-5. ~~N6~~ — done, except Node container units (see §6)
+5. ~~N6~~ — done
 
 The managed-secret branch §4 leaves open is still open: `petstore-node` has no
 database, so N4 did not exercise it. An example with a `persist`ed pg client

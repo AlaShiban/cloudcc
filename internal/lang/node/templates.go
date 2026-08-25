@@ -29,6 +29,9 @@ const LambdaRuntime = "nodejs22.x"
 // the file the bundle was built from.
 const (
 	LambdaEntryFile = "cloudcc_lambda_entry.mjs"
+	// ServerEntryFile is the generated entrypoint for a container unit, which
+	// listens rather than exporting a handler.
+	ServerEntryFile = "cloudcc_server_entry.mjs"
 	LambdaBundle    = "index.mjs"
 	LambdaHandler   = "index.handler"
 	DockerfileName  = "Dockerfile"
@@ -101,6 +104,16 @@ func unitFiles(u *ir.ExecUnit, opts lang.UnitOptions) (map[string][]byte, error)
 	out := map[string][]byte{}
 
 	if opts.Container {
+		// A container unit that serves HTTP needs something to call listen();
+		// the unit's own module only exports the app, since a module that
+		// listened on import could not also be wrapped for Lambda.
+		if u.ASGIApp != "" {
+			rendered, err := render("templates/cloudcc_server_entry.mjs.tmpl", data)
+			if err != nil {
+				return nil, err
+			}
+			out[ServerEntryFile] = rendered
+		}
 		if !opts.UserDockerfile {
 			rendered, err := render("templates/Dockerfile.tmpl", data)
 			if err != nil {
