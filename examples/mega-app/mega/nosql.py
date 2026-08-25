@@ -1,20 +1,27 @@
-"""Everything else that stores data: Redis, Mongo, DynamoDB, Cassandra,
-ClickHouse.
+"""Stores that are not relational: Redis, Mongo, DynamoDB.
 
-Two of these are the interesting cases.
+The DynamoDB entry is the one that changed the SDK. There used to be a
+`cloudcc.KVStore()` class here -- an object this project supplied because the
+Python ecosystem has no single key/value client everyone reaches for. It is
+gone, and the rule that replaced it is:
 
-``boto3`` is interesting because it is both a client library a program uses and
-the library the shims themselves are built from. A program that reaches for a
-DynamoDB Table directly is not doing anything wrong -- it is just declaring the
-same resource in a lower-level way, and it should get the same table.
+    **cloudcc does not supply objects for data stores.** A store is declared by
+    wrapping the client library you would have used anyway.
 
-``clickhouse-driver`` is interesting because there is no managed AWS service
-behind it, which is the case the compiler must handle by *refusing* rather than
-by picking something approximate.
+The reason is the one the whole `persist` design rests on. A supplied class has
+its own method names, and those have to stay in step with the shim's forever;
+the parity test that compares them exists because they drift. Worse, the class
+is a dialect nobody else speaks -- code written against it cannot be lifted out
+of cloudcc, and every example of how to use DynamoDB on the internet is written
+against boto3.
+
+The cost is honest and worth stating: an uncompiled run now needs a real
+DynamoDB endpoint, because a real boto3 client is what it holds. That is
+already true of every other store here -- redis-py wants a Redis, SQLAlchemy
+wants a Postgres -- so the KV store has stopped being the exception rather than
+started being awkward.
 """
 
-from cassandra.cluster import Cluster
-from clickhouse_driver import Client as ClickHouseClient
 from pymongo import MongoClient
 from redis import Redis
 
@@ -23,7 +30,7 @@ import boto3
 import cloudcompiler as cloudcc
 
 # ---------------------------------------------------------------------------
-# 1. redis-py -- supported today
+# 1. redis-py
 # ---------------------------------------------------------------------------
 #
 # shim: `_cloudcc_runtime.redis.connect(id, library="redis-py")` returns a
@@ -38,7 +45,36 @@ cache = cloudcc.persist(Redis(host="localhost", port=6379), id="itemCache")
 
 
 # ---------------------------------------------------------------------------
-# 2. PyMongo -- proposed
+# 2. boto3 DynamoDB -- the key/value store
+# ---------------------------------------------------------------------------
+#
+# `boto3.resource("dynamodb").Table(name)` is the right object to wrap for the
+# same reason `pathlib.Path` is: it is bound to one store, it is lazy, and it
+# is what the program would have held anyway.
+#
+# The name in the call is the *local* table name, and the physical name in the
+# cloud is chosen by the compiler -- which is why `id` is a separate argument.
+# Uncompiled, the program talks to a table called "orders" on whatever endpoint
+# AWS_ENDPOINT_URL names; compiled, it talks to "mega-app-orders-a1b2c3", and
+# neither the call sites nor the queries change.
+#
+# shim: `_cloudcc_runtime.kv.connect(id)` returns a real
+# `boto3.resource("dynamodb").Table` bound to the provisioned table, using the
+# unit's own role. There is no cloudcc class in the return path at all, which
+# is the point: `put_item`, `query`, `batch_writer` and the paginators all work
+# because they *are* boto3's.
+#
+# The compiler grants this unit access to exactly this table -- the thing a
+# hand-written policy always gets slightly wrong, and always in the permissive
+# direction.
+orders = cloudcc.persist(
+    boto3.resource("dynamodb").Table("orders"),
+    id="orders",
+)
+
+
+# ---------------------------------------------------------------------------
+# 3. PyMongo -- proposed
 # ---------------------------------------------------------------------------
 #
 # `MongoClient` is lazy by design: it does not connect in its constructor, it
@@ -49,84 +85,31 @@ cache = cloudcc.persist(Redis(host="localhost", port=6379), id="itemCache")
 #
 # open question: DocumentDB is Mongo-compatible, not Mongo. Aggregation stages
 # and change streams differ, so a program that compiles cleanly can still fail
-# at runtime on a feature the emulation supported. This is the strongest
+# at runtime on a feature the local Mongo supported. This is the strongest
 # argument in the whole example for the differential harness: uncompiled runs
-# against real Mongo and compiled runs against DocumentDB, and any behavioural
-# difference shows up as a mismatched response rather than as a support ticket.
+# against real Mongo and compiled runs against DocumentDB, and a behavioural
+# difference shows up as a mismatched response rather than a support ticket.
 # `cloudcc.yaml` should also allow `type: atlas` for people who want the real
 # thing.
 documents = cloudcc.persist(MongoClient("mongodb://localhost:27017"), id="itemDocs")
 
 
 # ---------------------------------------------------------------------------
-# 3. boto3 DynamoDB -- proposed
+# Deliberately absent: Cassandra and ClickHouse
 # ---------------------------------------------------------------------------
 #
-# The same table `cloudcc.KVStore()` would have provisioned, declared through
-# the AWS SDK instead. Note that the string here is the *local* table name, and
-# the physical name in the cloud is chosen by the compiler -- which is the whole
-# point of the `id`, and the reason the two are separate arguments.
+# Both were written out here and both are cut. Neither is a bad library; the
+# problem is what they would commit cloudcc to.
 #
-# shim: returns a `boto3.resource("dynamodb").Table` bound to the provisioned
-# table's real name, using the unit's own execution role. Uncompiled it is
-# bound to a local DynamoDB.
+# Amazon Keyspaces is Cassandra-compatible in the way DocumentDB is
+# Mongo-compatible, and the gaps are in DDL and in the parts of CQL that
+# programs actually use -- so "supported" would mean a program that compiles
+# and then fails on a query the local Cassandra answered. ClickHouse has no
+# managed AWS service at all: the only answers are an always-on cluster
+# somebody has to operate, or an account with another vendor. Neither is a
+# default a compiler should pick on an author's behalf, and offering the choice
+# is offering to maintain both.
 #
-# The compiler additionally grants this unit IAM access to exactly this table,
-# which is the thing a hand-written boto3 program always gets slightly wrong in
-# the permissive direction.
-orders_table = cloudcc.persist(
-    boto3.resource("dynamodb").Table("orders"),
-    id="orders",
-)
-
-
-# ---------------------------------------------------------------------------
-# 4. cassandra-driver -- proposed
-# ---------------------------------------------------------------------------
-#
-# `Cluster(...)` is the parameters object; `cluster.connect()` is what opens
-# sockets and returns a Session. So the cheapest object that names the resource
-# is the Cluster, and the application still calls `connect()` itself.
-#
-# shim: returns a Cluster pointed at Amazon Keyspaces, with TLS and the
-# SigV4 auth provider already installed -- which is several dozen lines of
-# setup that every Keyspaces user writes once, badly.
-#
-# open question: Keyspaces has no `USE keyspace` DDL through the driver and
-# rejects some `CREATE TABLE` options, so `models` here would have to mean
-# "these tables must already exist" rather than "these are the tables". Same
-# position as the relational side: cloudcc does not run DDL.
-metrics_cluster = cloudcc.persist(
-    Cluster(["127.0.0.1"], port=9042),
-    id="eventMetrics",
-)
-
-
-# ---------------------------------------------------------------------------
-# 5. clickhouse-driver -- proposed, and the first honest "no"
-# ---------------------------------------------------------------------------
-#
-# There is no managed ClickHouse on AWS. The available answers are: run it on
-# ECS or EKS with EBS, or use ClickHouse Cloud, which is a different provider
-# with its own credentials. Neither is a default the compiler should pick on a
-# program's behalf -- one costs an always-on cluster, the other costs an
-# account somewhere else -- so `type` must be stated in cloudcc.yaml and the
-# error when it is not says exactly that:
-#
-#     persist_columnar "analytics" has no default type: ClickHouse has no
-#     managed AWS equivalent. Choose one in cloudcc.yaml:
-#       type: self_hosted_ecs   -- a container and an EBS volume, always on
-#       type: clickhouse_cloud  -- external; set connection.secret to a secret
-#                                  holding the service credentials
-#
-# This is D15 and D9 doing their job. The alternative -- quietly mapping it to
-# Redshift or to Athena because both are columnar -- produces a program that
-# compiles, deploys, and then behaves differently, which is the failure mode
-# the whole project is organised against.
-#
-# shim: returns a `clickhouse_driver.Client`. The driver is lazy, so whichever
-# backing is chosen, nothing connects at import.
-analytics = cloudcc.persist(
-    ClickHouseClient(host="localhost"),
-    id="analytics",
-)
+# A capability whose local emulation and deployed resource differ in ways the
+# differential harness cannot catch is worse than no capability, because it
+# fails late and looks like the program's fault.

@@ -100,6 +100,24 @@ func (p *Persist) Capability() string { return p.Kind }
 // Topic is a pub/sub topic.
 type Topic struct {
 	base
+	// Requires is what the program declared about how its messages must move.
+	// The backing service is chosen from it, so it belongs in the IR: a plan
+	// that showed `sns` without saying which requirements produced it would be
+	// unreviewable.
+	Requires TopicRequires `json:"requires"`
+	// Because names the requirements that forced the chosen backing, for the
+	// plan and for the error when that backing is not implemented.
+	Because string `json:"because,omitempty"`
+}
+
+// TopicRequires is the requirement set, mirroring the SDK's Topic arguments.
+type TopicRequires struct {
+	Subscribers    string `json:"subscribers"`
+	Ordering       string `json:"ordering"`
+	Delivery       string `json:"delivery"`
+	Replay         bool   `json:"replay,omitempty"`
+	RetentionHours int    `json:"retention_hours,omitempty"`
+	MaxMessageKB   int    `json:"max_message_kb"`
 }
 
 func (t *Topic) Key() Key           { return Key{Kind: config.KindPubSub, ID: t.ID} }

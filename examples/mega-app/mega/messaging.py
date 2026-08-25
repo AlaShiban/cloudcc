@@ -1,17 +1,70 @@
 """Pub/sub and messaging.
 
-``cloudcc.Topic`` is the portable path: no broker to choose, no client library,
-and the compiler is free to pick SNS, or EventBridge, or SQS fan-out. Everything
-else in this file is the "I already have a broker and I know which one" path,
-and there the library *is* the choice -- a program written against Kafka's
-ordering guarantees is not a program that can run on SNS.
+``cloudcc.Topic`` is the portable path, and it is the one capability where the
+SDK still supplies the object -- because a topic is not a data store. Nothing
+is being kept in it; it is a decision about how messages move, and the decision
+is what the compiler needs.
 
-So the rule for this category is the inverse of the storage one:
+So the topic carries its decisions:
 
-    For storage, the library declares a capability and ``cloudcc.yaml`` picks
-    the variant. For messaging, the library often declares the *service*, and
-    the compiler's job is to provision that service and wire it up, not to
-    offer alternatives.
+    Topic[T](
+        subscribers = "one" | "many",
+        ordering    = "none" | "key" | "total",
+        delivery    = "at_least_once" | "exactly_once",
+        replay      = False | True,
+        retention_hours = int,
+        max_message_kb  = int,
+    )
+
+and **the compiler chooses the backing service from the whole set, or fails**.
+That inversion is the point of the category. For a data store the library picks
+the capability and `cloudcc.yaml` picks the variant. For a topic there is no
+library to ask, and the variants are not interchangeable: SNS cannot replay,
+SQS cannot fan out, and FIFO everything costs throughput. Choosing by hand
+means knowing all of that; declaring the requirement means the compiler has to.
+
+What it resolves to on AWS today:
+
+===========  ========  ==============  ======  ==========================
+subscribers  ordering  delivery        replay  backing
+===========  ========  ==============  ======  ==========================
+one          none      at_least_once   no      SQS standard
+one          key/total exactly_once    no      SQS FIFO
+many         none      at_least_once   no      SNS + a queue per subscriber
+many         total     exactly_once    no      SNS FIFO + SQS FIFO
+any          none/key  any             yes     Kinesis Data Stream
+===========  ========  ==============  ======  ==========================
+
+and the combinations that resolve to nothing are errors naming the constraint
+to relax, not approximations:
+
+  - ``ordering="total"`` with ``replay=True`` and many subscribers. Total order
+    plus replay means one shard, and one shard is a throughput ceiling the
+    author has not agreed to. Relax to ``ordering="key"``.
+  - ``delivery="exactly_once"`` with ``ordering="none"``. On AWS exactly-once
+    is a FIFO property; asking for one without the other describes nothing.
+  - ``max_message_kb`` above 256 with an SNS or SQS backing. The message does
+    not fit. The fix is a claim check through S3, which changes the failure
+    modes enough that it should be asked for rather than inserted.
+  - ``retention_hours`` above 336 without ``replay``. SQS holds 14 days;
+    anything longer is a stream, and a stream is what ``replay`` asks for.
+
+The alternative -- defaulting to SNS and letting the differences surface in
+production -- is the failure this project is organised against. A topic that
+silently drops ordering is a bug that reproduces once a week.
+
+**What works today:** the decision layer is implemented -- the requirements are
+read, the service is chosen from them, and an impossible set is a compile error
+naming the constraint to relax. Of the five services it can choose, only SNS is
+provisioned. Selecting one of the other four is a clean error saying which
+service was chosen and which requirement forced it:
+
+    "kinesis" is not yet supported for pubsub (declared for "auditEvents").
+    cloudcc chose it because replay=True: only a stream lets a subscriber read
+    messages sent before it existed.
+
+which is the honest position: choosing correctly and then saying so beats
+provisioning something that almost fits.
 """
 
 import aiokafka
@@ -25,29 +78,64 @@ from .nosql import cache
 from .wire import OrderPlaced, RefundRequested, RefundRequestedSchema, ShipmentRequested
 
 # ---------------------------------------------------------------------------
-# 1. cloudcc.Topic -- supported today, typed here (proposed)
+# 1. cloudcc.Topic -- the portable path
 # ---------------------------------------------------------------------------
 #
+# Many subscribers, no ordering requirement, and messages are small. Resolves
+# to SNS with a queue per subscriber.
+#
 # The type parameter is the codec: see mega/wire.py. Both ends of the channel
-# read it from the topic's intent in the IR, so the publisher and the
-# subscriber cannot disagree about the format.
+# read it from the topic's intent in the IR, so a publisher and a subscriber
+# cannot disagree about the format.
 #
 # shim: `_cloudcc_runtime.pubsub.connect(id)` returns a Topic whose `publish`
-# encodes with the topic's codec and calls SNS, and whose `subscribe` is
-# compile-time only -- the subscription becomes an event-source mapping on the
-# subscribing unit, and the handler is invoked with a decoded OrderPlaced.
+# encodes with the topic's codec and calls whichever service was chosen, and
+# whose `subscribe` is compile-time only -- the subscription becomes an event
+# source on the subscribing unit, and the handler is invoked with a decoded
+# OrderPlaced.
 #
 # Uncompiled, `subscribe` registers an in-process callback and `publish` calls
-# it synchronously, so a single-process run behaves the same way. It is not the
-# same *timing*, and no emulation can make it so; what it preserves is that the
-# handler runs, with the right value, and errors surface.
-order_events = cloudcc.persist(cloudcc.Topic[OrderPlaced](), id="orderEvents")
+# it synchronously. That is not the same *timing*, and no emulation can make it
+# so; what it preserves is that the handler runs, with the right value, and
+# that errors surface.
+order_events = cloudcc.persist(
+    cloudcc.Topic[OrderPlaced](
+        subscribers="many",
+        ordering="none",
+        delivery="at_least_once",
+    ),
+    id="orderEvents",
+)
 
-# The same, with an explicit codec, because marshmallow's schema is a separate
-# object and the type alone would not name it.
+# One subscriber, and money is involved: a refund applied twice is a refund
+# twice. Resolves to SQS FIFO, and the compiler enforces that only one unit
+# subscribes -- a second subscriber is a compile error rather than a silent
+# split of the messages between them.
 refund_events = cloudcc.persist(
-    cloudcc.Topic[RefundRequested](codec=cloudcc.Marshmallow(RefundRequestedSchema())),
+    cloudcc.Topic[RefundRequested](
+        subscribers="one",
+        ordering="key",
+        delivery="exactly_once",
+        codec=cloudcc.Marshmallow(RefundRequestedSchema()),
+    ),
     id="refundEvents",
+)
+
+# Replay, because a new consumer needs the history to rebuild its projection.
+# Resolves to a Kinesis stream: ordering per key, seven days of retention, and
+# a cursor each consumer owns.
+#
+# Note what changes for the author here, and what does not. `publish` is the
+# same call. What differs is that this topic can be read from the beginning,
+# which is a property they asked for by name.
+audit_events = cloudcc.persist(
+    cloudcc.Topic[OrderPlaced](
+        subscribers="many",
+        ordering="key",
+        replay=True,
+        retention_hours=168,
+    ),
+    id="auditEvents",
 )
 
 
@@ -113,9 +201,10 @@ rabbit_params = cloudcc.persist(
 # cluster's brokers, with `security_protocol="SASL_SSL"` and the IAM token
 # provider installed.
 #
-# Kafka is the clearest case of the library declaring the service: partitions,
-# offsets and consumer groups have no SNS equivalent, so there is nothing for
-# `cloudcc.yaml` to choose between beyond MSK and MSK Serverless.
+# Kafka is the clearest case of a library declaring the service rather than the
+# capability: partitions, offsets and consumer groups have no SNS equivalent.
+# It is also the answer for someone who wants the `Topic` above but does not
+# want cloudcc choosing -- naming the library is how you take the decision back.
 shipment_producer = cloudcc.persist(
     aiokafka.AIOKafkaProducer(bootstrap_servers="localhost:9092"),
     id="shipmentStream",
@@ -165,6 +254,7 @@ channel.subscribe("order-events")
 def announce(event: OrderPlaced) -> None:
     """Publish through the portable path."""
     order_events.publish(event)
+    audit_events.publish(event)
 
 
 async def request_shipment(event: ShipmentRequested) -> None:

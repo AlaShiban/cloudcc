@@ -1,78 +1,54 @@
 // File store backed by S3.
+//
+// Same shape as kv.js and for the same reason: `connect` returns an `S3Client`,
+// not a wrapper, so `GetObjectCommand`, `Upload` from `@aws-sdk/lib-storage`,
+// presigned URLs and every other thing built on the AWS SDK keep working.
+//
+// The Python side wraps `pathlib.Path` and hands back a `cloudpathlib.S3Path`,
+// which has the same API. Node has no equivalent, so the client is the object
+// and the shim binds it to the provisioned bucket.
 
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { S3Client } from "@aws-sdk/client-s3";
 
 import { common, env, slug } from "./client.js";
 
 export function connect(id) {
   const bucket = env(`CLOUDCC_FS_${slug(id)}_BUCKET`, "persist", id);
-  return new FileStore(id, bucket, new S3Client(common()));
+  const client = new S3Client(common());
+  bindBucket(client, bucket);
+  return client;
 }
 
-export class FileStore {
-  constructor(id, bucket, client) {
-    this.id = id;
-    this._bucket = bucket;
-    this._client = client;
-  }
+/**
+ * Point every command this client sends at `bucket`.
+ *
+ * Exported for the tests, which check the rewrite without a network.
+ */
+export function bindBucket(client, bucket) {
+  client.middlewareStack.add(
+    (next) => (args) => {
+      args.input = rewrite(args.input, bucket);
+      return next(args);
+    },
+    { step: "initialize", name: "cloudccBindBucket", priority: "high" },
+  );
+  return client;
+}
 
-  _key(key) {
-    return String(key).replace(/^\/+/, "");
+function rewrite(input, bucket) {
+  if (input === null || typeof input !== "object") {
+    return input;
   }
-
-  async read(key) {
-    try {
-      const out = await this._client.send(
-        new GetObjectCommand({ Bucket: this._bucket, Key: this._key(key) }),
-      );
-      return Buffer.from(await out.Body.transformToByteArray());
-    } catch (err) {
-      // Match the SDK's local emulation, which throws rather than leaking the
-      // provider's own error shape to callers.
-      if (err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404) {
-        const e = new Error(`no such key: ${key}`);
-        e.code = "ENOENT";
-        throw e;
-      }
-      throw err;
+  const out = { ...input };
+  if ("Bucket" in out) {
+    out.Bucket = bucket;
+  }
+  // CopyObject names its source as "bucket/key" in a single string.
+  if (typeof out.CopySource === "string") {
+    const slash = out.CopySource.replace(/^\/+/, "").indexOf("/");
+    if (slash > 0) {
+      out.CopySource = `${bucket}/${out.CopySource.replace(/^\/+/, "").slice(slash + 1)}`;
     }
   }
-
-  async write(key, data) {
-    await this._client.send(
-      new PutObjectCommand({ Bucket: this._bucket, Key: this._key(key), Body: data }),
-    );
-  }
-
-  async delete(key) {
-    await this._client.send(
-      new DeleteObjectCommand({ Bucket: this._bucket, Key: this._key(key) }),
-    );
-  }
-
-  async exists(key) {
-    try {
-      await this._client.send(
-        new HeadObjectCommand({ Bucket: this._bucket, Key: this._key(key) }),
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async list(prefix = "") {
-    const out = [];
-    let token;
-    do {
-      const page = await this._client.send(
-        new ListObjectsV2Command({ Bucket: this._bucket, Prefix: prefix, ContinuationToken: token }),
-      );
-      for (const obj of page.Contents ?? []) {
-        out.push(obj.Key);
-      }
-      token = page.IsTruncated ? page.NextContinuationToken : undefined;
-    } while (token);
-    return out.sort();
-  }
+  return out;
 }

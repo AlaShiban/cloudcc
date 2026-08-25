@@ -24,6 +24,12 @@ var NodeCorpusSeeds = []int64{
 	// one. TestNodeCorpusCoversEveryShape is what says whether this list is
 	// still complete.
 	10, 15, 45,
+	// Added when the SDK's KVStore and FileStore were replaced by the AWS
+	// SDK's own clients. Removing two client shapes moves every later draw
+	// from the generator's rng, so seeds that used to cover `new Redis(`
+	// stopped doing so -- caught by the coverage test rather than leaving a
+	// detector path quietly untested.
+	4, 8, 18,
 }
 
 // TestNodeCorpus is the Node half of the permanent corpus: fixed programs,
@@ -108,7 +114,8 @@ func TestNodeGenerationIsReproducible(t *testing.T) {
 // provision and which client library to hand back, so a corpus that misses one
 // is not testing the thing that decides what gets built.
 var nodeClientShapes = []string{
-	"new KVStore(", "new FileStore(", "new Secret(", "new Topic(",
+	"new DynamoDBClient({})", "new DynamoDBClient({ region:", "new S3Client(",
+	"new Secret(", "new Topic(",
 	"new Pool(", "knex(", "new Redis(", "createClient(",
 	"postgresql://", "mysql://",
 }

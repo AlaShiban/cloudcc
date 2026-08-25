@@ -13,6 +13,13 @@
 #     fetched lazily
 #   * knex accepts an async connection factory, for the same reason
 #
+# The two AWS-SDK shims rest on a different property: their clients are not
+# bound to a resource -- the table or bucket name travels in each command -- so
+# the shim installs a middleware that rewrites whatever name the program wrote
+# to the one the compiler provisioned. That rewrite is the whole reason the
+# uncompiled and compiled programs can be the same text, and it is checked here
+# against a real DynamoDB and a real S3.
+#
 # Those four are what let connect() stay synchronous, which is what keeps a
 # compiled binding the same shape as an uncompiled one. If any of them stops
 # being true, connect() has to become async and every call on a persisted
@@ -56,7 +63,9 @@ cat > "$WORK/package.json" <<'JSON'
     "redis": "^4.7.0",
     "pg": "^8.13.0",
     "knex": "^3.1.0",
-    "@aws-sdk/client-secrets-manager": "^3.700.0"
+    "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "@aws-sdk/client-dynamodb": "^3.700.0",
+    "@aws-sdk/client-s3": "^3.700.0"
   }
 }
 JSON
@@ -71,6 +80,10 @@ import * as ioredisShim from "./_cloudcc_runtime/redis_ioredis.js";
 import * as noderedisShim from "./_cloudcc_runtime/redis_node.js";
 import * as pgShim from "./_cloudcc_runtime/orm_pg.js";
 import * as knexShim from "./_cloudcc_runtime/orm_knex.js";
+import * as kvShim from "./_cloudcc_runtime/kv.js";
+import * as fsShim from "./_cloudcc_runtime/fs.js";
+import { GetItemCommand, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 
 let failures = 0;
 const ok = (n) => console.log(`  ok    ${n}`);
@@ -116,15 +129,60 @@ try {
   await db.destroy();
 } catch (e) { bad("orm_knex.js", e.message); }
 
+// The program names its own table -- "whatever-the-program-called-it" is a
+// name that exists nowhere in the emulator -- and the shim's middleware sends
+// the command to the provisioned one anyway. If the rewrite ever stops
+// happening this fails with ResourceNotFoundException, which is exactly the
+// failure a user would get.
+try {
+  const c = assertNotPromise("kv.connect", kvShim.connect("pets"));
+  const TableName = "whatever-the-program-called-it";
+  await c.send(new PutItemCommand({
+    TableName,
+    Item: { id: { S: "1" }, pet: { S: "rex" } },
+  }));
+  const out = await c.send(new GetItemCommand({ TableName, Key: { id: { S: "1" } } }));
+  if (out.Item?.pet?.S !== "rex") throw new Error("round trip failed");
+  ok("kv.js binds any table name to the provisioned table");
+} catch (e) { bad("kv.js", e.message); }
+
+try {
+  const c = assertNotPromise("fs.connect", fsShim.connect("docs"));
+  const Bucket = "whatever-the-program-called-it";
+  await c.send(new PutObjectCommand({ Bucket, Key: "a.txt", Body: "hello" }));
+  const out = await c.send(new GetObjectCommand({ Bucket, Key: "a.txt" }));
+  if ((await out.Body.transformToString()) !== "hello") throw new Error("round trip failed");
+  ok("fs.js binds any bucket name to the provisioned bucket");
+} catch (e) { bad("fs.js", e.message); }
+
 process.exit(failures === 0 ? 0 : 1);
 JS
 
 log "waiting for the servers"
 "$REPO_ROOT/hack/wait-for.sh" "$REDIS_PORT" 2>/dev/null || sleep 5
 
+# The two AWS shims need real AWS-shaped services, which the emulator already
+# provides for every other integration test. The table and bucket are made here
+# under names the shim will be told about; the program in check.mjs uses a
+# different name on purpose, which is what proves the rewrite.
+require_endpoint
+KV_TABLE="cloudcc-verify-pets"
+FS_BUCKET="cloudcc-verify-docs"
+aws_local dynamodb delete-table --table-name "$KV_TABLE" >/dev/null 2>&1 || true
+aws_local dynamodb create-table --table-name "$KV_TABLE" \
+  --attribute-definitions AttributeName=id,AttributeType=S \
+  --key-schema AttributeName=id,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST >/dev/null
+aws_local s3api create-bucket --bucket "$FS_BUCKET" >/dev/null 2>&1 || true
+
 log "running the shims against them"
 (
   cd "$WORK"
+  export CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT"
+  export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-cloudcc-local}"
+  export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-cloudcc-local}"
+  export CLOUDCC_KV_PETS_TABLE="$KV_TABLE"
+  export CLOUDCC_FS_DOCS_BUCKET="$FS_BUCKET"
   export CLOUDCC_REDIS_CACHE_ENDPOINT=127.0.0.1
   export CLOUDCC_REDIS_CACHE_PORT="$REDIS_PORT"
   # Two credential shapes, both without a managed secret. The password in the
@@ -138,5 +196,7 @@ log "running the shims against them"
   export PGPASSWORD=secretpw
   node check.mjs
 )
+
+aws_local dynamodb delete-table --table-name "$KV_TABLE" >/dev/null 2>&1 || true
 
 pass "every Node client shim talks to a real server, and none of them returns a promise"

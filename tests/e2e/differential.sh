@@ -90,6 +90,28 @@ SERVE
   fi
 }
 
+# reset_local_table gives the uncompiled run an empty table to talk to.
+#
+# The program as written holds a real client now -- a boto3 Table, or a
+# DynamoDBClient -- rather than a class the SDK supplied, so "run it as written"
+# means running it against a real DynamoDB. The emulator is already up for the
+# compiled half, so it serves both, with the *local* table name the program
+# wrote rather than the physical one the compiler chose.
+#
+# Dropping and recreating it per seed matters: the two halves talk to different
+# tables, so an item left behind by an earlier seed would show up in one run's
+# listing and not the other, and read as a behavioural difference.
+LOCAL_TABLE="items"
+
+reset_local_table() {
+  aws_local dynamodb delete-table --table-name "$LOCAL_TABLE" >/dev/null 2>&1 || true
+  aws_local dynamodb create-table --table-name "$LOCAL_TABLE" \
+    --attribute-definitions AttributeName=id,AttributeType=S \
+    --key-schema AttributeName=id,KeyType=HASH \
+    --billing-mode PAY_PER_REQUEST >/dev/null \
+    || fail "could not create the local $LOCAL_TABLE table in the emulator"
+}
+
 # replay issues the scenario and writes one normalised line per step, so the
 # two runs can be compared with a plain diff.
 replay() {
@@ -146,19 +168,29 @@ for seed in "${SEEDS[@]}"; do
   log "unit $unit, serving $target"
 
   # ---------------------------------------------------------- A: as written
-  log "running the program as written, against the SDK's local emulations"
+  log "running the program as written, against a real store and the SDK's emulations"
   rm -rf "$case_dir/local-state"
+  reset_local_table
   if [ "$LANGUAGE" = "node" ]; then
     # The program as written imports the real SDK, so it has to be installed --
     # from the working tree, not a registry, so this tests what is in the repo.
     ( cd "$REPO_ROOT/sdk/node" && npm install --silent --no-audit --no-fund >/dev/null \
         && npm run build >/dev/null )
     ( cd "$src" && npm install --silent --no-audit --no-fund \
-        express "$REPO_ROOT/sdk/node" >/dev/null )
+        express @aws-sdk/client-dynamodb @aws-sdk/client-s3 "$REPO_ROOT/sdk/node" >/dev/null )
   fi
+  # AWS_ENDPOINT_URL is the AWS SDKs' own standard variable, honoured by both
+  # boto3 and the JavaScript v3 clients, so the program as written needs no
+  # cloudcc-specific configuration to reach the emulator.
+  AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
+  AWS_REGION="$AWS_REGION" \
+  AWS_DEFAULT_REGION="$AWS_REGION" \
+  AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-cloudcc-local}" \
+  AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-cloudcc-local}" \
   CLOUDCC_LOCAL_STATE_DIR="$case_dir/local-state" \
     serve "$src" "$target" "$PORT_A" "uncompiled" \
-      --with fastapi --with uvicorn --with-editable "$REPO_ROOT/sdk/python"
+      --with fastapi --with uvicorn --with boto3 \
+      --with-editable "$REPO_ROOT/sdk/python"
   replay "$PORT_A" "$manifest" "$case_dir/uncompiled.txt"
   stop_app
   pass "uncompiled run recorded"

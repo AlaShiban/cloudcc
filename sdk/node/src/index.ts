@@ -31,9 +31,12 @@
  * - Calls belong at module top level, where the compiler can see the shape of
  *   the program. `executionUnit` in particular must be a top-level call.
  *
- * Where the ecosystem has no standard client -- a key/value store, a pub/sub
- * topic, a secret -- this package supplies a typed one, wrapped by the same
- * verb as everything else.
+ * This package supplies no client for a data store. A store is declared by
+ * wrapping the library you already use -- `ioredis`, `pg`, a
+ * `DynamoDBClient`, an `S3Client` -- because a class of ours would be a
+ * dialect nobody else speaks, and its methods would have to be kept in step
+ * with the injected runtime's forever. The two things it does supply, a
+ * pub/sub topic and a secret, are not stores: neither has a client to wrap.
  *
  * This package never imports the AWS SDK. Cloud access only ever appears in
  * the `_cloudcc_runtime` package the compiler injects into the compiled copy.
@@ -42,9 +45,7 @@
 import { Gateway, Json, slug } from "./emulation.js";
 
 export {
-  FileStore,
   Gateway,
-  KVStore,
   Secret,
   Topic,
   localRoot,
@@ -89,10 +90,10 @@ export function expose(app: unknown, options: { id?: string; target?: string } =
  * | `new Redis(...)` (ioredis)         | ElastiCache (or MemoryDB) |
  * | `createClient(...)` (node-redis)   | ElastiCache (or MemoryDB) |
  * | `new Pool({ … })` (pg)             | RDS Postgres              |
- * | `new Sequelize("mysql://…")`       | RDS MySQL                 |
- * | `new KVStore()`                    | DynamoDB                  |
- * | `new FileStore()`                  | S3                        |
- * | `new Topic()`                      | SNS                       |
+ * | `knex({ … })`                      | RDS Postgres or MySQL     |
+ * | `new DynamoDBClient({})`           | DynamoDB                  |
+ * | `new S3Client({})`                 | S3                        |
+ * | `new Topic()`                      | SNS, SQS or Kinesis       |
  * | `new Secret()`                     | Secrets Manager           |
  *
  * The library you reached for supplies the default; cloudcc.yaml still chooses

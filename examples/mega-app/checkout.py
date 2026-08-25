@@ -16,7 +16,6 @@ from sqlmodel import Session, select
 
 import cloudcompiler as cloudcc
 
-from mega.drivers import lookup
 from mega.jobs import emails, rebuild_search_index
 from mega.orm import checkout_engine
 from mega.settings import settings
@@ -63,15 +62,6 @@ def order(order_id: str):
     if found is None:
         return jsonify(error="no such order"), 404
     return jsonify(id=found.id, total=str(found.total))
-
-
-@app.get("/regions/<postcode>")
-def region(postcode: str):
-    """The unpersisted sqlite3 cache from mega/drivers.py, used as intended."""
-    row = lookup.execute(
-        "SELECT region FROM postcode WHERE code = ?", (postcode,)
-    ).fetchone()
-    return jsonify(region=row[0] if row else None)
 
 
 def _notify(order_id: str) -> None:

@@ -61,16 +61,33 @@ Three consequences worth naming:
 - **The client is the weakest layer of configuration.** A Redis client asks for
   ElastiCache, but an explicit `cloudcc.yaml` entry still wins, so choosing
   MemoryDB stays a configuration change. `App.HasExplicitType` is the guard.
-- **Python has no `FileStore` class; Node does.** `pathlib.Path` already is one
-  and `cloudpathlib.S3Path` mirrors it, so Python wraps the real thing. Node's
-  `fs` is a set of functions with no object to wrap, so there a class is
-  unavoidable — and it is one of the few that still needs the parity test. The
-  asymmetry reflects the ecosystems, not an oversight.
+- **The SDK supplies no classes for data stores.** Every store is declared by
+  wrapping a real client: `redis.Redis`, `pathlib.Path`, a boto3 `Table`, an
+  `S3Client`. What is left in the SDK is a topic and a secret, which are not
+  stores and have no client to wrap.
 
-This was caught by the parity test itself: a `FileStore` added to the Python SDK
-for symmetry had `read`/`write`/`list`, while the shim returned an `S3Path` that
-has none of them. It would have compiled and then failed at runtime on the first
-call — exactly the failure the redesign exists to prevent.
+  Two things forced this. A supplied class has to be kept in step with the
+  shim's forever — the parity test exists because they drift — and it is a
+  dialect nobody else speaks, so code written against it cannot be lifted out
+  of cloudcc. Every pair removed from the parity test is a pair that can no
+  longer drift, and that list is now two entries long instead of five.
+
+  It was the parity test that made the case: a `FileStore` added to the Python
+  SDK for symmetry had `read`/`write`/`list`, while the shim returned an
+  `S3Path` that has none of them. It would have compiled and then failed at
+  runtime on the first call.
+
+  The cost is that an uncompiled run needs a real endpoint for each store. That
+  was already true of Redis and Postgres; the key/value store was the exception,
+  and buying that exception cost a class, a local file format and a parity test.
+
+- **Node wraps the AWS SDK where Python wraps a bound object.** A boto3 `Table`
+  names one table; a `DynamoDBClient` names none, because the name travels in
+  each command. So the Node shim installs a middleware that rewrites whatever
+  table or bucket name the program wrote to the provisioned one. Rewriting any
+  name rather than matching a convention is deliberate: the client was declared
+  as one store, so every command it sends belongs to that store, and the local
+  run is free to call its table whatever it likes.
 
 ## Deviations from the brief
 

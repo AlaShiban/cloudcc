@@ -10,6 +10,8 @@ defaults:
     type: lambda
   expose:
     type: apigateway
+  logging:
+    type: cloudwatch
   persist_fs:
     type: s3
   persist_kv:

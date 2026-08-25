@@ -99,6 +99,11 @@ func unitConfigEnv(ctx *compiler.Context) map[string]map[string]ir.EnvBinding {
 		// pointed at an emulator without touching its code (D15).
 		bindings[aws.EnvEndpointOverride] = ir.FromExpr(
 			ir.Raw(fmt.Sprintf("process.env.%s ?? \"\"", aws.EnvEndpointOverride)))
+		// And where its logs go, so the runtime installs the right handler
+		// before user code is imported rather than sniffing for it.
+		bindings[aws.EnvLogDestination] = ir.FromExpr(
+			ir.Lit(ctx.Config.LogDestination().Type))
+		bindings[aws.EnvUnitID] = ir.FromExpr(ir.Lit(unit.ID))
 		out[unit.ID] = bindings
 	}
 	return out

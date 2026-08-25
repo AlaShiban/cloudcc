@@ -60,13 +60,38 @@ var typeSupport = map[string]map[string]Level{
 		"elasticache": Supported,
 		"memorydb":    Supported,
 	},
+	// A topic's backing is chosen from the requirements the program declared,
+	// not configured -- see SelectTopicBacking. The four beyond SNS are listed
+	// because the selector can reach them, and a requirement set that resolves
+	// to one must be a clean error naming what it selected and why, rather than
+	// a quiet fall back to SNS. A topic that silently drops ordering is a bug
+	// that reproduces once a week.
 	config.KindPubSub: {
-		"sns": Supported,
+		"sns":      Supported,
+		"sns_fifo": NotYetSupported,
+		"sqs":      NotYetSupported,
+		"sqs_fifo": NotYetSupported,
+		"kinesis":  NotYetSupported,
 	},
 	config.KindStaticUnit: {
 		"s3": Supported,
 	},
 	config.KindConfig: {},
+	// Where logs go. CloudWatch is the only destination that works, and the
+	// two vendors are listed rather than omitted so that choosing one is a
+	// clean error naming what is implemented -- the same treatment `eks` gets
+	// above, and for the same reason: a configuration key that is silently
+	// dropped leaves a program looking configured when it is not.
+	//
+	// This is also where an extensibility model would attach. The seam is the
+	// destination, not the call sites: nothing in an application changes when
+	// this does, which is the property that makes a vendor integration worth
+	// having at all.
+	config.KindLogging: {
+		"cloudwatch": Supported,
+		"datadog":    NotYetSupported,
+		"honeycomb":  NotYetSupported,
+	},
 }
 
 // Support reports how well the provider supports typ for kind.

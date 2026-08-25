@@ -26,18 +26,19 @@ import (
 // routes; nothing else is meant to survive into the IR.
 const pythonSource = `from pathlib import Path
 
+import boto3
 from redis import Redis
 from sqlalchemy import create_engine
 from fastapi import FastAPI, HTTPException
 
 import cloudcompiler as cloudcc
 
-items = cloudcc.persist(cloudcc.KVStore(), id="itemCache")
+items = cloudcc.persist(boto3.resource("dynamodb").Table("items"), id="itemCache")
 docs = cloudcc.persist(Path("./docs"), id="itemDocs")
 signing = cloudcc.persist(cloudcc.Secret(), id="signingKey")
 cache = cloudcc.persist(Redis(), id="sessions")
 db = cloudcc.persist(create_engine("postgresql://localhost/shop"), id="shopdb")
-events = cloudcc.persist(cloudcc.Topic(), id="itemEvents")
+events = cloudcc.persist(cloudcc.Topic(subscribers="many", ordering="none"), id="itemEvents")
 
 LEVEL = cloudcc.config_value("log_level", default="info")
 
@@ -64,17 +65,19 @@ def write_item(item_id: str, payload: dict) -> dict:
     return {"ok": True}
 `
 
-const nodeSource = `import { FileStore, KVStore, Secret, Topic, configValue, expose, persist } from "@cloudcompiler/sdk";
+const nodeSource = `import { Secret, Topic, configValue, expose, persist } from "@cloudcompiler/sdk";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { S3Client } from "@aws-sdk/client-s3";
 import Redis from "ioredis";
 import { Pool } from "pg";
 import express from "express";
 
-const items = persist(new KVStore(), { id: "itemCache" });
-const docs = persist(new FileStore(), { id: "itemDocs" });
+const items = persist(new DynamoDBClient({}), { id: "itemCache" });
+const docs = persist(new S3Client({}), { id: "itemDocs" });
 const signing = persist(new Secret(), { id: "signingKey" });
 const cache = persist(new Redis(), { id: "sessions" });
 const db = persist(new Pool({ connectionString: "postgresql://localhost/shop" }), { id: "shopdb" });
-const events = persist(new Topic(), { id: "itemEvents" });
+const events = persist(new Topic({ subscribers: "many", ordering: "none" }), { id: "itemEvents" });
 
 const LEVEL = configValue("log_level", { default: "info" });
 

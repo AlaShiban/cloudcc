@@ -159,6 +159,13 @@ jobs:
       - name: Provisioning and functional tests (Node)
         run: ./tests/e2e/ministack.sh petstore-node
 
+      # A multi-unit application whose entry module is not called app.py. It
+      # was never run here before, because the harness hardcoded `uvicorn
+      # app:app`; it now asks the compiler which module holds the application,
+      # which is a fact the compiler already worked out.
+      - name: Provisioning and functional tests (multi-unit)
+        run: ./tests/e2e/ministack.sh petstore-multi api
+
       # One application, two languages, one store. The architecture has always
       # claimed to support this -- a frontend is chosen per execution unit --
       # but nothing checked it until there was an example that deploys.

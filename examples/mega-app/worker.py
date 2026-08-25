@@ -28,7 +28,6 @@ import cloudcompiler as cloudcc
 from mega.jobs import settle_order  # noqa: F401 -- the worker must ship the task
 from mega.logs import log
 from mega.messaging import audit_connection, order_events, rabbit_params, refund_events
-from mega.nosql import analytics, metrics_cluster
 from mega.orm import reporting_db, tortoise_config
 from mega.storage import store
 from mega.wire import OrderPlaced, RefundRequested, ShipmentRequested
@@ -55,9 +54,15 @@ def on_order(event: OrderPlaced) -> None:
 
 def on_refund(event: RefundRequested) -> None:
     """Decoded by the marshmallow schema named on the topic, not by this
-    signature -- which is exactly why the codec has to live on the channel."""
-    analytics.execute(
-        "INSERT INTO refunds (order_id, reason, amount) VALUES", [(event.order_id, event.reason, event.amount)]
+    signature -- which is exactly why the codec has to live on the channel.
+
+    This topic asked for exactly-once delivery to a single subscriber, so it
+    resolved to an SQS FIFO queue, and a second unit subscribing to it is a
+    compile error rather than a silent split of the refunds between them.
+    """
+    reporting_db.execute_sql(
+        "INSERT INTO refunds (order_id, reason, amount) VALUES (%s, %s, %s)",
+        (event.order_id, event.reason, str(event.amount)),
     )
 
 
@@ -118,8 +123,6 @@ async def main() -> None:
     every binding a coroutine.
     """
     await Tortoise.init(config=tortoise_config)
-    session = metrics_cluster.connect("mega")
-    session.execute("USE mega")
     await consume_shipments()
 
 

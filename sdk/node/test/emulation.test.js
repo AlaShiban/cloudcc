@@ -8,7 +8,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, test } from "node:test";
@@ -27,9 +27,16 @@ after(() => cloudcc.resetLocalState());
 
 test("the SDK never imports an AWS client", () => {
   // Cloud access belongs in the injected shims, never in the hint SDK.
+  //
+  // Comments are stripped before the check rather than searched: the
+  // documentation has to be free to name @aws-sdk/client-dynamodb, because
+  // wrapping one is now how a key/value store is declared. A test that cannot
+  // tell an import from a doc comment would have to be weakened every time the
+  // docs improve.
   for (const file of ["index.ts", "emulation.ts"]) {
-    const src = readFileSync(join(here, "..", "src", file), "utf8");
-    assert.ok(!src.includes("@aws-sdk/"), `${file} imports an AWS client`);
+    const src = readFileSync(join(here, "..", "src", file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
     assert.ok(!src.includes("aws-sdk"), `${file} imports an AWS client`);
   }
 });
@@ -38,70 +45,30 @@ test("persist returns exactly what it was given", () => {
   // The property the whole design rests on. persist is a compile-time hint;
   // uncompiled it must be the identity function, or a program would behave
   // differently depending on whether it had been compiled.
-  for (const client of [{}, [1, 2], "text", 42, new cloudcc.KVStore()]) {
+  for (const client of [{}, [1, 2], "text", 42, new cloudcc.Topic()]) {
     assert.equal(cloudcc.persist(client, { id: "anything" }), client);
   }
 });
 
 test("persist preserves the type it was handed", () => {
-  const store = new cloudcc.KVStore();
-  assert.ok(cloudcc.persist(store, { id: "kv" }) instanceof cloudcc.KVStore);
+  const topic = new cloudcc.Topic();
+  assert.ok(cloudcc.persist(topic, { id: "events" }) instanceof cloudcc.Topic);
 });
 
-test("KVStore round-trips", async () => {
-  const pets = cloudcc.persist(new cloudcc.KVStore(), { id: "petsByOwner" });
-  assert.equal(await pets.get("1"), null);
-
-  await pets.put("1", { name: "rex" });
-  assert.deepEqual(await pets.get("1"), { name: "rex" });
-  assert.deepEqual(await pets.keys(), ["1"]);
-
-  await pets.delete("1");
-  assert.equal(await pets.get("1"), null);
-  assert.deepEqual(await pets.keys(), []);
-});
-
-test("KVStore returns a copy", async () => {
-  const pets = cloudcc.persist(new cloudcc.KVStore(), { id: "petsByOwner" });
-  await pets.put("1", { name: "rex" });
-  const got = await pets.get("1");
-  got.name = "mutated";
-  assert.deepEqual(await pets.get("1"), { name: "rex" });
-});
-
-test("a KVStore really persists", async () => {
-  // A verb called persist handing back a Map that forgets on exit would be a
-  // poor joke, so the local store is file-backed.
-  const path = join(process.env.CLOUDCC_LOCAL_STATE_DIR, "explicit.json");
-  await new cloudcc.KVStore(path).put("1", { name: "rex" });
-  assert.deepEqual(await new cloudcc.KVStore(path).get("1"), { name: "rex" });
-});
-
-test("two KVStores are independent", async () => {
-  const a = new cloudcc.KVStore();
-  const b = new cloudcc.KVStore();
-  await a.put("k", { v: 1 });
-  assert.equal(await b.get("k"), null);
-});
-
-test("FileStore round-trips", async () => {
-  // Node has no pathlib, so unlike the Python SDK this one is a class we
-  // supply -- and the injected shim has to match it method for method.
-  const blobs = cloudcc.persist(new cloudcc.FileStore(), { id: "petAudit" });
-  assert.deepEqual(await blobs.list(), []);
-  assert.equal(await blobs.exists("a.txt"), false);
-
-  await blobs.write("a.txt", Buffer.from("hello"));
-  await blobs.write("nested/b.txt", Buffer.from("there"));
-
-  assert.equal((await blobs.read("a.txt")).toString(), "hello");
-  assert.equal(await blobs.exists("a.txt"), true);
-  assert.deepEqual(await blobs.list(), ["a.txt", "nested/b.txt"]);
-  assert.deepEqual(await blobs.list("nested/"), ["nested/b.txt"]);
-
-  await blobs.delete("a.txt");
-  assert.equal(await blobs.exists("a.txt"), false);
-  await assert.rejects(() => blobs.read("a.txt"));
+test("the SDK supplies no data store classes", () => {
+  // A store is declared by wrapping the client library you already use. A
+  // class of ours would be a dialect nobody else speaks, and its methods would
+  // have to be kept in step with the injected runtime's forever -- which is
+  // the drift the parity test exists to catch and this rule exists to remove.
+  for (const gone of ["KVStore", "FileStore", "DocumentStore", "Queue"]) {
+    assert.equal(
+      cloudcc[gone],
+      undefined,
+      `cloudcc.${gone} is a data store class; wrap a real client instead`,
+    );
+  }
+  assert.ok(cloudcc.Topic);
+  assert.ok(cloudcc.Secret);
 });
 
 test("Secret reads the environment", async () => {
@@ -162,12 +129,12 @@ test("hint-only functions return quietly", () => {
 });
 
 test("resetLocalState clears directories", async () => {
-  const blobs = new cloudcc.FileStore();
-  await blobs.write("a.txt", Buffer.from("x"));
-  assert.equal(await blobs.exists("a.txt"), true);
+  const root = cloudcc.localRoot();
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "leftover"), "x");
 
   cloudcc.resetLocalState();
-  assert.equal(await blobs.exists("a.txt"), false);
+  assert.equal(existsSync(root), false);
 });
 
 test("slug matches the compiler's spelling", () => {

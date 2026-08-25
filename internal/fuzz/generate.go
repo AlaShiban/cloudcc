@@ -412,6 +412,10 @@ func (g *generator) writeExposedBody(p *Program, m *pyModule, unitID string,
 	storeNames map[string]string, primaryStore, topicID string) {
 
 	m.importStd("from fastapi import FastAPI, HTTPException")
+	// The store is a boto3 Table, so the item shape is the program's own. A
+	// JSON string keeps numbers as numbers: DynamoDB's native types would make
+	// them Decimals, which FastAPI cannot serialise.
+	m.importStd("import json")
 	appVar := []string{"app", "api", "application"}[g.rng.Intn(3)]
 	m.assign(appVar, "FastAPI()")
 	p.AppVar = appVar
@@ -442,15 +446,17 @@ func (g *generator) writeExposedBody(p *Program, m *pyModule, unitID string,
 
 	m.decorateHandler(g.rng, appVar, "GET", base+"/{item_id}", "read_item(item_id: str) -> dict",
 		[]string{
-			fmt.Sprintf("found = %s.get(item_id)", store),
+			fmt.Sprintf(`found = %s.get_item(Key={"id": item_id}).get("Item")`, store),
 			"if found is None:",
 			`    raise HTTPException(status_code=404, detail="missing")`,
-			"return found",
+			`return json.loads(found["value"])`,
 		})
 	routes = append(routes, Route{"GET", base + "/{item_id}"})
 	m.blank()
 
-	writeBody := []string{fmt.Sprintf("%s.put(item_id, payload)", store)}
+	writeBody := []string{
+		fmt.Sprintf(`%s.put_item(Item={"id": item_id, "value": json.dumps(payload)})`, store),
+	}
 	if topicID != "" {
 		writeBody = append(writeBody, `events.publish({"id": item_id})`)
 	}
@@ -462,14 +468,17 @@ func (g *generator) writeExposedBody(p *Program, m *pyModule, unitID string,
 
 	m.decorateHandler(g.rng, appVar, "DELETE", base+"/{item_id}", "drop_item(item_id: str) -> dict",
 		[]string{
-			fmt.Sprintf("%s.delete(item_id)", store),
+			fmt.Sprintf(`%s.delete_item(Key={"id": item_id})`, store),
 			`return {"ok": True}`,
 		})
 	routes = append(routes, Route{"DELETE", base + "/{item_id}"})
 	m.blank()
 
 	m.decorateHandler(g.rng, appVar, "GET", base, "list_items() -> dict",
-		[]string{fmt.Sprintf(`return {"keys": sorted(%s.keys())}`, store)})
+		[]string{
+			fmt.Sprintf(`page = %s.scan(ProjectionExpression="id")`, store),
+			`return {"keys": sorted(item["id"] for item in page.get("Items", []))}`,
+		})
 	routes = append(routes, Route{"GET", base})
 
 	sort.Slice(routes, func(i, j int) bool {
@@ -487,7 +496,7 @@ func (g *generator) writeWorkerBody(m *pyModule, storeNames map[string]string,
 	store := storeNames[primaryStore]
 	m.blank()
 	m.line("def summarise() -> int:")
-	m.linef("    return len(%s.keys())", store)
+	m.linef(`    return len(%s.scan(ProjectionExpression="id").get("Items", []))`, store)
 
 	if topicID != "" {
 		m.blank()

@@ -382,7 +382,15 @@ func boolToRune(b bool) rune {
 func (m *pyModule) clientExpr(rng *rand.Rand, kind string) string {
 	switch kind {
 	case "persist_kv":
-		return m.hint("KVStore")
+		// A key/value store is a boto3 Table. There is no cloudcc class for it:
+		// the compiled program gets a Table too, bound to the provisioned
+		// table, so every method boto3 has keeps working.
+		if rng.Intn(2) == 0 {
+			m.importStd("import boto3")
+			return "boto3.resource(" + m.quote("dynamodb") + ").Table(" + m.quote("items") + ")"
+		}
+		m.importStd("from boto3 import resource")
+		return "resource(" + m.quote("dynamodb") + ").Table(" + m.quote("items") + ")"
 
 	case "persist_secret":
 		return m.hint("Secret")
@@ -435,5 +443,6 @@ func (m *pyModule) clientExpr(rng *rand.Rand, kind string) string {
 			return "StrictRedis()"
 		}
 	}
-	return m.hint("KVStore")
+	m.importStd("import boto3")
+	return "boto3.resource(" + m.quote("dynamodb") + ").Table(" + m.quote("items") + ")"
 }

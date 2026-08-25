@@ -7,7 +7,7 @@ from fastapi import FastAPI
 import cloudcompiler as cloudcc
 
 app = FastAPI()
-pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("pets"), id="petsByOwner")
 cloudcc.expose(app, id="pet-api")
 ```
 

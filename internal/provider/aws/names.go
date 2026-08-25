@@ -29,6 +29,18 @@ func EnvECRRepo(id string) string { return "CLOUDCC_ECR_" + sanitize.EnvVar(id) 
 // be pointed at an AWS emulator with no code change (D15).
 const EnvEndpointOverride = "CLOUDCC_AWS_ENDPOINT_URL"
 
+// EnvLogDestination tells the injected runtime where this unit's logs are
+// meant to go, so it can install the right handler before user code loads.
+//
+// It is a binding rather than something the runtime infers, because inferring
+// it would mean sniffing the environment -- which is exactly what compiling is
+// supposed to remove.
+const EnvLogDestination = "CLOUDCC_LOG_DESTINATION"
+
+// EnvUnitID names the execution unit a process is running as. A module shared
+// between units cannot know which one is importing it, so the environment says.
+const EnvUnitID = "CLOUDCC_UNIT"
+
 // Concrete resource kinds. A resource Key's Kind is one of these, which is
 // what keeps intent nodes and resource nodes from ever colliding.
 const (

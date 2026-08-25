@@ -123,6 +123,8 @@ const workerPolicy = new aws.iam.RolePolicy("worker", {
 const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_UNIT: `api`,
 };
 
 const apiFn = new aws.lambda.Function("api", {
@@ -167,6 +169,8 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
 const workerEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_UNIT: `worker`,
 };
 
 const workerFn = new aws.lambda.Function("worker", {

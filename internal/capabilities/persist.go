@@ -4,6 +4,7 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/compiler"
 	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/provider/aws"
 	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 )
 
@@ -100,6 +101,51 @@ func findOtherKind(ctx *compiler.Context, id, kind string) (string, bool) {
 	return "", false
 }
 
+// topicRequires reads the requirement set from the wrapped Topic()'s
+// arguments, falling back to the defaults a bare Topic() has always meant:
+// fan-out, unordered, at-least-once, which is SNS.
+func topicRequires(args map[string]any) ir.TopicRequires {
+	d := aws.DefaultTopicRequirements()
+	out := ir.TopicRequires{
+		Subscribers:  d.Subscribers,
+		Ordering:     d.Ordering,
+		Delivery:     d.Delivery,
+		MaxMessageKB: d.MaxMessageKB,
+	}
+	str := func(key string, into *string) {
+		if v, ok := args[key].(string); ok {
+			*into = v
+		}
+	}
+	str("subscribers", &out.Subscribers)
+	str("ordering", &out.Ordering)
+	str("delivery", &out.Delivery)
+	if v, ok := args["replay"].(bool); ok {
+		out.Replay = v
+	}
+	if v, ok := args["retention_hours"].(int); ok {
+		out.RetentionHours = v
+	}
+	if v, ok := args["max_message_kb"].(int); ok {
+		out.MaxMessageKB = v
+	}
+	return out
+}
+
+// requirementsOf converts the IR's copy back into the provider's type. They are
+// separate on purpose: the IR is provider-agnostic (D7), and a second provider
+// would read the same requirements and reach different services.
+func requirementsOf(r ir.TopicRequires) aws.TopicRequirements {
+	return aws.TopicRequirements{
+		Subscribers:    r.Subscribers,
+		Ordering:       r.Ordering,
+		Delivery:       r.Delivery,
+		Replay:         r.Replay,
+		RetentionHours: r.RetentionHours,
+		MaxMessageKB:   r.MaxMessageKB,
+	}
+}
+
 // PubSubPlugin turns pubsub_topic hints into Topic intents and records which
 // units publish to and subscribe from them.
 type PubSubPlugin struct{ base }
@@ -117,9 +163,29 @@ func (p *PubSubPlugin) Transform(ctx *compiler.Context) error {
 
 		if _, seen := ctx.Graph.Intent(topic.Key()); !seen {
 			cfg := ctx.Config.Lookup(config.KindPubSub, id)
-			if h.ClientType != "" && !ctx.Config.HasExplicitType(config.KindPubSub, id) {
-				cfg.Type = h.ClientType
+			topic.Requires = topicRequires(h.ClientArgs)
+
+			// The backing is chosen from the requirements, not configured.
+			// A type in cloudcc.yaml is checked against them rather than
+			// obeyed: everywhere else the file is the stronger layer because
+			// the choice is between variants that behave alike, but SNS and a
+			// FIFO queue do not behave alike, and a file that overrode this
+			// would be asking for messages to arrive out of order.
+			choice, err := aws.SelectTopicBacking(requirementsOf(topic.Requires))
+			if err != nil {
+				ctx.Diags.Errorf(ctx.HintPos(h), config.KindPubSub,
+					"topic %q: %s", id, err.Error())
+			} else if ctx.Config.HasExplicitType(config.KindPubSub, id) {
+				if err := aws.TopicSatisfies(cfg.Type, requirementsOf(topic.Requires)); err != nil {
+					ctx.Diags.Errorf(ctx.HintPos(h), config.KindPubSub,
+						"topic %q: %s", id, err.Error())
+				}
+				topic.Because = choice.Because
+			} else {
+				cfg.Type = choice.Type
+				topic.Because = choice.Because
 			}
+
 			if err := topic.Configure(cfg); err != nil {
 				return err
 			}

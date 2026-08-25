@@ -10,9 +10,12 @@
  *
  * Most capabilities are deliberately absent from the pairs below, and that is
  * the design rather than a gap. A program that hands `persist` an ioredis
- * client or a pg Pool gets one of the same type back once compiled, so there
- * is no second implementation to keep in step. Only the capabilities with no
- * standard client need a class here, and only those can drift.
+ * client, a pg Pool, a DynamoDBClient or an S3Client gets one of the same type
+ * back once compiled, so there is no second implementation to keep in step.
+ *
+ * The list shrank by two when the key/value store and the file store stopped
+ * being classes this SDK supplies. That is the direction of travel: every pair
+ * removed from here is a pair that can no longer drift.
  */
 
 import assert from "node:assert/strict";
@@ -40,8 +43,6 @@ test("the compiler's shim templates are reachable", () => {
 /** SDK class -> [shim module, shim class]. Named alike on purpose; the mapping
  *  is explicit anyway so a rename cannot pass silently. */
 const PAIRS = [
-  [cloudcc.KVStore, "kv", "KVStore"],
-  [cloudcc.FileStore, "fs", "FileStore"],
   [cloudcc.Secret, "secret", "Secret"],
   [cloudcc.Topic, "pubsub", "Topic"],
   [cloudcc.Gateway, "expose", "Gateway"],
@@ -49,7 +50,7 @@ const PAIRS = [
 
 /** Shims that hand back the library's own client. Nothing to compare
  *  method-by-method; what matters is that they still export connect(). */
-const TYPE_PRESERVING = ["redis_ioredis", "redis_node", "orm_pg", "orm_knex"];
+const TYPE_PRESERVING = ["kv", "fs", "redis_ioredis", "redis_node", "orm_pg", "orm_knex"];
 
 /**
  * Public methods of a shim class, read from source.

@@ -4,21 +4,26 @@ Write a plain Python application. Add a few hints. Get infrastructure.
 
 ```python
 # app.py
+import json
+
+import boto3
 from fastapi import FastAPI, HTTPException
+
 import cloudcompiler as cloudcc
 
 app = FastAPI()
 
-pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")  # -> DynamoDB
-cloudcc.expose(app, id="pet-api")                            # -> API Gateway v2 + Lambda
+table = boto3.resource("dynamodb").Table("pets")
+pets = cloudcc.persist(table, id="petsByOwner")  # -> DynamoDB
+cloudcc.expose(app, id="pet-api")                # -> API Gateway v2 + Lambda
 
 
 @app.get("/pets/{pet_id}")
 def get_pet(pet_id: str):
-    pet = pets.get(pet_id)
-    if pet is None:
+    item = pets.get_item(Key={"id": pet_id}).get("Item")
+    if item is None:
         raise HTTPException(status_code=404, detail="no such pet")
-    return pet
+    return json.loads(item["pet"])
 ```
 
 ```console
@@ -132,9 +137,23 @@ docs  = cloudcc.persist(Path("./itemDocs"), id="itemDocs")
 | `sqlalchemy.create_engine("postgresql…")` | RDS Postgres |
 | `sqlalchemy.create_engine("mysql…")` | RDS MySQL |
 | `pathlib.Path(...)` | S3, as a `cloudpathlib.S3Path` |
-| `cloudcc.KVStore()` | DynamoDB |
-| `cloudcc.Topic()` | SNS + subscriptions |
+| `boto3.resource("dynamodb").Table(...)` | DynamoDB, as a `Table` |
+| `cloudcc.Topic()` | SNS, SQS or Kinesis |
 | `cloudcc.Secret()` | Secrets Manager |
+
+Where logs go is configuration rather than code:
+
+```yaml
+logging:
+  type: cloudwatch     # the only destination implemented
+  retention_days: 14
+```
+
+`datadog` and `honeycomb` are recognised and refused rather than ignored, so
+choosing one is a clear error instead of a key that silently does nothing. The
+seam for a vendor is the destination, not the call sites: nothing in an
+application changes when this does, which is the property that makes the
+integration worth routing through a compiler at all.
 
 `persist` is **type-preserving**: it returns exactly what you gave it. Uncompiled
 it *is* the object you passed — your program talks to a local Redis, a local
@@ -142,8 +161,15 @@ Postgres, a local directory. Compiled, the same expression becomes a client of
 the same type pointed at AWS. There is no parallel API to learn and none for us
 to keep in step with yours.
 
-Where the ecosystem has no standard client — a key/value store, a topic, a
-secret — the SDK supplies a typed one, wrapped by the same verb.
+**The SDK supplies no data-store classes.** A store is declared by wrapping the
+library you already use, because a class of ours would be a dialect nobody else
+speaks and its methods would have to be kept in step with the injected
+runtime's forever. The two things it does supply — a topic and a secret — are
+not stores: neither has a client to wrap.
+
+The cost is that an uncompiled run needs a real endpoint for each store: a local
+Redis, a local Postgres, a local DynamoDB. That was already true of everything
+except the key/value store, which has stopped being the exception.
 
 Two rules follow from the hints being read rather than run:
 

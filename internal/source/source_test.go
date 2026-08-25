@@ -168,7 +168,7 @@ func TestModulePaths(t *testing.T) {
 }
 
 func TestQueryFindsCalls(t *testing.T) {
-	f := &File{Path: "a.py", Content: []byte("import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n")}
+	f := &File{Path: "a.py", Content: []byte("import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"petsByOwner\")\n")}
 	if err := f.ParsePython(); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestQueryFindsCalls(t *testing.T) {
 	})
 	// The nested constructor is a call too, and the query is expected to see
 	// both: reading what persist wraps is the whole point of it being there.
-	want := []string{"cloudcc.persist", "cloudcc.KVStore"}
+	want := []string{"cloudcc.persist", `boto3.resource("dynamodb").Table`, "boto3.resource"}
 	if !reflect.DeepEqual(fns, want) {
 		t.Errorf("query captured %v, want %v", fns, want)
 	}

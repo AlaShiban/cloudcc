@@ -52,6 +52,7 @@ probe_service() {
     lambda)         aws_local lambda list-functions           >/dev/null 2>&1 ;;
     apigatewayv2)   aws_local apigatewayv2 get-apis           >/dev/null 2>&1 ;;
     secretsmanager) aws_local secretsmanager list-secrets     >/dev/null 2>&1 ;;
+    logs)           aws_local logs describe-log-groups        >/dev/null 2>&1 ;;
     *)              return 1 ;;
   esac
 }

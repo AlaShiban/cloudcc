@@ -44,6 +44,14 @@ func RuntimeFiles() (map[string][]byte, error) {
 		if err != nil || d.IsDir() {
 			return err
 		}
+		// Never ship compiled bytecode. The template tree is embedded
+		// wholesale, so anything that runs one of these modules in place --
+		// a test loading it by path, someone poking at it -- leaves a
+		// __pycache__ that would otherwise travel into every bundle, stale by
+		// definition and for whatever interpreter happened to write it.
+		if isBytecode(p) {
+			return nil
+		}
 		data, rerr := templateFS.ReadFile(p)
 		if rerr != nil {
 			return rerr
@@ -58,6 +66,12 @@ func RuntimeFiles() (map[string][]byte, error) {
 		return nil, fmt.Errorf("the %s templates were not embedded", RuntimePackage)
 	}
 	return out, nil
+}
+
+// isBytecode reports whether a path is compiled Python rather than source.
+func isBytecode(p string) bool {
+	return strings.HasSuffix(p, ".pyc") ||
+		strings.Contains(p, "/__pycache__/")
 }
 
 // UnitTemplateData is what the per-unit templates are rendered against.

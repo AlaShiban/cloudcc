@@ -24,6 +24,12 @@ var CorpusSeeds = []int64{
 	// SQLAlchemy driver-qualified URL. TestCorpusCoversEveryClientShape is
 	// what says whether this list is still complete.
 	30, 96,
+	// Added when cloudcc.KVStore() was replaced by a boto3 Table. Removing a
+	// client shape moves every later draw from the generator's rng, so seeds
+	// that used to cover `redis.Redis(` and `postgresql+psycopg://` stopped
+	// doing so -- which the coverage test caught rather than letting two
+	// detector paths go quietly untested.
+	4, 18, 34,
 }
 
 // TestCorpus is the permanent one: twenty fixed programs, compiled and checked
@@ -164,7 +170,8 @@ func walk(t *testing.T, root, dir string, out map[string]string) {
 // wraps, each of these is a distinct path through the detector -- so a corpus
 // that misses one is not testing the thing that decides what gets provisioned.
 var clientShapes = []string{
-	"KVStore(",
+	`boto3.resource("dynamodb").Table(`,
+	`resource("dynamodb").Table(`,
 	"Secret(",
 	"Topic(",
 	"Path(",

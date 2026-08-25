@@ -16,12 +16,11 @@ from fastapi import FastAPI, HTTPException
 
 import cloudcompiler as cloudcc
 
-from mega.caching import prices, region_for
 from mega.cloudsdk import presign_upload
 from mega.jobs import settle_order
 from mega.logs import slog
 from mega.messaging import announce
-from mega.nosql import cache, documents, orders_table
+from mega.nosql import cache, documents, orders
 from mega.orm import engine
 from mega.settings import settings
 from mega.storage import recent
@@ -48,7 +47,7 @@ def get_item(item_id: str) -> dict:
     if doc is None:
         raise HTTPException(status_code=404, detail="no such item")
 
-    doc["price"] = prices.get_or_create(f"price:{item_id}", lambda: _price(item_id))
+    doc["price"] = _price(item_id)
     cache.set(f"item:{item_id}", str(doc), ex=60)
     return {"source": "store", "item": doc}
 
@@ -69,7 +68,7 @@ def place_order(order: OrderPlaced) -> dict:
     every one of them carries a typed payload -- which is what lets the
     compiler check that the worker on the other end agrees.
     """
-    orders_table.put_item(
+    orders.put_item(
         Item={
             "order_id": order.order_id,
             "customer_id": order.customer_id,
@@ -85,9 +84,3 @@ def place_order(order: OrderPlaced) -> dict:
 @app.get("/receipts")
 def receipts() -> dict:
     return {"receipts": recent()}
-
-
-@app.get("/regions/{postcode}")
-def region(postcode: str) -> dict:
-    """An in-process cache. Correct, and per-instance -- see mega/caching.py."""
-    return {"region": region_for(postcode)}

@@ -23,8 +23,8 @@ func detect(t *testing.T, path, src string) ([]sdkdetect.Hint, *diag.Diagnostics
 
 func TestDetectNamedImport(t *testing.T) {
 	hints, d := detect(t, "app.js", `
-import { persist, KVStore } from "@cloudcompiler/sdk";
-const pets = persist(new KVStore(), { id: "petsByOwner" });
+import { persist, Topic } from "@cloudcompiler/sdk";
+const pets = persist(new DynamoDBClient({}), { id: "petsByOwner" });
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -36,8 +36,8 @@ const pets = persist(new KVStore(), { id: "petsByOwner" });
 
 func TestDetectAliasedImport(t *testing.T) {
 	hints, _ := detect(t, "app.ts", `
-import { persist as store, KVStore } from "@cloudcompiler/sdk";
-const pets = store(new KVStore(), { id: "a" });
+import { persist as store, Topic } from "@cloudcompiler/sdk";
+const pets = store(new DynamoDBClient({}), { id: "a" });
 `)
 	if len(hints) != 1 || hints[0].ID() != "a" {
 		t.Fatalf("hints = %+v", hints)
@@ -47,7 +47,7 @@ const pets = store(new KVStore(), { id: "a" });
 func TestDetectNamespaceImport(t *testing.T) {
 	hints, _ := detect(t, "app.js", `
 import * as sdk from "@cloudcompiler/sdk";
-const pets = sdk.persist(new sdk.KVStore(), { id: "a" });
+const pets = sdk.persist(new sdk.Topic(), { id: "a" });
 `)
 	if len(hints) != 1 || hints[0].Func != sdkdetect.FnPersist {
 		t.Fatalf("hints = %+v", hints)
@@ -57,12 +57,12 @@ const pets = sdk.persist(new sdk.KVStore(), { id: "a" });
 // Both module systems are idiomatic and a program may mix them.
 func TestDetectRequireForms(t *testing.T) {
 	cases := map[string]string{
-		"destructured": `const { persist, KVStore } = require("@cloudcompiler/sdk");
-const pets = persist(new KVStore(), { id: "a" });`,
+		"destructured": `const { persist, Topic } = require("@cloudcompiler/sdk");
+const pets = persist(new DynamoDBClient({}), { id: "a" });`,
 		"namespace": `const sdk = require("@cloudcompiler/sdk");
-const pets = sdk.persist(new sdk.KVStore(), { id: "a" });`,
-		"renamed": `const { persist: kv, KVStore } = require("@cloudcompiler/sdk");
-const pets = kv(new KVStore(), { id: "a" });`,
+const pets = sdk.persist(new sdk.Topic(), { id: "a" });`,
+		"renamed": `const { persist: kv, Topic } = require("@cloudcompiler/sdk");
+const pets = kv(new DynamoDBClient({}), { id: "a" });`,
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -119,12 +119,12 @@ expose(app, { id: "pet-api" });
 // rediscovered.
 func TestStringLiteralForms(t *testing.T) {
 	cases := map[string]string{
-		"double":        `persist(new KVStore(), { id: "petsByOwner" })`,
-		"single":        `persist(new KVStore(), { id: 'petsByOwner' })`,
-		"template":      "persist(new KVStore(), { id: `petsByOwner` })",
-		"concatenated":  `persist(new KVStore(), { id: "pets" + "ByOwner" })`,
-		"parenthesised": `persist(new KVStore(), { id: ("pets" + "ByOwner") })`,
-		"multiline": `persist(new KVStore(), {
+		"double":        `persist(new DynamoDBClient({}), { id: "petsByOwner" })`,
+		"single":        `persist(new DynamoDBClient({}), { id: 'petsByOwner' })`,
+		"template":      "persist(new DynamoDBClient({}), { id: `petsByOwner` })",
+		"concatenated":  `persist(new DynamoDBClient({}), { id: "pets" + "ByOwner" })`,
+		"parenthesised": `persist(new DynamoDBClient({}), { id: ("pets" + "ByOwner") })`,
+		"multiline": `persist(new DynamoDBClient({}), {
     id:
       "pets" +
       "ByOwner",
@@ -133,7 +133,7 @@ func TestStringLiteralForms(t *testing.T) {
 	for name, call := range cases {
 		t.Run(name, func(t *testing.T) {
 			hints, d := detect(t, "app.js",
-				"import { persist, KVStore } from \"@cloudcompiler/sdk\";\nconst pets = "+call+";\n")
+				"import { DynamoDBClient } from \"@aws-sdk/client-dynamodb\";\nimport { persist } from \"@cloudcompiler/sdk\";\nconst pets = "+call+";\n")
 			if d.HasErrors() {
 				t.Fatalf("diagnostics: %v", d.Items())
 			}
@@ -148,9 +148,9 @@ func TestStringLiteralForms(t *testing.T) {
 // running the program, and must stay an error rather than be guessed at.
 func TestSubstitutedTemplateIsRejected(t *testing.T) {
 	_, d := detect(t, "app.js", `
-import { persist, KVStore } from "@cloudcompiler/sdk";
+import { persist, Topic } from "@cloudcompiler/sdk";
 const env = "prod";
-const pets = persist(new KVStore(), { id: `+"`pets-${env}`"+` });
+const pets = persist(new DynamoDBClient({}), { id: `+"`pets-${env}`"+` });
 `)
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "template literal") {
@@ -160,16 +160,16 @@ const pets = persist(new KVStore(), { id: `+"`pets-${env}`"+` });
 
 func TestNonLiteralIsAPreciseError(t *testing.T) {
 	_, d := detect(t, "app.js", `
-import { persist, KVStore } from "@cloudcompiler/sdk";
+import { persist, Topic } from "@cloudcompiler/sdk";
 const name = "petsByOwner";
-const pets = persist(new KVStore(), { id: name });
+const pets = persist(new DynamoDBClient({}), { id: name });
 `)
 	items := d.Items()
 	if len(items) != 1 {
 		t.Fatalf("diagnostics = %v", items)
 	}
 	got := items[0].String()
-	if !strings.HasPrefix(got, "app.js:4:43: error: id must be") {
+	if !strings.HasPrefix(got, "app.js:4:52: error: id must be") {
 		t.Errorf("the error should point at the argument: %q", got)
 	}
 	if !strings.Contains(got, "the variable name") {
@@ -215,8 +215,8 @@ const level = configValue(
 
 func TestUnknownOptionIsRejected(t *testing.T) {
 	_, d := detect(t, "app.js", `
-import { persist, KVStore } from "@cloudcompiler/sdk";
-const pets = persist(new KVStore(), { id: "a", nope: 1 });
+import { persist, Topic } from "@cloudcompiler/sdk";
+const pets = persist(new DynamoDBClient({}), { id: "a", nope: 1 });
 `)
 	items := d.Items()
 	if len(items) != 1 || !strings.Contains(items[0].Message, "not an option") {
@@ -226,11 +226,11 @@ const pets = persist(new KVStore(), { id: "a", nope: 1 });
 
 func TestUnrelatedCallsIgnored(t *testing.T) {
 	hints, d := detect(t, "app.js", `
-import { persist, KVStore } from "@cloudcompiler/sdk";
+import { persist, Topic } from "@cloudcompiler/sdk";
 import other from "other";
-other.persist(new other.KVStore(), { id: "not-ours" });
+other.persist(new other.Topic(), { id: "not-ours" });
 console.log("hello");
-const pets = persist(new KVStore(), { id: "ours" });
+const pets = persist(new DynamoDBClient({}), { id: "ours" });
 `)
 	if d.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", d.Items())
@@ -241,7 +241,7 @@ const pets = persist(new KVStore(), { id: "ours" });
 }
 
 func TestNoSDKImportMeansNoHints(t *testing.T) {
-	hints, _ := detect(t, "app.js", `const pets = persist(new KVStore(), { id: "x" });`)
+	hints, _ := detect(t, "app.js", `const pets = persist(new DynamoDBClient({}), { id: "x" });`)
 	if len(hints) != 0 {
 		t.Fatalf("hints = %+v", hints)
 	}
@@ -249,9 +249,9 @@ func TestNoSDKImportMeansNoHints(t *testing.T) {
 
 func TestTypeScriptAnnotationsDoNotHide(t *testing.T) {
 	hints, d := detect(t, "app.ts", `
-import { persist, KVStore } from "@cloudcompiler/sdk";
+import { persist, Topic } from "@cloudcompiler/sdk";
 
-const pets: KVStore = persist(new KVStore(), { id: "petsByOwner" });
+const pets: Topic = persist(new DynamoDBClient({}), { id: "petsByOwner" });
 
 export function get(id: string): Promise<unknown> {
   return pets.get(id);
@@ -279,9 +279,9 @@ function handler() {
 }
 
 func TestSpanCoversTheWholeCall(t *testing.T) {
-	src := "import { persist, KVStore } from \"@cloudcompiler/sdk\";\nconst pets = persist(new KVStore(), { id: \"petsByOwner\" });\n"
+	src := "import { DynamoDBClient } from \"@aws-sdk/client-dynamodb\";\nimport { persist } from \"@cloudcompiler/sdk\";\nconst pets = persist(new DynamoDBClient({}), { id: \"petsByOwner\" });\n"
 	hints, _ := detect(t, "app.js", src)
-	if got, want := src[hints[0].Span[0]:hints[0].Span[1]], `persist(new KVStore(), { id: "petsByOwner" })`; got != want {
+	if got, want := src[hints[0].Span[0]:hints[0].Span[1]], `persist(new DynamoDBClient({}), { id: "petsByOwner" })`; got != want {
 		t.Errorf("span text = %q, want %q", got, want)
 	}
 }
@@ -441,3 +441,48 @@ import express from "express";
 		t.Fatalf("unresolved = %+v", unresolved)
 	}
 }
+
+// A topic's arguments are its requirements, and the compiler chooses the
+// backing service from them -- so they have to survive detection. JavaScript
+// spells them camelCase and the IR uses the Python spelling, which is a
+// translation that belongs at the language seam rather than downstream.
+func TestTopicRequirementsAreReadAndTranslated(t *testing.T) {
+	hints, d := detect(t, "app.js", `
+import { Topic, persist } from "@cloudcompiler/sdk";
+const audit = persist(new Topic({ replay: true, ordering: "key", maxMessageKb: 512 }), { id: "audit" });
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if len(hints) != 1 {
+		t.Fatalf("got %d hints, want 1", len(hints))
+	}
+	got := hints[0].ClientArgs
+	for key, want := range map[string]any{
+		"replay":         true,
+		"ordering":       "key",
+		"max_message_kb": 512,
+	} {
+		if got[key] != want {
+			t.Errorf("ClientArgs[%q] = %#v, want %#v", key, got[key], want)
+		}
+	}
+}
+
+// The arguments of a library's own client are none of the compiler's business:
+// the region on a DynamoDBClient is talking to the local emulator, and reading
+// it as a declaration would be a category error.
+func TestALibraryClientsArgumentsAreNotRead(t *testing.T) {
+	hints, d := detect(t, "app.js", `
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { persist } from "@cloudcompiler/sdk";
+const pets = persist(new DynamoDBClient({ region: "eu-west-1" }), { id: "pets" });
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if hints[0].ClientArgs != nil {
+		t.Errorf("ClientArgs = %v, want nothing read", hints[0].ClientArgs)
+	}
+}
+

@@ -2,8 +2,14 @@
 
 The type of what you hand to `persist` is what decides the resource. A Redis
 client asks for ElastiCache; a SQLAlchemy engine pointed at Postgres asks for
-RDS Postgres. Uncompiled, these are exactly the clients you see -- a real local
-Redis, a real local database -- and `persist` hands each one straight back.
+RDS Postgres; a boto3 Table asks for DynamoDB. Uncompiled, these are exactly
+the clients you see -- a real local Redis, a real local database, a local
+DynamoDB -- and `persist` hands each one straight back.
+
+Note what is not here: a class of cloudcc's own for any of them. Every store
+below is the library's own client, which is why the compiled program can use
+every method those libraries have rather than the handful someone thought to
+wrap.
 """
 # Injected by cloudcc: runtime clients for this program's declared capabilities.
 from _cloudcc_runtime import fs as _cloudcc_fs
@@ -16,6 +22,7 @@ from _cloudcc_runtime import secret as _cloudcc_secret
 
 from pathlib import Path
 
+import boto3
 from redis import Redis
 from sqlalchemy import create_engine
 

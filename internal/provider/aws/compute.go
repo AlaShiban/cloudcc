@@ -47,7 +47,7 @@ func (r *Resolver) lambda(u *ir.ExecUnit) error {
 	// invocation, is what makes retention configurable and destroy clean.
 	logs := ir.NewResource(KindLogGroup, u.ID, "aws.cloudwatch.LogGroup", map[string]any{
 		"name":            "/aws/lambda/" + fnName,
-		"retentionInDays": 14,
+		"retentionInDays": r.Config.LogDestination().RetentionDays,
 	}, nil)
 	r.Program.Resolve(u.Key(), logs)
 

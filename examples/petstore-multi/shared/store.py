@@ -5,11 +5,29 @@ so the two units end up wired to a single DynamoDB table with their own
 environment bindings.
 """
 
+import json
+
+import boto3
+
 import cloudcompiler as cloudcc
 
-pets = cloudcc.persist(cloudcc.KVStore(), id="petsByOwner")
+pets = cloudcc.persist(boto3.resource("dynamodb").Table("pets"), id="petsByOwner")
 events = cloudcc.persist(cloudcc.Topic(), id="petEvents")
 
 
 def summarize(pet: dict) -> str:
     return f"{pet.get('name', 'unnamed')} ({pet.get('species', 'unknown')})"
+
+
+def read_pet(pet_id: str) -> dict | None:
+    """Both units read the table the same way, so the shape lives here."""
+    item = pets.get_item(Key={"id": pet_id}).get("Item")
+    return json.loads(item["pet"]) if item else None
+
+
+def write_pet(pet_id: str, pet: dict) -> None:
+    pets.put_item(Item={"id": pet_id, "pet": json.dumps(pet)})
+
+
+def delete_pet(pet_id: str) -> None:
+    pets.delete_item(Key={"id": pet_id})

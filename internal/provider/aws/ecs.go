@@ -50,7 +50,7 @@ func (r *Resolver) ecsServiceUnit(u *ir.ExecUnit) error {
 
 	logs := ir.NewResource(KindLogGroup, u.ID, "aws.cloudwatch.LogGroup", map[string]any{
 		"name":            "/ecs/" + sanitize.LambdaFunction(r.App, u.ID),
-		"retentionInDays": 14,
+		"retentionInDays": r.Config.LogDestination().RetentionDays,
 	}, nil)
 	r.Program.Resolve(u.Key(), logs)
 

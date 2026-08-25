@@ -19,14 +19,11 @@ psycopg-pool
 pymysql
 mysqlclient
 asyncpg
-# sqlite3 is in the standard library, and is deliberately not persistable.
 
 # --- other stores ---------------------------------------------------------
 redis
 pymongo
 boto3
-cassandra-driver
-clickhouse-driver
 
 # --- messaging ------------------------------------------------------------
 celery
@@ -37,10 +34,6 @@ kombu
 # --- task queues ----------------------------------------------------------
 rq
 dramatiq
-
-# --- caching --------------------------------------------------------------
-cachetools
-dogpile.cache
 
 # --- serialization --------------------------------------------------------
 pydantic

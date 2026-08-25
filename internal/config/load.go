@@ -12,6 +12,11 @@ import (
 // DefaultFileName is the conventional name of the configuration file.
 const DefaultFileName = "cloudcc.yaml"
 
+// DefaultLogRetentionDays is how long logs are kept when nothing says
+// otherwise. Fourteen days is long enough to investigate an incident from the
+// week before and short enough not to become a storage bill nobody chose.
+const DefaultLogRetentionDays = 14
+
 // DefaultOutDir is used when neither cloudcc.yaml nor -o specifies one.
 const DefaultOutDir = "compiled"
 
@@ -35,6 +40,7 @@ func BuiltinDefaults() map[string]KindDefault {
 		KindPubSub:        kd("sns"),
 		KindStaticUnit:    kd("s3"),
 		KindConfig:        {},
+		KindLogging:       kd("cloudwatch"),
 	}
 }
 
@@ -115,6 +121,7 @@ func (a *App) mergeFile(f *App) {
 	a.PubSub = mergeSection(a.PubSub, f.PubSub)
 	a.StaticUnits = mergeSection(a.StaticUnits, f.StaticUnits)
 	a.ConfigVars = mergeSection(a.ConfigVars, f.ConfigVars)
+	a.Logging = a.Logging.Merge(f.Logging)
 	a.PulumiParams = DeepMerge(a.PulumiParams, f.PulumiParams)
 }
 

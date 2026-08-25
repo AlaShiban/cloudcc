@@ -244,14 +244,21 @@ func (m *jsModule) options(pairs ...string) string {
 func (m *jsModule) clientExpr(rng *rand.Rand, kind string) string {
 	switch kind {
 	case "persist_kv":
-		return "new " + m.localName("KVStore") + "()"
+		// A key/value store is the AWS SDK's own client. There is no cloudcc
+		// class for it: the compiled program gets a DynamoDBClient too, with
+		// every command it sends bound to the provisioned table.
+		m.importStd(m.importFrom("{ DynamoDBClient }", "@aws-sdk/client-dynamodb"))
+		if rng.Intn(2) == 0 {
+			return "new DynamoDBClient({})"
+		}
+		return "new DynamoDBClient(" + m.options("region: "+m.quote("us-east-1")) + ")"
 	case "persist_secret":
 		return "new " + m.localName("Secret") + "()"
 	case "pubsub":
 		return "new " + m.localName("Topic") + "()"
 	case "persist_fs":
-		// Node has no pathlib, so the SDK supplies this one.
-		return "new " + m.localName("FileStore") + "()"
+		m.importStd(m.importFrom("{ S3Client }", "@aws-sdk/client-s3"))
+		return "new S3Client({})"
 
 	case "persist_orm":
 		url := []string{
@@ -274,7 +281,8 @@ func (m *jsModule) clientExpr(rng *rand.Rand, kind string) string {
 		m.importStd(m.importFrom("{ createClient }", "redis"))
 		return "createClient()"
 	}
-	return "new " + m.localName("KVStore") + "()"
+	m.importStd(m.importFrom("{ DynamoDBClient }", "@aws-sdk/client-dynamodb"))
+	return "new DynamoDBClient({})"
 }
 
 // importFrom renders a third-party import in this module's module system.
@@ -579,6 +587,12 @@ func (g *nodeGenerator) writeExposedBody(p *Program, m *jsModule, unitID string,
 	m.blank()
 
 	store := storeNames[primaryStore]
+	// The store is the AWS SDK's own client, so the commands and the item
+	// shape are the program's. A JSON string keeps numbers as numbers, which a
+	// native DynamoDB attribute would not.
+	m.importStd(m.importFrom(
+		"{ DeleteItemCommand, GetItemCommand, PutItemCommand, ScanCommand }",
+		"@aws-sdk/client-dynamodb"))
 	base := routeSet(g.rng)
 	p.RoutePrefix = base
 	var routes []Route
@@ -590,18 +604,24 @@ func (g *nodeGenerator) writeExposedBody(p *Program, m *jsModule, unitID string,
 	m.blank()
 
 	m.linef("%s.get(%s, async (req, res) => {", appVar, m.quote(base+"/:itemId"))
-	m.linef("  const found = await %s.get(req.params.itemId);", store)
-	m.line("  if (found === null || found === undefined) {")
+	m.linef("  const found = await %s.send(new GetItemCommand({", store)
+	m.line(`    TableName: "items",`)
+	m.line("    Key: { id: { S: req.params.itemId } },")
+	m.line("  }));")
+	m.line("  if (!found.Item) {")
 	m.line(`    res.status(404).json({ detail: "missing" });`)
 	m.line("    return;")
 	m.line("  }")
-	m.line("  res.json(found);")
+	m.line("  res.json(JSON.parse(found.Item.value.S));")
 	m.line("});")
 	routes = append(routes, Route{"GET", base + "/{itemId}"})
 	m.blank()
 
 	m.linef("%s.put(%s, async (req, res) => {", appVar, m.quote(base+"/:itemId"))
-	m.linef("  await %s.put(req.params.itemId, req.body);", store)
+	m.linef("  await %s.send(new PutItemCommand({", store)
+	m.line(`    TableName: "items",`)
+	m.line("    Item: { id: { S: req.params.itemId }, value: { S: JSON.stringify(req.body) } },")
+	m.line("  }));")
 	if topicID != "" {
 		m.line("  await events.publish({ id: req.params.itemId });")
 	}
@@ -611,14 +631,21 @@ func (g *nodeGenerator) writeExposedBody(p *Program, m *jsModule, unitID string,
 	m.blank()
 
 	m.linef("%s.delete(%s, async (req, res) => {", appVar, m.quote(base+"/:itemId"))
-	m.linef("  await %s.delete(req.params.itemId);", store)
+	m.linef("  await %s.send(new DeleteItemCommand({", store)
+	m.line(`    TableName: "items",`)
+	m.line("    Key: { id: { S: req.params.itemId } },")
+	m.line("  }));")
 	m.line("  res.json({ ok: true });")
 	m.line("});")
 	routes = append(routes, Route{"DELETE", base + "/{itemId}"})
 	m.blank()
 
 	m.linef("%s.get(%s, async (req, res) => {", appVar, m.quote(base))
-	m.linef("  res.json({ keys: (await %s.keys()).sort() });", store)
+	m.linef("  const page = await %s.send(new ScanCommand({", store)
+	m.line(`    TableName: "items",`)
+	m.line(`    ProjectionExpression: "id",`)
+	m.line("  }));")
+	m.line("  res.json({ keys: (page.Items ?? []).map((item) => item.id.S).sort() });")
 	m.line("});")
 	routes = append(routes, Route{"GET", base})
 	m.blank()
@@ -643,14 +670,18 @@ func (g *nodeGenerator) writeWorkerBody(m *jsModule, storeNames map[string]strin
 	primaryStore, topicID string) {
 
 	store := storeNames[primaryStore]
+	m.importStd(m.importFrom("{ ScanCommand }", "@aws-sdk/client-dynamodb"))
+	count := fmt.Sprintf(
+		"  const page = await %s.send(new ScanCommand({ TableName: \"items\", ProjectionExpression: \"id\" }));\n"+
+			"  return (page.Items ?? []).length;", store)
 	m.blank()
 	m.line("export async function summarise() {")
-	m.linef("  return (await %s.keys()).length;", store)
+	m.line(count)
 	m.line("}")
 	if !m.style.esm() {
 		m.body = m.body[:len(m.body)-3]
 		m.line("async function summarise() {")
-		m.linef("  return (await %s.keys()).length;", store)
+		m.line(count)
 		m.line("}")
 		m.line("module.exports = { summarise };")
 	}

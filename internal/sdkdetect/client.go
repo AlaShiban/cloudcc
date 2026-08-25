@@ -38,10 +38,14 @@ const (
 	LibSQLAlchemyA  = "sqlalchemy-async"
 	LibPathlib      = "pathlib"
 
+	LibBoto3DDB = "boto3-dynamodb"
+
 	LibIORedis   = "ioredis"
 	LibNodeRedis = "node-redis"
 	LibPg        = "pg"
 	LibKnex      = "knex"
+	LibAwsSdkDDB = "aws-sdk-dynamodb"
+	LibAwsSdkS3  = "aws-sdk-s3"
 )
 
 // pythonClients maps a Python constructor to the capability it declares.
@@ -61,20 +65,27 @@ var pythonClients = map[string]Client{
 	"Path":      {config.KindPersistFS, "s3", LibPathlib, "a filesystem path"},
 	"PosixPath": {config.KindPersistFS, "s3", LibPathlib, "a filesystem path"},
 
-	// Supplied by this SDK, because the ecosystem has no standard for these.
-	// They have no library: the shim's own class is the only implementation.
-	"KVStore": {config.KindPersistKV, "dynamodb", "", "a key/value store"},
-	"Topic":   {config.KindPubSub, "sns", "", "a topic"},
-	"Secret":  {config.KindPersistSecret, "secretsmanager", "", "a secret"},
+	// A key/value store is a boto3 Table. There used to be a cloudcc.KVStore
+	// class here; it is gone, because this project supplies no objects for data
+	// stores. A supplied class is a dialect nobody else speaks, and its methods
+	// have to be kept in step with the shim's forever.
+	"Table": {config.KindPersistKV, "dynamodb", LibBoto3DDB, "a DynamoDB table"},
+
+	// Supplied by this SDK: the two capabilities that are not data stores, and
+	// so have no client to wrap. They have no library -- the shim's own class
+	// is the only implementation.
+	"Topic":  {config.KindPubSub, "sns", "", "a topic"},
+	"Secret": {config.KindPersistSecret, "secretsmanager", "", "a secret"},
 }
 
 // nodeClients is the same table for JavaScript and TypeScript.
 //
-// It carries a FileStore that the Python table does not, and the asymmetry is
-// real rather than an oversight: Python has pathlib.Path, so the SDK wraps that
-// and the compiled program gets a cloudpathlib S3Path of the same shape. Node's
-// fs module is a set of functions with no object to wrap, so a file store here
-// has to be a class this package supplies.
+// Node has no pathlib and no boto3, so where Python wraps a Table or a Path,
+// Node wraps the AWS SDK client for the same service. The client is not bound
+// to one resource the way a boto3 Table is, so the shim installs a middleware
+// that rewrites the logical name the program wrote -- the id it declared -- to
+// the physical one the compiler chose. The program still names its own
+// resources, which is what makes the uncompiled run readable.
 var nodeClients = map[string]Client{
 	"Redis":        {config.KindPersistRedis, "elasticache", LibIORedis, "an ioredis client"},
 	"createClient": {config.KindPersistRedis, "elasticache", LibNodeRedis, "a node-redis client"},
@@ -90,10 +101,11 @@ var nodeClients = map[string]Client{
 	// unrecognised client is a compile error naming what is supported, which
 	// is a much better outcome than a bundle that fails on its first query.
 
-	"KVStore":   {config.KindPersistKV, "dynamodb", "", "a key/value store"},
-	"Topic":     {config.KindPubSub, "sns", "", "a topic"},
-	"Secret":    {config.KindPersistSecret, "secretsmanager", "", "a secret"},
-	"FileStore": {config.KindPersistFS, "s3", "", "a file store"},
+	"DynamoDBClient": {config.KindPersistKV, "dynamodb", LibAwsSdkDDB, "a DynamoDB client"},
+	"S3Client":       {config.KindPersistFS, "s3", LibAwsSdkS3, "an S3 client"},
+
+	"Topic":  {config.KindPubSub, "sns", "", "a topic"},
+	"Secret": {config.KindPersistSecret, "secretsmanager", "", "a secret"},
 }
 
 // LookupClient resolves a constructor name for a language.

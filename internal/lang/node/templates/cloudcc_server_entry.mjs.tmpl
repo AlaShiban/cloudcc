@@ -6,6 +6,9 @@
 // module that listened on import could not also be wrapped for Lambda. This is
 // the container's counterpart to the Lambda entry -- and to uvicorn, which
 // plays exactly this role for a Python unit.
+// First, so that logging is configured before the application module is
+// evaluated: ES modules evaluate their dependencies in source order.
+import "./_cloudcc_runtime/logs.js";
 import * as _module from "./{{.EntryFile}}";
 
 const app = _module.{{.ASGIApp}} ?? _module.default;

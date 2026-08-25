@@ -123,7 +123,7 @@ func TestMultipleUnitsShareAFile(t *testing.T) {
 		"api.py":             "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"api\")\nfrom shared.store import pets\n",
 		"worker.py":          "import cloudcompiler as cloudcc\ncloudcc.execution_unit(id=\"worker\")\nfrom shared.store import pets\n",
 		"shared/__init__.py": "",
-		"shared/store.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n",
+		"shared/store.py":    "import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"petsByOwner\")\n",
 	})
 	units := config.SortedKeys(ctx.UnitFiles)
 	if !reflect.DeepEqual(units, []string{"api", "worker"}) {
@@ -276,7 +276,7 @@ func TestStaticAssetsWrittenUnderTheirSiteRoot(t *testing.T) {
 
 func TestSourceTreeIsNeverModified(t *testing.T) {
 	root := t.TempDir()
-	src := "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"petsByOwner\")\n"
+	src := "import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"petsByOwner\")\n"
 	write(t, root, "app.py", src)
 
 	cfg := config.New()
@@ -362,7 +362,7 @@ func TestDefaultEntrypointPrefersTheExposedModule(t *testing.T) {
 		"src/svc/__init__.py": "",
 		"src/svc/api.py": "from fastapi import FastAPI\nimport cloudcompiler as cloudcc\n" +
 			"from .store import pets\napp = FastAPI()\ncloudcc.expose(app, id=\"gw\")\n",
-		"src/svc/store.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.KVStore(), id=\"pets\")\n",
+		"src/svc/store.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"pets\")\n",
 	})
 
 	unit := ctx.Graph.IntentsOfKind(config.KindExecutionUnit)[0].(*ir.ExecUnit)
@@ -380,7 +380,7 @@ func TestDefaultEntrypointPrefersTheExposedModule(t *testing.T) {
 func TestDefaultEntrypointSkipsEmptyModules(t *testing.T) {
 	ctx := harness(t, map[string]string{
 		"pkg/__init__.py": "\n\n",
-		"pkg/worker.py":   "import cloudcompiler as cloudcc\nq = cloudcc.persist(cloudcc.KVStore(), id=\"q\")\n",
+		"pkg/worker.py":   "import cloudcompiler as cloudcc\nq = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=\"q\")\n",
 	})
 	unit := ctx.Graph.IntentsOfKind(config.KindExecutionUnit)[0].(*ir.ExecUnit)
 	if unit.Entrypoint() != "pkg/worker.py" {
