@@ -19,4 +19,10 @@ Pulumi.*.yaml.bak
 # Node
 node_modules/
 sdk/node/dist/
+
+# Lockfiles are generated all over the place -- compiled output, example dirs,
+# e2e work dirs -- and none of those belong in the repo.
 package-lock.json
+# The SDK is a real published package, though, and CI installs it with
+# `npm ci`, which refuses to run without one.
+!sdk/node/package-lock.json
