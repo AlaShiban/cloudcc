@@ -50,7 +50,19 @@ from deep inside a shim and looks exactly like a product bug. Both branches now
 
 ---
 
-## 3. N5 — Node differential harness, and cross-language IR equivalence
+## 3. ~~N5 — Node differential harness, and cross-language IR equivalence~~ — DONE
+
+`CLOUDCC_DIFF_LANG=node ./tests/e2e/differential.sh 1 2 3` reports identical
+behaviour before and after compiling, and
+`TestTheTwoFrontendsProduceTheSameIntents` compiles the same application written
+in both languages and compares the intent layer field by field. Both run in CI.
+
+The equivalence test was checked against deliberate mutations -- dropping a
+capability from one side, adding a route to one side -- and catches each.
+
+### What it looked like before
+
+
 
 **Scope:** the same uncompiled-vs-compiled comparison Python has, for Node, plus
 a check that both languages produce the same IR for equivalent programs.
@@ -100,25 +112,21 @@ back, that is the problem to solve first, not the client table entry.
 
 ---
 
-## 5. The generator only emits Python
+## 5. ~~The generator only emits Python~~ — DONE
 
-Left over from N2. `internal/fuzz` generates Python programs; there is no Node
-renderer. Consequences:
+`internal/fuzz/node.go` generates Node programs planting the same ground truth,
+so both languages are checked by one oracle. 23 pinned corpus seeds
+(`NodeCorpusSeeds`), a shape-coverage test over client and import spellings, and
+a 1000-seed sweep, all green. `genprogram -lang node` drives the differential
+harness.
 
-- `TestCorpus` and `TestSweep` exercise only the Python frontend
-- `TestCorpusCoversEveryClientShape` pins Python client spellings only; the Node
-  table (`nodeClients` in `internal/sdkdetect/client.go`) has no equivalent
-- §3 is blocked on this
-
-The generator is already structured for it: `internal/fuzz/generate.go` builds a
-language-neutral shape and `internal/fuzz/python.go` renders it. A `node.go`
-alongside would slot in. The renderer is the work; the shapes are done.
-
-Worth carrying over: the corpus is seed-pinned
-(`CorpusSeeds` in `internal/fuzz/sweep_test.go`) and the shape-coverage test is
-what keeps that hand-chosen list honest. It has already failed twice on real
-gaps — once when `persist()` started reading client types, once when async
-SQLAlchemy engines were added. Build the Node equivalent the same way.
+I had written here that "the renderer is the work; the shapes are done." That
+was optimistic: `generate.go` turned out to be Python-flavoured throughout, not
+language-neutral. The Node generator is therefore written beside the Python one
+rather than sharing its program builder — threading both through one builder
+would have changed the order the Python side draws from its rng, and that order
+is what makes the twenty pinned Python seeds reproduce. What is shared is the
+part that matters: the `Program`/`Expectations` types and the oracle.
 
 ---
 

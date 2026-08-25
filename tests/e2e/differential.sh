@@ -16,6 +16,8 @@ set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+LANGUAGE="${CLOUDCC_DIFF_LANG:-python}"
+
 SEEDS=("$@")
 if [ ${#SEEDS[@]} -eq 0 ]; then
   read -r -a SEEDS <<< "${CLOUDCC_DIFF_SEEDS:-1 2 3}"
@@ -57,12 +59,31 @@ log "building cloudcc"
 ( cd "$REPO_ROOT" && go build -o "$WORK/cloudcc" ./cmd/cloudcc )
 
 # serve starts a program and waits for it to answer.
-#   serve <dir> <module>:<app> <port> <label> [extra uv args...]
+#   serve <dir> <target> <port> <label> [extra uv args...]
+#
+# For Python the target is module:app and uvicorn does the serving. Node has no
+# uvicorn, so a launcher is written next to the program: the same arrangement,
+# since uvicorn is no more part of the application than that launcher is.
 serve() {
   local dir="$1" target="$2" port="$3" label="$4"
   shift 4
-  ( cd "$dir" && PYTHONPATH="$dir" exec uv run --quiet "$@" \
-      python -m uvicorn "$target" --host 127.0.0.1 --port "$port" --log-level error ) &
+
+  if [ "$LANGUAGE" = "node" ]; then
+    local entry="${target%%:*}" appvar="${target##*:}"
+    cat > "$dir/cloudcc_serve.mjs" <<SERVE
+const m = await import("./$entry");
+const app = m.$appvar ?? m.default;
+if (!app) {
+  console.error("the entry exports neither $appvar nor default");
+  process.exit(1);
+}
+app.listen($port, "127.0.0.1");
+SERVE
+    ( cd "$dir" && exec node cloudcc_serve.mjs ) &
+  else
+    ( cd "$dir" && PYTHONPATH="$dir" exec uv run --quiet "$@" \
+        python -m uvicorn "$target" --host 127.0.0.1 --port "$port" --log-level error ) &
+  fi
   APP_PID=$!
   if ! wait_for_http "http://127.0.0.1:$port/health" 60; then
     fail "the $label program did not start on port $port"
@@ -114,17 +135,27 @@ for seed in "${SEEDS[@]}"; do
   mkdir -p "$src"
 
   manifest="$case_dir/manifest.json"
-  ( cd "$REPO_ROOT" && go run ./internal/fuzz/cmd/genprogram -seed "$seed" -out "$src" ) > "$manifest"
+  ( cd "$REPO_ROOT" && go run ./internal/fuzz/cmd/genprogram \
+      -lang "$LANGUAGE" -seed "$seed" -out "$src" ) > "$manifest"
 
   entry="$(jq -r .entry_module "$manifest")"
   appvar="$(jq -r .app_var "$manifest")"
   unit="$(jq -r .unit "$manifest")"
+  LANGUAGE="$(jq -r '.language // "python"' "$manifest")"
   target="$entry:$appvar"
   log "unit $unit, serving $target"
 
   # ---------------------------------------------------------- A: as written
   log "running the program as written, against the SDK's local emulations"
   rm -rf "$case_dir/local-state"
+  if [ "$LANGUAGE" = "node" ]; then
+    # The program as written imports the real SDK, so it has to be installed --
+    # from the working tree, not a registry, so this tests what is in the repo.
+    ( cd "$REPO_ROOT/sdk/node" && npm install --silent --no-audit --no-fund >/dev/null \
+        && npm run build >/dev/null )
+    ( cd "$src" && npm install --silent --no-audit --no-fund \
+        express "$REPO_ROOT/sdk/node" >/dev/null )
+  fi
   CLOUDCC_LOCAL_STATE_DIR="$case_dir/local-state" \
     serve "$src" "$target" "$PORT_A" "uncompiled" \
       --with fastapi --with uvicorn --with-editable "$REPO_ROOT/sdk/python"

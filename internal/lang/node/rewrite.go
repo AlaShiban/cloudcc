@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -164,7 +165,7 @@ func rewrite(f *source.File, hints []sdkdetect.Hint, esm bool) error {
 	}
 
 	if len(needed) > 0 {
-		content = insertImports(content, needed, esm)
+		content = insertImports(content, needed, esm, f.Path)
 	}
 	return f.SetContent(content)
 }
@@ -214,22 +215,29 @@ func renderCall(target shimTarget, h sdkdetect.Hint) string {
 // insertImports adds the runtime imports at the top of the module, in whichever
 // module system the unit uses. Which system that is was decided once, from
 // package.json and the file extension, rather than re-derived here.
-func insertImports(content []byte, needed map[string]string, esm bool) []byte {
+//
+// path is the importing file's location within the unit, which decides how many
+// levels up the injected runtime is. A JavaScript import is resolved relative
+// to the importing file, so a module in a subdirectory needs "../" for each
+// level; Python never needed this because its imports are package-absolute.
+func insertImports(content []byte, needed map[string]string, esm bool, path string) []byte {
 	aliases := make([]string, 0, len(needed))
 	for alias := range needed {
 		aliases = append(aliases, alias)
 	}
 	sort.Strings(aliases)
 
+	prefix := runtimePrefix(path)
+
 	var block strings.Builder
 	block.WriteString("// Injected by cloudcc: runtime clients for this program's declared capabilities.\n")
 	for _, alias := range aliases {
 		if esm {
-			fmt.Fprintf(&block, "import * as %s from \"./%s/%s.js\";\n",
-				alias, RuntimePackage, needed[alias])
+			fmt.Fprintf(&block, "import * as %s from \"%s%s/%s.js\";\n",
+				alias, prefix, RuntimePackage, needed[alias])
 		} else {
-			fmt.Fprintf(&block, "const %s = require(\"./%s/%s.js\");\n",
-				alias, RuntimePackage, needed[alias])
+			fmt.Fprintf(&block, "const %s = require(\"%s%s/%s.js\");\n",
+				alias, prefix, RuntimePackage, needed[alias])
 		}
 	}
 	block.WriteString("\n")
@@ -258,6 +266,16 @@ func insertionPoint(content []byte) int {
 		break
 	}
 	return at
+}
+
+// runtimePrefix is the relative path from a file to its unit's root, where the
+// injected runtime lives: "./" at the root, "../" one level down, and so on.
+func runtimePrefix(path string) string {
+	depth := strings.Count(filepath.ToSlash(path), "/")
+	if depth == 0 {
+		return "./"
+	}
+	return strings.Repeat("../", depth)
 }
 
 func jsString(s string) string {
