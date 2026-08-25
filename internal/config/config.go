@@ -31,6 +31,11 @@ const (
 	KindPubSub        = "pubsub"
 	KindStaticUnit    = "static_unit"
 	KindConfig        = "config"
+	// KindLogging is where a unit's logs go. Unlike every other kind it is
+	// declared in configuration rather than in code: a program does not choose
+	// its log destination, an operator does, and the call sites are identical
+	// either way.
+	KindLogging = "logging"
 )
 
 // Kinds is the canonical, sorted list of capability kinds.
@@ -43,6 +48,7 @@ var Kinds = []string{
 	KindPersistORM,
 	KindPersistRedis,
 	KindPersistSecret,
+	KindLogging,
 	KindPubSub,
 	KindStaticUnit,
 }
@@ -75,6 +81,9 @@ type ResourceConfig struct {
 	// Value is the literal default for a config value.
 	Value string `yaml:"value,omitempty" json:"value,omitempty"`
 	// StaticFiles / SharedFiles / IndexDocument configure a static unit.
+	// RetentionDays is how long logs are kept. Zero means the default.
+	RetentionDays int `yaml:"retention_days,omitempty" json:"retention_days,omitempty"`
+
 	StaticFiles   string `yaml:"static_files,omitempty" json:"static_files,omitempty"`
 	SharedFiles   string `yaml:"shared_files,omitempty" json:"shared_files,omitempty"`
 	IndexDocument string `yaml:"index_document,omitempty" json:"index_document,omitempty"`
@@ -105,6 +114,9 @@ func (rc ResourceConfig) Merge(other ResourceConfig) ResourceConfig {
 	if other.IndexDocument != "" {
 		out.IndexDocument = other.IndexDocument
 	}
+	if other.RetentionDays != 0 {
+		out.RetentionDays = other.RetentionDays
+	}
 	out.EnvironmentVariables = mergeStringMap(rc.EnvironmentVariables, other.EnvironmentVariables)
 	out.PulumiParams = DeepMerge(rc.PulumiParams, other.PulumiParams)
 	return out
@@ -131,6 +143,11 @@ type App struct {
 	PubSub         map[string]ResourceConfig `yaml:"pubsub,omitempty"`
 	StaticUnits    map[string]ResourceConfig `yaml:"static_units,omitempty"`
 	ConfigVars     map[string]ResourceConfig `yaml:"config,omitempty"`
+
+	// Logging is app-wide rather than keyed by id: there is one answer to
+	// "where do the logs go" for an application, and a per-unit override would
+	// mostly be a way to lose half of them.
+	Logging ResourceConfig `yaml:"logging,omitempty"`
 
 	// PulumiParams applies to every generated resource.
 	PulumiParams map[string]any `yaml:"pulumi_params,omitempty" json:"pulumi_params,omitempty"`
@@ -192,6 +209,16 @@ func (a *App) setSection(kind, id string, rc ResourceConfig) {
 	case IsPersistKind(kind):
 		assign(&a.Persisted)
 	}
+}
+
+// LogDestination resolves where this application's logs go: the builtin
+// default, with anything the file said layered over it.
+func (a *App) LogDestination() ResourceConfig {
+	out := a.Defaults[KindLogging].ResourceConfig.Merge(a.Logging)
+	if out.RetentionDays == 0 {
+		out.RetentionDays = DefaultLogRetentionDays
+	}
+	return out
 }
 
 // Lookup resolves the layered configuration for one resource. The returned

@@ -99,6 +99,19 @@ if skip_unless_service lambda; then
   pass "L4 lambda: function provisioned"
 fi
 
+# Where logs go is configuration rather than code, so nothing in the program
+# mentions it and nothing else in this harness would notice if it were dropped.
+if skip_unless_service logs; then
+  RETENTION="$(aws_local logs describe-log-groups \
+    --log-group-name-prefix "/aws/lambda/" \
+    | jq -r '[.logGroups[] | select(.retentionInDays != null) | .retentionInDays][0] // ""')"
+  [ -n "$RETENTION" ] \
+    || fail "no log group carried a retention policy; logging.retention_days was dropped"
+  [ "$RETENTION" = "14" ] \
+    || fail "log retention is $RETENTION days, expected the configured 14"
+  pass "L4 logs: the configured retention reached the log group"
+fi
+
 if skip_unless_service apigatewayv2; then
   aws_local apigatewayv2 get-apis | grep -q "$APP_NAME" \
     || warn "no HTTP API matching $APP_NAME was found; the emulator may not implement apigatewayv2 fully"

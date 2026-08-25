@@ -67,6 +67,21 @@ var typeSupport = map[string]map[string]Level{
 		"s3": Supported,
 	},
 	config.KindConfig: {},
+	// Where logs go. CloudWatch is the only destination that works, and the
+	// two vendors are listed rather than omitted so that choosing one is a
+	// clean error naming what is implemented -- the same treatment `eks` gets
+	// above, and for the same reason: a configuration key that is silently
+	// dropped leaves a program looking configured when it is not.
+	//
+	// This is also where an extensibility model would attach. The seam is the
+	// destination, not the call sites: nothing in an application changes when
+	// this does, which is the property that makes a vendor integration worth
+	// having at all.
+	config.KindLogging: {
+		"cloudwatch": Supported,
+		"datadog":    NotYetSupported,
+		"honeycomb":  NotYetSupported,
+	},
 }
 
 // Support reports how well the provider supports typ for kind.

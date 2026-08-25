@@ -2,6 +2,9 @@
 //
 // Do not edit: recompiling overwrites this file.
 
+// First, so that logging is configured before the application module is
+// evaluated: ES modules evaluate their dependencies in source order.
+import "./_cloudcc_runtime/logs.js";
 import * as _cloudccPubsub from "./_cloudcc_runtime/pubsub.js";
 {{if .ASGIApp}}import serverless from "serverless-http";
 {{end}}

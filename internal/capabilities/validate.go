@@ -27,6 +27,12 @@ func NewValidatePlugin() *ValidatePlugin {
 }
 
 func (p *ValidatePlugin) Transform(ctx *compiler.Context) error {
+	// Logging is checked separately because it is the one kind declared only in
+	// configuration: there is no intent to walk, so nothing below would ever
+	// look at it, and an unrecognised destination would be silently dropped --
+	// leaving an application that looks configured and is not.
+	p.validateLogging(ctx)
+
 	for _, in := range ctx.Graph.Intents() {
 		kind := in.Capability()
 		typ := in.Config().Type
@@ -46,6 +52,27 @@ func (p *ValidatePlugin) Transform(ctx *compiler.Context) error {
 		}
 	}
 	return nil
+}
+
+func (p *ValidatePlugin) validateLogging(ctx *compiler.Context) {
+	dest := ctx.Config.LogDestination()
+	switch aws.Support(config.KindLogging, dest.Type) {
+	case aws.Supported:
+	case aws.NotYetSupported:
+		ctx.Diags.Errorf(diag.Position{}, config.KindLogging,
+			"logging.type %q is not yet supported; %s is the only destination "+
+				"implemented. The seam for a vendor is the destination, not your "+
+				"call sites -- nothing in the application changes when this does",
+			dest.Type, strings.Join(aws.SupportedTypes(config.KindLogging), ", "))
+	default:
+		ctx.Diags.Errorf(diag.Position{}, config.KindLogging,
+			"unknown logging.type %q; supported destinations are %s",
+			dest.Type, strings.Join(aws.SupportedTypes(config.KindLogging), ", "))
+	}
+	if dest.RetentionDays < 0 {
+		ctx.Diags.Errorf(diag.Position{}, config.KindLogging,
+			"logging.retention_days is %d; it must be positive", dest.RetentionDays)
+	}
 }
 
 // DescribeSupport renders the provider's type matrix, used by documentation

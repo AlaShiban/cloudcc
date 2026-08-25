@@ -181,7 +181,9 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
     CLOUDCC_CONFIG_LOG_LEVEL: "info",
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
     CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
+    CLOUDCC_UNIT: `api`,
     LOG_LEVEL: "info",
 };
 
@@ -228,7 +230,9 @@ const workerEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
     CLOUDCC_FS_PETAUDIT_BUCKET: pulumi.interpolate`${petAuditBucket.bucket}`,
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
     CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
+    CLOUDCC_UNIT: `worker`,
 };
 
 const workerFn = new aws.lambda.Function("worker", {

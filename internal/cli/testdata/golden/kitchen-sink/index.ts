@@ -276,6 +276,7 @@ const reporterEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
     CLOUDCC_FS_ITEMDOCS_BUCKET: pulumi.interpolate`${itemDocsBucket.bucket}`,
     CLOUDCC_KV_CATALOGUE_TABLE: pulumi.interpolate`${catalogueTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
     CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s[0].secretArn)}`,
     CLOUDCC_ORM_SHOPDB_URL: pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`,
     CLOUDCC_REDIS_ITEMCACHE_ENDPOINT: pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n[0].address)}`,
@@ -283,6 +284,7 @@ const reporterEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_REDIS_ITEMCACHE_TLS: "false",
     CLOUDCC_SECRET_SIGNINGKEY_ARN: pulumi.interpolate`${signingKeySecret.arn}`,
     CLOUDCC_TOPIC_ITEMEVENTS_ARN: pulumi.interpolate`${itemEventsTopic.arn}`,
+    CLOUDCC_UNIT: `reporter`,
 };
 
 const reporterTask = new aws.ecs.TaskDefinition("reporter", {
@@ -472,6 +474,7 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_CONFIG_STRIPE_KEY: pulumi.interpolate`${stripeKeySecret}`,
     CLOUDCC_FS_ITEMDOCS_BUCKET: pulumi.interpolate`${itemDocsBucket.bucket}`,
     CLOUDCC_KV_CATALOGUE_TABLE: pulumi.interpolate`${catalogueTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
     CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s[0].secretArn)}`,
     CLOUDCC_ORM_SHOPDB_URL: pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`,
     CLOUDCC_REDIS_ITEMCACHE_ENDPOINT: pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n[0].address)}`,
@@ -479,6 +482,7 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_REDIS_ITEMCACHE_TLS: "false",
     CLOUDCC_SECRET_SIGNINGKEY_ARN: pulumi.interpolate`${signingKeySecret.arn}`,
     CLOUDCC_TOPIC_ITEMEVENTS_ARN: pulumi.interpolate`${itemEventsTopic.arn}`,
+    CLOUDCC_UNIT: `api`,
 };
 
 const apiFn = new aws.lambda.Function("api", {

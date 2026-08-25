@@ -73,6 +73,8 @@ const mainPolicy = new aws.iam.RolePolicy("main", {
 const mainEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_UNIT: `main`,
 };
 
 const mainFn = new aws.lambda.Function("main", {

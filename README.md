@@ -141,6 +141,20 @@ docs  = cloudcc.persist(Path("./itemDocs"), id="itemDocs")
 | `cloudcc.Topic()` | SNS, SQS or Kinesis |
 | `cloudcc.Secret()` | Secrets Manager |
 
+Where logs go is configuration rather than code:
+
+```yaml
+logging:
+  type: cloudwatch     # the only destination implemented
+  retention_days: 14
+```
+
+`datadog` and `honeycomb` are recognised and refused rather than ignored, so
+choosing one is a clear error instead of a key that silently does nothing. The
+seam for a vendor is the destination, not the call sites: nothing in an
+application changes when this does, which is the property that makes the
+integration worth routing through a compiler at all.
+
 `persist` is **type-preserving**: it returns exactly what you gave it. Uncompiled
 it *is* the object you passed — your program talks to a local Redis, a local
 Postgres, a local directory. Compiled, the same expression becomes a client of

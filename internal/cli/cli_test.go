@@ -83,6 +83,38 @@ func TestExitCodes(t *testing.T) {
 	}
 }
 
+// Choosing a log destination that is planned but unimplemented must stop the
+// compile, not fall back to CloudWatch. Nothing in the program mentions
+// logging, so this is the one capability whose configuration could be dropped
+// without anything noticing until the logs failed to arrive.
+func TestAnUnimplementedLogDestinationIsRefused(t *testing.T) {
+	src := writeApp(t, map[string]string{
+		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.Topic(), id=\"pets\")\n",
+		"cloudcc.yaml": "app: demo\nprovider: aws\nlogging:\n  type: datadog\n",
+	})
+	_, stderr, code := run(t, src, "-o", t.TempDir())
+	if code != ExitCompile {
+		t.Fatalf("exit %d, want %d; stderr:\n%s", code, ExitCompile, stderr)
+	}
+	if !strings.Contains(stderr, "datadog") || !strings.Contains(stderr, "cloudwatch") {
+		t.Errorf("the error should name the choice and what is implemented:\n%s", stderr)
+	}
+}
+
+func TestAnUnknownLogDestinationIsRefused(t *testing.T) {
+	src := writeApp(t, map[string]string{
+		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.Topic(), id=\"pets\")\n",
+		"cloudcc.yaml": "app: demo\nprovider: aws\nlogging:\n  type: nonsense\n",
+	})
+	_, stderr, code := run(t, src, "-o", t.TempDir())
+	if code != ExitCompile {
+		t.Fatalf("exit %d, want %d; stderr:\n%s", code, ExitCompile, stderr)
+	}
+	if !strings.Contains(stderr, "unknown logging.type") {
+		t.Errorf("stderr:\n%s", stderr)
+	}
+}
+
 func TestNonLiteralArgumentIsReportedWithAPosition(t *testing.T) {
 	src := writeApp(t, map[string]string{
 		"app.py": "import cloudcompiler as cloudcc\nname = \"x\"\npets = cloudcc.persist(boto3.resource(\"dynamodb\").Table(\"t\"), id=name)\n",
