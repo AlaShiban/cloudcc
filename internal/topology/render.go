@@ -46,9 +46,20 @@ func (v View) Name() string {
 // PNGFile is the rendered image's name for an application's declared topology.
 func PNGFile(app string) string { return app + ".png" }
 
-// ArchPNGFile is the rendered image of what it compiled to. A separate name so
-// the two never overwrite each other.
+// ArchPNGFile is the architecture picture: the diagrams render, with the
+// provider's own icons.
 func ArchPNGFile(app string) string { return app + "-architecture.png" }
+
+// ResourcePNGFile is graphviz's render of the exhaustive resource graph.
+//
+// It has its own name because it is a different picture, and one name for two
+// pictures is a trap. When diagrams is not installed the -architecture.png
+// simply does not exist, which is visible; if the fallback wrote to that name
+// instead, the file would be there and would quietly be a dependency graph --
+// and someone would review it believing they were looking at the architecture.
+// This project refuses silent substitutions elsewhere (D9, D15) and a diagram
+// is not an exception.
+func ResourcePNGFile(app string) string { return app + "-resources.png" }
 
 // Result reports what was written.
 type Result struct {
@@ -100,8 +111,9 @@ func Write(p *ir.Program, out afero.Fs, outDir string, opts Options) (Result, er
 			result.Notice = notice
 		} else {
 			result.Files = append(result.Files, ArchPNGFile(opts.App))
-			return result, nil
 		}
+		// Either way, graphviz still renders the exhaustive graph below, under
+		// its own name.
 	}
 
 	dotBin, err := exec.LookPath("dot")
@@ -115,7 +127,7 @@ func Write(p *ir.Program, out afero.Fs, outDir string, opts Options) (Result, er
 
 	png := PNGFile(opts.App)
 	if opts.View == Resources {
-		png = ArchPNGFile(opts.App)
+		png = ResourcePNGFile(opts.App)
 	}
 	cmd := exec.Command(dotBin, "-Tpng", "-o", filepath.Join(outDir, png))
 	cmd.Stdin = bytes.NewReader(dot)

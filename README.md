@@ -274,6 +274,13 @@ plumbing included — the picture to review before a deploy.
 | `architecture.mmd` / `.dot` | every resolved resource, in Mermaid and Graphviz |
 | `architecture.py` | the *architecture*, as a [`diagrams`](https://pypi.org/project/diagrams) program — one AWS icon per capability |
 
+Three images, each under its own name and never substituted for one another:
+`<app>.png` (declared topology), `<app>-resources.png` (graphviz's render of
+every resource) and `<app>-architecture.png` (the icon diagram). If `diagrams`
+is not installed the last one is simply absent — which is visible. Writing the
+resource graph under that name instead would leave a file that *looks* like the
+architecture and is not.
+
 ```console
 $ cloudcc diagram ./app --view architecture --format mermaid
 $ pip install diagrams && python compiled/myapp/architecture.py

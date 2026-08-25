@@ -123,7 +123,38 @@ func TestTheTwoViewsWriteDifferentFiles(t *testing.T) {
 	if tm == am || td == ad {
 		t.Fatalf("the views share a filename: %s/%s and %s/%s", tm, td, am, ad)
 	}
-	if PNGFile("demo") == ArchPNGFile("demo") {
-		t.Error("the two PNGs would overwrite each other")
+	names := map[string]string{
+		"topology":     PNGFile("demo"),
+		"architecture": ArchPNGFile("demo"),
+		"resources":    ResourcePNGFile("demo"),
+	}
+	seen := map[string]string{}
+	for what, name := range names {
+		if other, clash := seen[name]; clash {
+			t.Errorf("%s and %s would both write %s", what, other, name)
+		}
+		seen[name] = what
+	}
+}
+
+// The architecture picture and the exhaustive resource graph are different
+// pictures, so they get different names.
+//
+// When diagrams is not installed, -architecture.png simply does not exist,
+// which is visible. If graphviz's render of the resource graph took that name
+// instead, the file would be there and would quietly be a dependency graph --
+// and someone would review it believing they were looking at the architecture.
+//
+// This is not hypothetical: four stale fallback renders were sent for review
+// as though they were the icon diagrams, and the name is what made them
+// indistinguishable at a glance.
+func TestTheFallbackRenderDoesNotClaimTheArchitectureName(t *testing.T) {
+	if ResourcePNGFile("demo") == ArchPNGFile("demo") {
+		t.Fatal("graphviz's exhaustive render must not be written under the " +
+			"architecture picture's name: one name for two pictures is a trap")
+	}
+	if !strings.Contains(ResourcePNGFile("demo"), "resources") {
+		t.Errorf("ResourcePNGFile = %q; the name should say what it is",
+			ResourcePNGFile("demo"))
 	}
 }
