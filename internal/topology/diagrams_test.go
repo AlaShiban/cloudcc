@@ -62,20 +62,40 @@ func TestEveryDrawnNodeIsImported(t *testing.T) {
 	}
 }
 
-func TestResourcesAreClusteredByExecutionUnit(t *testing.T) {
+// This file draws the architecture, not the resource graph: one icon per
+// capability, and none for the supporting cast. Nobody draws the execution role
+// when they sketch a service on a whiteboard, and a picture in which a
+// three-service application arrives as ten icons is not one anybody reads
+// twice. The exhaustive view lives in architecture.mmd.
+func TestOnlyThePrincipalServiceOfEachCapabilityIsDrawn(t *testing.T) {
 	p := archProgram(t)
 	got := string(Python(p, Options{App: "demo", View: Resources}))
 
-	if !strings.Contains(got, `with Cluster("main"):`) {
-		t.Errorf("a unit's resources should be grouped:\n%s", got)
+	if !strings.Contains(got, `Lambda("main`) {
+		t.Errorf("the unit's compute should be drawn:\n%s", got)
 	}
-	// A shared store belongs to no unit, and boxing it inside one would imply
-	// an ownership that is not there.
-	lines := strings.Split(got, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "Dynamodb(") && strings.HasPrefix(line, "        ") {
-			t.Errorf("a shared store should not be inside a unit's cluster: %q", line)
+	if !strings.Contains(got, `Dynamodb("pets`) {
+		t.Errorf("the store should be drawn:\n%s", got)
+	}
+	for _, supporting := range []string{"IAMRole", "IAMPermissions", "CloudwatchLogs"} {
+		if strings.Contains(got, supporting) {
+			t.Errorf("%s is supporting cast and belongs in architecture.mmd, "+
+				"not in the architecture picture:\n%s", supporting, got)
 		}
+	}
+}
+
+// The label says what the program called it and which service it became --
+// "petsByOwner / DynamoDB", not "petsByOwner / aws.dynamodb".
+func TestLabelsNameTheServiceNotThePulumiType(t *testing.T) {
+	p := archProgram(t)
+	got := string(Python(p, Options{App: "demo", View: Resources}))
+
+	if !strings.Contains(got, `\nDynamoDB"`) {
+		t.Errorf("expected a service label:\n%s", got)
+	}
+	if strings.Contains(got, "aws.dynamodb\"") {
+		t.Errorf("a Pulumi type leaked into a label:\n%s", got)
 	}
 }
 

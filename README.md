@@ -272,19 +272,27 @@ plumbing included — the picture to review before a deploy.
 |---|---|
 | `topology.mmd` / `.dot` | the declared capabilities, in Mermaid and Graphviz |
 | `architecture.mmd` / `.dot` | every resolved resource, in Mermaid and Graphviz |
-| `architecture.py` | the same, as a [`diagrams`](https://pypi.org/project/diagrams) program — AWS icons, clustered by execution unit |
+| `architecture.py` | the *architecture*, as a [`diagrams`](https://pypi.org/project/diagrams) program — one AWS icon per capability |
 
 ```console
 $ cloudcc diagram ./app --view architecture --format mermaid
 $ pip install diagrams && python compiled/myapp/architecture.py
 ```
 
-`architecture.py` is worth having as a *file* rather than only an image: it is
-the one output someone can edit — move a cluster, drop the IAM noise, annotate
-it for a review — without hand-drawing anything, and it diffs in a pull request
-like the rest of the compiled tree. A PNG is rendered during the compile when
-`diagrams` and graphviz are both installed, and skipped with a one-line note
-when they are not. Nothing is downloaded to draw a picture nobody asked for.
+The two `architecture` files answer different questions, and it matters which
+you reach for. The Mermaid and DOT ones are **exhaustive** — every resource that
+will exist, roles and log groups and route tables included — and the e2e harness
+checks them against what the stack actually created. `architecture.py` is the
+**architecture**: one icon per capability, the service it resolved to, and the
+edges the program itself declared. Nobody draws the execution role when they
+sketch a service on a whiteboard.
+
+It is worth having as a *file* rather than only an image: it is the one output
+someone can edit — regroup it, annotate it for a review — without hand-drawing
+anything, and it diffs in a pull request like the rest of the compiled tree. A
+PNG is rendered during the compile when `diagrams` and graphviz are both
+installed, and skipped with a one-line note when they are not. Nothing is
+downloaded to draw a picture nobody asked for.
 
 All three are rendered from the program's own edges rather than a structure
 built for drawing, so none can show something that was not compiled or omit
