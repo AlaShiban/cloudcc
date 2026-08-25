@@ -96,8 +96,8 @@ func SelectTopicBacking(r TopicRequirements) (TopicChoice, error) {
 	}
 	if r.Ordering == "total" && r.Replay {
 		return TopicChoice{}, fmt.Errorf(
-			"ordering=\"total\" with replay=True means a single-shard stream, which is a "+
-				"throughput ceiling rather than a design. Relax to ordering=\"key\": "+
+			"ordering=\"total\" with replay=True means a single-shard stream, which is a " +
+				"throughput ceiling rather than a design. Relax to ordering=\"key\": " +
 				"messages sharing a key stay ordered, and the stream can grow")
 	}
 	if r.RetentionHours > maxSQSHours && !r.Replay {

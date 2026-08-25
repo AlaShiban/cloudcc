@@ -485,4 +485,3 @@ const pets = persist(new DynamoDBClient({ region: "eu-west-1" }), { id: "pets" }
 		t.Errorf("ClientArgs = %v, want nothing read", hints[0].ClientArgs)
 	}
 }
-

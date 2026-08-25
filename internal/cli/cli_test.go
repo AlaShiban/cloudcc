@@ -89,7 +89,7 @@ func TestExitCodes(t *testing.T) {
 // without anything noticing until the logs failed to arrive.
 func TestAnUnimplementedLogDestinationIsRefused(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.Topic(), id=\"pets\")\n",
+		"app.py":       "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.Topic(), id=\"pets\")\n",
 		"cloudcc.yaml": "app: demo\nprovider: aws\nlogging:\n  type: datadog\n",
 	})
 	_, stderr, code := run(t, src, "-o", t.TempDir())
@@ -103,7 +103,7 @@ func TestAnUnimplementedLogDestinationIsRefused(t *testing.T) {
 
 func TestAnUnknownLogDestinationIsRefused(t *testing.T) {
 	src := writeApp(t, map[string]string{
-		"app.py": "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.Topic(), id=\"pets\")\n",
+		"app.py":       "import cloudcompiler as cloudcc\npets = cloudcc.persist(cloudcc.Topic(), id=\"pets\")\n",
 		"cloudcc.yaml": "app: demo\nprovider: aws\nlogging:\n  type: nonsense\n",
 	})
 	_, stderr, code := run(t, src, "-o", t.TempDir())
