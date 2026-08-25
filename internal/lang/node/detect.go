@@ -399,7 +399,99 @@ func resolveClient(f *source.File, call *ts.Node, h *sdkdetect.Hint) *hintError 
 	if client.Type == "" {
 		h.ClientType = sdkdetect.RelationalType(firstStringArg(f, ctorCall))
 	}
+
+	// The SDK's own clients take declarations rather than connection settings,
+	// so their arguments are the compiler's business. A library's are not: the
+	// region on a DynamoDBClient is talking to the local emulator, and where
+	// that is has nothing to do with what gets provisioned.
+	if client.Library == "" {
+		args, err := clientOptions(f, ctorCall)
+		if err != nil {
+			return err
+		}
+		h.ClientArgs = args
+	}
 	return nil
+}
+
+// clientOptions reads the literal options of an SDK client constructor:
+// `new Topic({ ordering: "key", replay: true })`.
+//
+// The keys are camelCase in JavaScript and snake_case in Python, and the
+// compiler works in the Python spelling because the IR does. Translating here
+// rather than downstream keeps the language seam where it belongs.
+func clientOptions(f *source.File, call *ts.Node) (map[string]any, *hintError) {
+	if call == nil {
+		return nil, nil
+	}
+	args := call.ChildByFieldName("arguments")
+	if args == nil {
+		return nil, nil
+	}
+	out := map[string]any{}
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		obj := args.NamedChild(i)
+		if obj.Kind() != "object" {
+			continue
+		}
+		for j := uint(0); j < obj.NamedChildCount(); j++ {
+			pair := obj.NamedChild(j)
+			if pair.Kind() != "pair" {
+				continue
+			}
+			name := strings.Trim(f.Text(pair.ChildByFieldName("key")), `"'`)
+			value := pair.ChildByFieldName("value")
+			if name == "" || value == nil {
+				continue
+			}
+			literal, err := optionLiteral(f, name, value)
+			if err != nil {
+				return nil, err
+			}
+			out[snakeCase(name)] = literal
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// optionLiteral evaluates one option. Strings, booleans and numbers are the
+// whole vocabulary: these are declarations, not expressions.
+func optionLiteral(f *source.File, name string, n *ts.Node) (any, *hintError) {
+	if s, ok := stringLiteral(f, n); ok {
+		return s, nil
+	}
+	switch n.Kind() {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	case "number":
+		if v, err := strconv.Atoi(strings.TrimSpace(f.Text(n))); err == nil {
+			return v, nil
+		}
+	}
+	return nil, &hintError{
+		fmt.Sprintf("%s must be a literal, not %s (SDK arguments are read at "+
+			"compile time and never executed)", name, describe(f, n)),
+		int(n.StartByte()),
+	}
+}
+
+// snakeCase converts a JavaScript option name to the spelling the IR uses.
+func snakeCase(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if r >= 'A' && r <= 'Z' {
+			b.WriteByte('_')
+			b.WriteRune(r - 'A' + 'a')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // positionalArg returns the nth positional argument of a call.

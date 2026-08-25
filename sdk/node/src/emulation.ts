@@ -108,8 +108,37 @@ export type Subscriber = (message: Json) => unknown;
  * Locally a publisher and a subscriber in the same program behave as they will
  * once they are separate Lambdas.
  */
+/**
+ * What a topic must guarantee. The compiler picks the service that meets it.
+ *
+ * This is the inversion that makes pub/sub different from storage: for a store
+ * the library picks the capability and cloudcc.yaml picks between variants that
+ * behave alike, but here the variants do not behave alike -- SNS cannot replay,
+ * SQS cannot fan out, and FIFO everything costs throughput. Choosing by hand
+ * means knowing all of that; declaring the requirement means the compiler has
+ * to. A set no service can meet is a compile error naming what to relax.
+ */
+export interface TopicRequirements {
+  /** "many" fans out; "one" is a queue with a single consumer. */
+  subscribers?: "many" | "one";
+  /** "none", "key" (ordered within a key), or "total" (globally ordered). */
+  ordering?: "none" | "key" | "total";
+  delivery?: "at_least_once" | "exactly_once";
+  /** Whether a new subscriber can read messages sent before it existed. */
+  replay?: boolean;
+  retentionHours?: number;
+  maxMessageKb?: number;
+}
+
 export class Topic {
   readonly #subscribers: Subscriber[] = [];
+
+  /**
+   * The requirements are read by the compiler, not by this class. Locally
+   * dispatch is in order and exactly once whatever they say -- the usual
+   * bargain with an emulation: the code path is exercised, the timing is not.
+   */
+  constructor(readonly requirements: TopicRequirements = {}) {}
 
   /** Deliver `message` to every subscriber. */
   async publish(message: Json): Promise<void> {

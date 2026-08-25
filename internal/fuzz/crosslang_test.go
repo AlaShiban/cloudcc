@@ -38,7 +38,7 @@ docs = cloudcc.persist(Path("./docs"), id="itemDocs")
 signing = cloudcc.persist(cloudcc.Secret(), id="signingKey")
 cache = cloudcc.persist(Redis(), id="sessions")
 db = cloudcc.persist(create_engine("postgresql://localhost/shop"), id="shopdb")
-events = cloudcc.persist(cloudcc.Topic(), id="itemEvents")
+events = cloudcc.persist(cloudcc.Topic(subscribers="many", ordering="none"), id="itemEvents")
 
 LEVEL = cloudcc.config_value("log_level", default="info")
 
@@ -77,7 +77,7 @@ const docs = persist(new S3Client({}), { id: "itemDocs" });
 const signing = persist(new Secret(), { id: "signingKey" });
 const cache = persist(new Redis(), { id: "sessions" });
 const db = persist(new Pool({ connectionString: "postgresql://localhost/shop" }), { id: "shopdb" });
-const events = persist(new Topic(), { id: "itemEvents" });
+const events = persist(new Topic({ subscribers: "many", ordering: "none" }), { id: "itemEvents" });
 
 const LEVEL = configValue("log_level", { default: "info" });
 

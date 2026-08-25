@@ -292,12 +292,85 @@ func resolveClient(f *source.File, call *ts.Node, h *sdkdetect.Hint) *hintError 
 	h.Capability = client.Capability
 	h.ClientType = client.Type
 	h.ClientLibrary = client.Library
+
+	// The SDK's own clients take declarations rather than connection settings,
+	// so their arguments are the compiler's business. A library's are not:
+	// Redis(host=...) is talking to the local Redis, and where that is has
+	// nothing to do with what gets provisioned.
+	if client.Library == "" {
+		args, err := clientKeywordArgs(f, ctorCall)
+		if err != nil {
+			return err
+		}
+		h.ClientArgs = args
+	}
 	if client.Type == "" {
 		// A library that speaks to several engines still supplies the default,
 		// read from the connection URL it was given.
 		h.ClientType = sdkdetect.RelationalType(firstStringArg(f, ctorCall))
 	}
 	return nil
+}
+
+// clientKeywordArgs reads the literal keyword arguments of an SDK client
+// constructor.
+//
+// Every one of them is a declaration the compiler acts on, so a non-literal is
+// an error for the same reason `id=name` is: reading it would mean running the
+// program.
+func clientKeywordArgs(f *source.File, call *ts.Node) (map[string]any, *hintError) {
+	if call == nil {
+		return nil, nil
+	}
+	args := call.ChildByFieldName("arguments")
+	if args == nil {
+		return nil, nil
+	}
+	out := map[string]any{}
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		arg := args.NamedChild(i)
+		if arg.Kind() != "keyword_argument" {
+			continue
+		}
+		name := f.Text(arg.ChildByFieldName("name"))
+		value := arg.ChildByFieldName("value")
+		if value == nil {
+			continue
+		}
+		literal, err := clientLiteral(f, name, value)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = literal
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// clientLiteral evaluates one such argument. Strings, booleans and integers
+// are the whole vocabulary: these are declarations, not expressions.
+func clientLiteral(f *source.File, name string, n *ts.Node) (any, *hintError) {
+	if s, ok := stringLiteral(f, n); ok {
+		return s, nil
+	}
+	switch n.Kind() {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	case "integer":
+		v, err := strconv.Atoi(strings.TrimSpace(f.Text(n)))
+		if err == nil {
+			return v, nil
+		}
+	}
+	return nil, &hintError{
+		msgf("%s must be a literal, not %s (SDK arguments are read at compile "+
+			"time and never executed)", name, describe(f, n)),
+		n.StartByte(),
+	}
 }
 
 // positionalArg returns the nth positional argument of a call.

@@ -8,6 +8,7 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/compiler"
 	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/diag"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 	"github.com/cloudcompiler/cloudcc/internal/provider/aws"
 )
 
@@ -44,7 +45,8 @@ func (p *ValidatePlugin) Transform(ctx *compiler.Context) error {
 			// nothing to say
 		case aws.NotYetSupported:
 			ctx.Diags.Errorf(diag.Position{}, kind,
-				"%q is not yet supported for %s (declared for %q)", typ, kind, in.Key().ID)
+				"%q is not yet supported for %s (declared for %q)%s",
+				typ, kind, in.Key().ID, why(in))
 		default:
 			ctx.Diags.Errorf(diag.Position{}, kind,
 				"unknown type %q for %s (declared for %q); supported types are %s",
@@ -52,6 +54,17 @@ func (p *ValidatePlugin) Transform(ctx *compiler.Context) error {
 		}
 	}
 	return nil
+}
+
+// why explains a type the program did not name. A topic's backing is chosen
+// from its requirements, so "kinesis is not yet supported" on its own would
+// leave the author looking for a word that appears nowhere in their code.
+func why(in ir.Intent) string {
+	topic, ok := in.(*ir.Topic)
+	if !ok || topic.Because == "" {
+		return ""
+	}
+	return ". cloudcc chose it because " + topic.Because
 }
 
 func (p *ValidatePlugin) validateLogging(ctx *compiler.Context) {

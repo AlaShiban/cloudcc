@@ -74,9 +74,54 @@ class Topic:
 
     Locally it fans out in process, so a publisher and a subscriber in the
     same program behave as they will once they are separate Lambdas.
+
+    **The arguments are the topic's requirements, and the compiler picks the
+    service that meets them.** This is the inversion that makes pub/sub
+    different from storage: for a store the library picks the capability and
+    cloudcc.yaml picks between variants that behave alike, but here the
+    variants do not behave alike -- SNS cannot replay, SQS cannot fan out, and
+    FIFO everything costs throughput. Choosing by hand means knowing all of
+    that. Declaring the requirement means the compiler has to.
+
+    ==========================  ================================================
+    argument                    what it decides
+    ==========================  ================================================
+    ``subscribers``             ``"many"`` fan-out, or ``"one"`` queue
+    ``ordering``                ``"none"``, ``"key"``, or ``"total"``
+    ``delivery``                ``"at_least_once"`` or ``"exactly_once"``
+    ``replay``                  whether a new subscriber can read the history
+    ``retention_hours``         how long a message is kept
+    ``max_message_kb``          the largest message you will publish
+    ==========================  ================================================
+
+    A set of requirements no service can meet is a compile error naming the
+    constraint to relax -- ``ordering="total"`` with ``replay=True`` means a
+    single-shard stream, which is a throughput ceiling rather than a design.
+
+    The defaults are what a bare ``Topic()`` has always compiled to: fan-out,
+    unordered, at-least-once, which is SNS.
+
+    Locally none of it changes anything: the arguments are read by the
+    compiler, and in-process dispatch is in order and exactly once whatever
+    they say. That is the usual bargain with an emulation -- the code path is
+    exercised, the timing is not.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        subscribers: str = "many",
+        ordering: str = "none",
+        delivery: str = "at_least_once",
+        replay: bool = False,
+        retention_hours: int = 0,
+        max_message_kb: int = 256,
+    ) -> None:
+        self.subscribers_required = subscribers
+        self.ordering = ordering
+        self.delivery = delivery
+        self.replay = replay
+        self.retention_hours = retention_hours
+        self.max_message_kb = max_message_kb
         self._subscribers: list[Callable[[dict], Any]] = []
 
     def publish(self, message: dict) -> None:

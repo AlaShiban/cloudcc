@@ -174,6 +174,15 @@ type Hint struct {
 	// Client is the source text of the wrapped client expression, kept so the
 	// rewriter knows what it is replacing.
 	Client string
+	// ClientArgs holds the literal arguments of the wrapped constructor, for
+	// the SDK-supplied clients whose arguments are declarations rather than
+	// connection settings.
+	//
+	// A Topic's arguments are its requirements -- ordering, delivery, replay --
+	// and the compiler chooses the backing service from them. Nothing reads the
+	// arguments of a library's own client: `Redis(host=...)` is talking to the
+	// local Redis, and what host it uses is none of the compiler's business.
+	ClientArgs map[string]any
 	// Args holds the resolved arguments by parameter name. String, bool and
 	// list literals are stored as Go values; pExpr parameters are stored as
 	// the verbatim source text of the expression.

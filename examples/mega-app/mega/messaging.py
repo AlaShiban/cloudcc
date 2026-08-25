@@ -52,6 +52,19 @@ to relax, not approximations:
 The alternative -- defaulting to SNS and letting the differences surface in
 production -- is the failure this project is organised against. A topic that
 silently drops ordering is a bug that reproduces once a week.
+
+**What works today:** the decision layer is implemented -- the requirements are
+read, the service is chosen from them, and an impossible set is a compile error
+naming the constraint to relax. Of the five services it can choose, only SNS is
+provisioned. Selecting one of the other four is a clean error saying which
+service was chosen and which requirement forced it:
+
+    "kinesis" is not yet supported for pubsub (declared for "auditEvents").
+    cloudcc chose it because replay=True: only a stream lets a subscriber read
+    messages sent before it existed.
+
+which is the honest position: choosing correctly and then saying so beats
+provisioning something that almost fits.
 """
 
 import aiokafka

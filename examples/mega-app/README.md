@@ -116,8 +116,12 @@ and vendors refused rather than ignored.
 
 ## What is new here beyond the current design
 
-- **`Topic[T](...)`** — a typed topic that carries its own requirements, whose
-  type parameter is the wire codec.
+- **`Topic[T](...)`** — the typed half. The requirements half is **implemented**:
+  `Topic(subscribers=…, ordering=…, delivery=…, replay=…)` is read by the
+  compiler, which picks SNS, SQS, their FIFO forms or Kinesis, or fails naming
+  the constraint to relax. Only SNS is provisioned so far; selecting another is
+  a clean error saying which requirement forced it. What is still proposed is
+  the type parameter as the wire codec.
 - **`cloudcc.TortoiseConfig`** — a typed object for an ORM whose "client" is
   otherwise an untyped dict.
 - **`cloudcc.location(store)`** — the physical bucket and prefix of a persisted

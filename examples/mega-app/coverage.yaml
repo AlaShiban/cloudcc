@@ -203,11 +203,13 @@ libraries:
     type: sns
     status: supported
     note: >-
-      Topic[T] carries the decisions that change its behaviour -- subscribers,
+      Topic carries the decisions that change its behaviour -- subscribers,
       ordering, delivery, replay, retention, message size -- and the compiler
       picks a backing service that satisfies the whole set or fails naming the
-      constraint to relax. `sns` is the resolution for the default set, not a
-      configured choice. The type parameter is the wire codec: see mega/wire.py.
+      constraint to relax. That much is implemented; `sns` is the resolution for
+      the default set rather than a configured choice, and it is the only one of
+      the five services provisioned so far. Still proposed: Topic[T], where the
+      type parameter is the wire codec. See mega/wire.py.
 
   - library: ""
     sdk_provided: true

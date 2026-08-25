@@ -60,8 +60,18 @@ var typeSupport = map[string]map[string]Level{
 		"elasticache": Supported,
 		"memorydb":    Supported,
 	},
+	// A topic's backing is chosen from the requirements the program declared,
+	// not configured -- see SelectTopicBacking. The four beyond SNS are listed
+	// because the selector can reach them, and a requirement set that resolves
+	// to one must be a clean error naming what it selected and why, rather than
+	// a quiet fall back to SNS. A topic that silently drops ordering is a bug
+	// that reproduces once a week.
 	config.KindPubSub: {
-		"sns": Supported,
+		"sns":      Supported,
+		"sns_fifo": NotYetSupported,
+		"sqs":      NotYetSupported,
+		"sqs_fifo": NotYetSupported,
+		"kinesis":  NotYetSupported,
 	},
 	config.KindStaticUnit: {
 		"s3": Supported,

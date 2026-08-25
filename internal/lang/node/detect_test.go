@@ -441,3 +441,48 @@ import express from "express";
 		t.Fatalf("unresolved = %+v", unresolved)
 	}
 }
+
+// A topic's arguments are its requirements, and the compiler chooses the
+// backing service from them -- so they have to survive detection. JavaScript
+// spells them camelCase and the IR uses the Python spelling, which is a
+// translation that belongs at the language seam rather than downstream.
+func TestTopicRequirementsAreReadAndTranslated(t *testing.T) {
+	hints, d := detect(t, "app.js", `
+import { Topic, persist } from "@cloudcompiler/sdk";
+const audit = persist(new Topic({ replay: true, ordering: "key", maxMessageKb: 512 }), { id: "audit" });
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if len(hints) != 1 {
+		t.Fatalf("got %d hints, want 1", len(hints))
+	}
+	got := hints[0].ClientArgs
+	for key, want := range map[string]any{
+		"replay":         true,
+		"ordering":       "key",
+		"max_message_kb": 512,
+	} {
+		if got[key] != want {
+			t.Errorf("ClientArgs[%q] = %#v, want %#v", key, got[key], want)
+		}
+	}
+}
+
+// The arguments of a library's own client are none of the compiler's business:
+// the region on a DynamoDBClient is talking to the local emulator, and reading
+// it as a declaration would be a category error.
+func TestALibraryClientsArgumentsAreNotRead(t *testing.T) {
+	hints, d := detect(t, "app.js", `
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { persist } from "@cloudcompiler/sdk";
+const pets = persist(new DynamoDBClient({ region: "eu-west-1" }), { id: "pets" });
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if hints[0].ClientArgs != nil {
+		t.Errorf("ClientArgs = %v, want nothing read", hints[0].ClientArgs)
+	}
+}
+
