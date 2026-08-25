@@ -1,0 +1,5 @@
+# A single application with units in two languages. Nothing here says so: the
+# frontend is chosen per execution unit from its entrypoint's extension, so a
+# Python worker beside a Node API is not a special case.
+app: mixed
+provider: aws

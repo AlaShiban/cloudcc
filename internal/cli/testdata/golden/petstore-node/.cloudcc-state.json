@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "app": "petstore-node",
+  "fingerprint": "43c94bf5a901cfc1645270a8e954a917f39a2617f9ecfef2a8d6654c61981c99",
+  "units": [
+    "main"
+  ]
+}
