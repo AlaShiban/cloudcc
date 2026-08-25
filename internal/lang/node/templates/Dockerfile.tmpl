@@ -15,4 +15,4 @@ RUN npm install --omit=dev
 COPY . .
 
 EXPOSE 8080
-CMD ["node", "{{.EntryFile}}"]
+{{if .ASGIApp}}CMD ["node", "cloudcc_server_entry.mjs"]{{else}}CMD ["node", "{{.EntryFile}}"]{{end}}

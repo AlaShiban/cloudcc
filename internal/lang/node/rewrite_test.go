@@ -1,8 +1,12 @@
 package node
 
 import (
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/cloudcompiler/cloudcc/internal/ir"
+	"github.com/cloudcompiler/cloudcc/internal/lang"
 
 	"github.com/cloudcompiler/cloudcc/internal/diag"
 	"github.com/cloudcompiler/cloudcc/internal/source"
@@ -129,4 +133,65 @@ func TestTheClientLibraryPicksTheShimModule(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A container unit needs something that calls listen(). The unit's own module
+// only exports the application -- a module that listened on import could not
+// also be wrapped for Lambda -- so a generated entry does it, which is the same
+// role uvicorn plays for a Python container.
+//
+// Without this the image built and started and then served nothing, which is a
+// failure that looks like a networking problem.
+func TestAContainerUnitGetsAnEntryThatListens(t *testing.T) {
+	unit := &ir.ExecUnit{Entrypoints: []string{"server.js"}, ASGIApp: "app"}
+	unit.ID = "web"
+
+	files, err := unitFiles(unit, lang.UnitOptions{Container: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry, ok := files[ServerEntryFile]
+	if !ok {
+		t.Fatalf("a container unit should get %s: %v", ServerEntryFile, sortedFileNames(files))
+	}
+	for _, want := range []string{`import * as _module from "./server.js"`, "_module.app", "app.listen("} {
+		if !strings.Contains(string(entry), want) {
+			t.Errorf("%s should contain %q:\n%s", ServerEntryFile, want, entry)
+		}
+	}
+
+	dockerfile, ok := files[DockerfileName]
+	if !ok {
+		t.Fatal("a container unit should get a Dockerfile")
+	}
+	if !strings.Contains(string(dockerfile), `CMD ["node", "cloudcc_server_entry.mjs"]`) {
+		t.Errorf("the Dockerfile should run the generated entry:\n%s", dockerfile)
+	}
+}
+
+// A worker has no application to serve, so it runs its own module directly.
+func TestAContainerWorkerRunsItsOwnModule(t *testing.T) {
+	unit := &ir.ExecUnit{Entrypoints: []string{"worker.js"}}
+	unit.ID = "worker"
+
+	files, err := unitFiles(unit, lang.UnitOptions{Container: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files[ServerEntryFile]; ok {
+		t.Errorf("a unit with no application should not get a server entry")
+	}
+	if !strings.Contains(string(files[DockerfileName]), `CMD ["node", "worker.js"]`) {
+		t.Errorf("the Dockerfile should run the unit's own module:\n%s", files[DockerfileName])
+	}
+}
+
+func sortedFileNames(files map[string][]byte) []string {
+	out := make([]string, 0, len(files))
+	for name := range files {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
