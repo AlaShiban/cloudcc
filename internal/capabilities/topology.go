@@ -21,15 +21,27 @@ func (p *TopologyPlugin) Transform(ctx *compiler.Context) error {
 	if ctx.Failed() {
 		return nil
 	}
-	result, err := topology.Write(ctx.Graph, ctx.Out, ctx.OutDir, topology.Options{
-		App:  ctx.Config.App,
-		View: topology.Intents,
-	})
-	if err != nil {
-		return err
-	}
-	if result.Notice != "" && ctx.Notice != nil {
-		ctx.Notice(fmt.Sprintf("topology: %s", result.Notice))
+	// Both layers, every time. They answer different questions: the intent
+	// diagram is what the program declared and is the one to reason about; the
+	// architecture diagram is every resource that will exist in the account,
+	// and is the one to review before a deploy.
+	//
+	// Writing both unconditionally rather than behind a flag is deliberate. A
+	// picture of the compiled architecture that has to be asked for is a
+	// picture nobody has when they need it -- and it costs two small text
+	// files, rendered from the program's own edges, so it cannot fall out of
+	// step with what was compiled.
+	for _, view := range []topology.View{topology.Intents, topology.Resources} {
+		result, err := topology.Write(ctx.Graph, ctx.Out, ctx.OutDir, topology.Options{
+			App:  ctx.Config.App,
+			View: view,
+		})
+		if err != nil {
+			return err
+		}
+		if result.Notice != "" && ctx.Notice != nil {
+			ctx.Notice(fmt.Sprintf("%s: %s", view.Name(), result.Notice))
+		}
 	}
 	return nil
 }

@@ -37,17 +37,18 @@ hints rewritten into real AWS clients. Your own tree is never modified.
 
 ```
 compiled/
-├── index.ts              # the infrastructure, one const per resource
-├── Pulumi.yaml           # project; Pulumi.<app>.yaml is created once and kept
-├── cloudcc.yaml               # every decision this compile made, including defaults
-├── topology.mmd / .dot   # architecture diagram, rendered locally
-├── bin/package.sh        # installs dependencies and zips each unit
-├── main/                 # your code, rewritten
-│   ├── app.py            #   cloudcc.persist(...) -> _cloudcc_kv.connect(...)
-│   ├── _cloudcc_runtime/      #   the injected clients; the only place boto3 appears
+├── index.ts                  # the infrastructure, one const per resource
+├── Pulumi.yaml               # project; Pulumi.<app>.yaml is created once and kept
+├── cloudcc.yaml              # every decision this compile made, including defaults
+├── topology.mmd / .dot       # what the program declared -- the capability layer
+├── architecture.mmd / .dot   # what it compiled to -- every resource that will exist
+├── bin/package.sh            # installs dependencies and zips each unit
+├── main/                     # your code, rewritten
+│   ├── app.py                #   cloudcc.persist(...) -> _cloudcc_kv.connect(...)
+│   ├── _cloudcc_runtime/     #   the injected clients; the only place boto3 appears
 │   ├── cloudcc_lambda_entry.py
-│   └── requirements.txt  #   yours, plus what the shims need
-└── .cloudcc-state.json        # fingerprint, so `cloudcc deploy` can refuse stale output
+│   └── requirements.txt      #   yours, plus what the shims need
+└── .cloudcc-state.json       # fingerprint, so `cloudcc deploy` can refuse stale output
 ```
 
 ## Install
@@ -252,6 +253,22 @@ watch mode, no Windows.
 Routes registered on a FastAPI `APIRouter` are not discovered. They are still
 served — the gateway forwards everything to your unit — but they will not show
 up in the topology, and `cloudcc` says so.
+
+### Two diagrams, every compile
+
+Both are written for every application, because they answer different
+questions. `topology` is the handful of capability nodes the program declared —
+the picture to reason about. `architecture` is every resource that will exist
+in the account, roles and log groups and VPC plumbing included — the picture to
+review before a deploy, and the one to hand to somebody asking what this costs.
+
+```console
+$ cloudcc diagram ./app --view architecture --format mermaid
+```
+
+Both are rendered from the program's own edges rather than a structure built
+for drawing, so neither can show something that was not compiled or omit
+something that was. Rendering is entirely local (D12).
 
 ## Further reading
 

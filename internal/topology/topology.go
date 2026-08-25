@@ -37,8 +37,22 @@ type Options struct {
 }
 
 // label renders a node's caption.
+//
+// A resource's kind is a Pulumi type -- "aws.dynamodb", "aws.iam.role" -- and
+// reading a dozen of those is how a diagram stops being worth looking at. The
+// service name alone is what someone wants: the id says which resource, the
+// service says what it is.
 func label(key ir.Key) string {
-	return key.ID + "\n" + key.Kind
+	return key.ID + "\n" + serviceName(key.Kind)
+}
+
+// serviceName shortens a concrete resource kind to something readable, and
+// leaves a capability kind alone.
+func serviceName(kind string) string {
+	if !strings.HasPrefix(kind, "aws.") {
+		return kind
+	}
+	return strings.TrimPrefix(kind, "aws.")
 }
 
 // nodeID makes a key safe to use as a graph node identifier.
@@ -55,9 +69,17 @@ func nodeID(key ir.Key) string {
 	return b.String()
 }
 
-// shape maps a capability to a Mermaid node shape, so the picture carries some
+// shape maps a node's kind to a Mermaid shape, so the picture carries some
 // meaning beyond the labels.
+//
+// The two layers are drawn with the same vocabulary on purpose: a DynamoDB
+// table is a cylinder for the same reason `persist_kv` is, so the intent
+// diagram and the architecture diagram can be read side by side and the second
+// one is recognisably an expansion of the first.
 func shape(kind string) (open, close string) {
+	if strings.HasPrefix(kind, "aws.") {
+		return shape(awsCategory(kind))
+	}
 	switch {
 	case kind == config.KindExecutionUnit:
 		return "[", "]" // rectangle: compute
@@ -167,7 +189,31 @@ func DOT(p *ir.Program, opts Options) []byte {
 	return []byte(b.String())
 }
 
+// awsCategory maps a concrete resource to the capability kind it looks like,
+// so both diagrams share one visual vocabulary.
+func awsCategory(kind string) string {
+	switch kind {
+	case "aws.lambda", "aws.ecs.service", "aws.ecs.task", "aws.ecs.taskdefinition":
+		return config.KindExecutionUnit
+	case "aws.apigatewayv2", "aws.alb":
+		return config.KindExpose
+	case "aws.sns", "aws.sns.subscription", "aws.sqs", "aws.kinesis":
+		return config.KindPubSub
+	case "aws.dynamodb", "aws.s3", "aws.rds", "aws.elasticache", "aws.memorydb",
+		"aws.secretsmanager":
+		return config.KindPersistKV
+	case "aws.s3.website", "aws.s3.object":
+		return config.KindStaticUnit
+	}
+	// Everything else -- roles, policies, log groups, VPC plumbing -- is
+	// supporting cast, and drawn as a plain box.
+	return ""
+}
+
 func dotShape(kind string) string {
+	if strings.HasPrefix(kind, "aws.") {
+		return dotShape(awsCategory(kind))
+	}
 	switch {
 	case kind == config.KindExecutionUnit:
 		return "box"
