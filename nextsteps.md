@@ -228,3 +228,66 @@ The three findings worth carrying forward regardless of what gets built next:
   can all carry what goes between units, but only the first two are recoverable
   from the type alone -- which is the argument for `Topic[T]`, and for making a
   publisher/subscriber format mismatch a compile error.
+
+---
+
+## The review round: five decisions implemented
+
+Added 2026-08-25, after a review of `examples/mega-app`. Five of the eight
+decisions were removals from the example; three changed the product.
+
+### 1. No SDK objects for data stores
+
+`cloudcc.KVStore` and Node's `KVStore`/`FileStore` are gone. A store is
+declared by wrapping the client library you already use: a boto3 `Table`, a
+`DynamoDBClient`, an `S3Client`. The shims return the library's own object.
+
+The parity list is two pairs long now instead of five, and every pair removed
+is a pair that can no longer drift. A boto3 `Table` names one table, so the
+Python shim binds it; a `DynamoDBClient` names none, so the Node shim installs
+a middleware that rewrites whatever name the program wrote to the provisioned
+one. `tests/e2e/node-clients.sh` proves that against a real DynamoDB and S3,
+and the assertion was checked against a deliberate break.
+
+**The cost, stated plainly:** an uncompiled run now needs a real endpoint for
+each store. That was already true of Redis and Postgres; the key/value store
+was the exception, and buying that exception cost a class, a local file format
+and a parity test. `differential.sh` creates the local table in the emulator
+and points both halves at it with `AWS_ENDPOINT_URL`, which is the AWS SDKs'
+own variable -- so the program as written needs no cloudcc-specific
+configuration to reach it.
+
+### 2. A log destination, with one value and a seam
+
+`logging.type` in cloudcc.yaml. `cloudwatch` works; `datadog` and `honeycomb`
+are recognised and refused. Logging is the only capability declared purely in
+configuration, so nothing in the source mentions it -- which is why it needed a
+validation path of its own and a ministack assertion of its own. Both exist.
+
+The vendor seam is the destination, not the call sites: a Datadog integration
+is a different handler installed by `configure()` and nothing else changes.
+
+### 3. A topic declares its guarantees; the compiler picks the service
+
+`Topic(subscribers=…, ordering=…, delivery=…, replay=…, retention_hours=…,
+max_message_kb=…)`. The selector resolves those to SNS, SQS, either FIFO form
+or Kinesis, and refuses a set no service can meet with the constraint to relax.
+A type in cloudcc.yaml is checked against the requirements rather than obeyed,
+because unlike ElastiCache-vs-MemoryDB these variants behave differently.
+
+**Only SNS is provisioned.** Selecting one of the other four is a clean error
+naming the service and the requirement that forced it. That is the honest
+position and the obvious next piece of work: SQS is the cheapest of the four to
+add, and it needs a queue resource, an event-source mapping, and a runtime
+dispatch branch for the SQS envelope.
+
+### Smaller things this round turned up
+
+- `ministack.sh` hardcoded `uvicorn app:app`, so it could only run an example
+  whose entry was `app.py`. It asks the compiler which module holds the
+  application now, and `petstore-multi` joined CI as a result.
+- A test that loaded a Python shim by path left a `__pycache__` **inside the
+  embedded template tree**, so that `.pyc` would have shipped in every bundle.
+  The golden trees caught it. `RuntimeFiles` refuses to ship bytecode now.
+- Both "the SDK never imports an AWS client" tests grepped source text, so they
+  failed the moment the documentation had to name boto3. They read imports now.
