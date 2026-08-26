@@ -135,7 +135,7 @@ fi
 log "wiring the compiled application from stack outputs"
 eval "$(pulumi stack output --json --stack "$STACK" \
         | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "export \(.key)=\(.value|@sh)"')"
-export_cache_endpoints_local
+export_engine_bindings_local
 seed_secrets "$(pulumi stack output --json --stack "$STACK")"
 
 [ -n "${CLOUDCC_KV_PETSBYOWNER_TABLE:-}" ] || fail "the stack did not export CLOUDCC_KV_PETSBYOWNER_TABLE"

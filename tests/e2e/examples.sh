@@ -244,7 +244,7 @@ for example in "${EXAMPLES[@]}"; do
     pulumi stack output --json --stack ministack \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' \
     | tr '\n' ' ')"
-  bindings="$(cache_endpoints_local "$bindings")"
+  bindings="$(engine_bindings_local "$bindings")"
 
   # The compiled *sources*, for both languages.
   #

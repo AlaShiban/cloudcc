@@ -413,7 +413,7 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
       && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
       pulumi stack output --json --stack ministack ) \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' | tr '\n' ' ')"
-  bindings="$(cache_endpoints_local "$bindings")"
+  bindings="$(engine_bindings_local "$bindings")"
   seed_secrets "$( ( cd "$app_out_dir" \
       && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
       pulumi stack output --json --stack ministack ) )"

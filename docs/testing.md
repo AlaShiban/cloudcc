@@ -226,13 +226,19 @@ That is the same bargain as the emulator itself: a stand-in for the managed
 service rather than a mock of it. A program that talks SQL talks it to an actual
 Postgres, and a cache miss is an actual cache miss.
 
-Only one binding is redirected, and it is worth knowing which. The RDS URL the
-compiler emits is used exactly as written, because the emulator reports the
-instance's address as localhost and the container is the user and database that
-URL names -- so the binding is tested rather than bypassed. An ElastiCache node
-is reported under a name on the emulator's own container network, which resolves
-nowhere else; pointing that at the Redis container redirects the emulator, not
-the compiler.
+Both engine bindings are redirected, and it is worth being exact about what that
+costs. The emulator reports where its instance and cluster are *on its own
+network* -- a container IP on CI, localhost on a desktop Docker that publishes
+ports -- and neither is where the engine is, because the emulator runs none. So
+the harness replaces the host and port, and only those: the URL's scheme, user
+and database name are the compiler's and are used as emitted. The shape of the
+binding is tested; the address in it is not, which is the most that can be
+checked against a control plane with nothing behind it.
+
+This was written as "only the cache needs redirecting" first, which was true on
+the machine it was written on. CI reports the database at a container IP, and
+the compiled program reached the emulator's own address and was asked to
+authenticate: `fe_sendauth: no password supplied`.
 
 `examples/petstore-multi` is the example that exercises this: two units, a
 DynamoDB table, an S3 bucket, an SNS topic, a relational catalogue, a cache, a

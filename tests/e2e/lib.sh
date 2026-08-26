@@ -285,49 +285,46 @@ stop_engines() {
   docker rm -f "$CLOUDCC_PG_CONTAINER" "$CLOUDCC_REDIS_CONTAINER" >/dev/null 2>&1 || true
 }
 
-# The one binding that has to be redirected, and the reason it is the only one.
+# Point the managed-engine bindings at the containers that actually serve them.
 #
-# The compiler emits an RDS URL built from the instance's own address, and the
-# emulator reports that as localhost -- so the compiled program connects to the
-# Postgres container on the published port using the stack's URL exactly as
-# written, and the binding is tested rather than bypassed.
+# The emulator provisions an RDS instance and an ElastiCache cluster and reports
+# where they are *on its own network*: a container IP on CI, and localhost on a
+# desktop Docker that publishes ports to the host. Neither is where the engine
+# is, because the emulator runs no engine -- so both are redirected, and neither
+# is a statement about the compiler.
 #
-# An ElastiCache node is different: the emulator reports it under a name on its
-# own container network, which resolves inside the emulator and nowhere else.
-# Nothing about that name is the compiler's doing, so pointing it at the Redis
-# container is redirecting the emulator rather than working around cloudcc.
+# It is worth being exact about what that costs. The URL's scheme, user and
+# database name are the compiler's and are used as emitted; only the host and
+# port are replaced. So the shape of the binding is still tested and the address
+# in it is not, which is the most that can be checked against a control plane
+# with nothing behind it.
 #
-# Both spellings exist because the harnesses differ: one builds a string of
-# NAME=VALUE pairs to hand to `env`, the other exports them into its own shell.
+# This was localhost-only at first, which worked on the machine it was written
+# on and failed on CI with "fe_sendauth: no password supplied" -- the compiled
+# program had reached the emulator's own address and been asked to authenticate.
 
-# cache_endpoints_local <bindings-string> -- echoes it with cache hosts redirected.
-cache_endpoints_local() {
-  printf '%s' "$1" | sed -E 's/(CLOUDCC_REDIS_[A-Z0-9_]+_ENDPOINT)=[^ ]*/\1=127.0.0.1/g'
+#: Where the real engines listen, from the harness's point of view.
+CLOUDCC_PG_HOSTPORT="${CLOUDCC_PG_HOSTPORT:-127.0.0.1:5432}"
+CLOUDCC_REDIS_HOST="${CLOUDCC_REDIS_HOST:-127.0.0.1}"
+
+# engine_bindings_local <bindings-string> -- echoes it with the engines redirected.
+engine_bindings_local() {
+  printf '%s' "$1" \
+    | sed -E "s/(CLOUDCC_REDIS_[A-Z0-9_]+_ENDPOINT)=[^ ]*/\1=$CLOUDCC_REDIS_HOST/g" \
+    | sed -E "s#(CLOUDCC_ORM_[A-Z0-9_]+_URL=[a-z+]+://[^@ ]*@)[^/ ]+#\1$CLOUDCC_PG_HOSTPORT#g"
 }
 
-# export_cache_endpoints_local -- rewrites them in this shell.
-export_cache_endpoints_local() {
-  local name
+# export_engine_bindings_local -- the same, for a harness that exports them.
+export_engine_bindings_local() {
+  local name value
   for name in $(env | sed -n -E 's/^(CLOUDCC_REDIS_[A-Z0-9_]+_ENDPOINT)=.*/\1/p'); do
-    export "$name=127.0.0.1"
+    export "$name=$CLOUDCC_REDIS_HOST"
   done
-}
-
-# py_run_deps <dir> -- the uv arguments that give a Python unit its dependencies.
-#
-# From the unit's own requirements.txt rather than a list kept here. A harness
-# that hardcodes "fastapi, boto3" quietly limits which capabilities an example
-# may use: the first example to declare a Redis client fails to start with
-# ModuleNotFoundError, and the fix looks like it belongs in the example.
-#
-# uvicorn is added separately because it is the harness's, not the
-# application's -- nothing in a deployed unit imports it.
-py_run_deps() {
-  local dir="$1"
-  printf -- '--with uvicorn'
-  if [ -s "$dir/requirements.txt" ]; then
-    printf -- ' --with-requirements %s/requirements.txt' "$dir"
-  fi
+  for name in $(env | sed -n -E 's/^(CLOUDCC_ORM_[A-Z0-9_]+_URL)=.*/\1/p'); do
+    value="$(printf '%s' "${!name}" \
+      | sed -E "s#^([a-z+]+://[^@]*@)[^/]+#\1$CLOUDCC_PG_HOSTPORT#")"
+    export "$name=$value"
+  done
 }
 
 # seed_secrets gives every provisioned secret a value.
@@ -349,6 +346,23 @@ seed_secrets() {
     aws_local secretsmanager put-secret-value \
       --secret-id "$arn" --secret-string "cloudcc-emulator-secret" >/dev/null 2>&1 || true
   done
+}
+
+# py_run_deps <dir> -- the uv arguments that give a Python unit its dependencies.
+#
+# From the unit's own requirements.txt rather than a list kept here. A harness
+# that hardcodes "fastapi, boto3" quietly limits which capabilities an example
+# may use: the first example to declare a Redis client fails to start with
+# ModuleNotFoundError, and the fix looks like it belongs in the example.
+#
+# uvicorn is added separately because it is the harness's, not the
+# application's -- nothing in a deployed unit imports it.
+py_run_deps() {
+  local dir="$1"
+  printf -- '--with uvicorn'
+  if [ -s "$dir/requirements.txt" ]; then
+    printf -- ' --with-requirements %s/requirements.txt' "$dir"
+  fi
 }
 
 # require_endpoint aborts unless something is answering at the emulator.
