@@ -4,7 +4,7 @@
 GO ?= go
 BIN ?= cloudcc
 
-.PHONY: build test fmt vet check golden sdk-test e2e e2e-deploy fuzz diff doctor clean
+.PHONY: build test fmt vet check golden sdk-test e2e e2e-deploy fuzz diff load doctor clean
 
 build:              ## Build the cloudcc binary
 	$(GO) build -o $(BIN) ./cmd/cloudcc
@@ -38,6 +38,9 @@ fuzz:               ## Sweep generated programs looking for compiler bugs
 
 diff:               ## Differential test: uncompiled vs compiled behaviour
 	./tests/e2e/differential.sh
+
+load:               ## Load test: throughput before/after, and every edge checked
+	./tests/e2e/load.sh
 
 doctor: build       ## Check the local toolchain
 	./$(BIN) doctor

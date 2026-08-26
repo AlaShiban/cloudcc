@@ -13,6 +13,7 @@
 | **Generated corpus** | Twenty generated programs compiled and checked against the generator's own ground truth | none | `go test ./internal/fuzz` |
 | **Examples** | Every example run uncompiled and compiled; every response must match, and each app's architecture diagram must match the deployed stack | emulator | `./tests/e2e/examples.sh` |
 | **Differential** | The same generated program run uncompiled and compiled; every response must match | emulator | `./tests/e2e/differential.sh` |
+| **Load** | Throughput before and after compiling, and whether every edge the compiler drew carried traffic | emulator | `./tests/e2e/load.sh` |
 
 ## Examples, twice
 
@@ -112,6 +113,73 @@ real value in the cloud, and an ORM handle is a connection URL; those are not
 observably equivalent by design, so comparing them would be comparing the
 emulation, not the compiler.
 
+## Load, and what a load test is for here
+
+`tests/e2e/load.sh` asks two questions, and the second is the one a load test
+does not usually ask.
+
+**Throughput** is the familiar one: how much the application sustains, and at
+what latency. It is measured twice -- the example as written, and the compiled
+application deployed -- so the number that comes out is a *ratio*, which is what
+survives being run on a different machine. Four strategies, because a single
+"fire N requests" answers none of the questions well:
+
+| Strategy | The question |
+|---|---|
+| `steady` | What does it sustain, with everything else held still |
+| `ramp` | Where does throughput stop rising as concurrency does |
+| `burst` | What does an idle system do when traffic arrives all at once |
+| `drain` | How long does the asynchronous half take to catch up |
+
+**Connectedness** is the other one. A compiled application is a graph, and the
+failure this project is organised against is an edge that looks right in the
+plan and is dead at runtime: a store nothing wrote to, a topic whose subscriber
+never woke, a unit nobody invoked. Each of those is a green deploy and a broken
+application, and none of them shows up as an error. After the load has run,
+every runtime edge in the IR is checked for evidence that it carried something.
+
+The plan is derived from the compiler's own IR, so an example that grows a
+route grows this test with it. The only thing supplied by hand is request
+bodies, which come from the scenario files the differential suite already uses:
+no amount of reading a graph says that an order needs items in it.
+
+An edge lands in one of three states, and the third is the honest one:
+
+- **carried** -- evidence found: rows in the table, objects in the bucket, log
+  streams for the unit.
+- **dead** -- no evidence, and the unit at the edge's source did run. There was
+  an opportunity and nothing took it. This fails the run.
+- **unverified** -- no evidence, and the harness cannot tell why. A unit that
+  only *reads* a table leaves it empty, and the emulator serves no read
+  counters, so a read-only path and a dead write path look identical from
+  outside. `nomnom`'s `pricing -uses-> menuPrices` is exactly this. Calling it
+  dead would be a false accusation; calling it fine would be a check that
+  passes without looking.
+
+```sh
+./tests/e2e/load.sh                       # every deployable example
+./tests/e2e/load.sh nomnom                # one of them
+CLOUDCC_LOAD_SCALE=0.25 ./tests/e2e/load.sh   # shorter, for CI
+```
+
+Reports are written to `compiled/<app>/loadtest-{uncompiled,compiled}.json` and
+can be compared later with `loadgen -compare before.json after.json`.
+
+**Load is the heaviest thing the emulator is asked to do.** An application with
+six units has the emulator plus six Lambda containers resident at once, and on a
+Docker VM sized for ordinary use that can exhaust it -- the container is
+OOM-killed and everything after it fails unhelpfully. The harness checks that
+the emulator is still answering before it draws any conclusion, and says the run
+is *void* rather than failed, because an edge reported as dead when the emulator
+has died would send someone looking for a bug in their program. `nomnom` needs
+roughly 4-6 GB; `colima stop && colima start --memory 6` is enough.
+
+**The ratios are against the emulator, not real AWS.** Its Lambda invoke is far
+slower than the real one, which is why `nomnom` -- six units and up to three
+sequential cross-unit calls per request -- reads as a much larger cost than it
+would in an account. The number is worth watching for *change*; it is not a
+production figure.
+
 ## Probe, then assert
 
 Before asserting against a service, the harness makes one cheap call to it. A
@@ -169,6 +237,7 @@ Some tests exist for a specific failure that would otherwise be easy to ship:
 | `TestPhysicalNamesAreUnique` | Two capability ids silently sharing one cloud resource |
 | `TestGenerationIsReproducible` | A failing seed that cannot be reproduced |
 | `differential.sh` | Compilation changing what a program does |
+| `load.sh` | An edge that is wired and dead: a store nothing writes to, a subscriber that never wakes, a unit nobody invokes |
 
 ## Golden trees
 
