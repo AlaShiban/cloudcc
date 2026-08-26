@@ -119,6 +119,28 @@ observe() {
                    | jq -r '(.Contents // []) | length')"
         fi
         ;;
+      orm)
+        # ANALYZE first: reltuples is an estimate maintained by the planner and
+        # reads as zero on a table that has never been analysed, which on a
+        # database this small is every table. It costs milliseconds here and
+        # makes the number the actual row count.
+        count="$(docker exec "$CLOUDCC_PG_CONTAINER" psql -U ccadmin -d petsdb -tAc \
+          "ANALYZE; SELECT COALESCE(SUM(c.reltuples)::bigint, 0) FROM pg_class c
+             JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind = 'r';" 2>/dev/null \
+          | tail -1 | tr -dc '0-9')"
+        # tail -1 because psql echoes a command tag per statement: the output is
+        # "ANALYZE" and then the count, and feeding both to jq --argjson is a
+        # parse error a long way from the cause.
+        ;;
+      cache)
+        count="$(docker exec "$CLOUDCC_REDIS_CONTAINER" redis-cli DBSIZE 2>/dev/null | tr -dc '0-9')"
+        ;;
+      secret)
+        # Settled by the report rather than here: nothing observable is left
+        # behind by reading one.
+        count=0
+        ;;
       invocations)
         count="$(unit_invocations "$target")"
         ;;
@@ -224,7 +246,7 @@ serve() {
     " ) >"$WORK/$label.log" 2>&1 &
   else
     ( cd "$dir" && exec env $env_pairs PYTHONPATH="$dir" \
-        uv run --quiet --with fastapi --with uvicorn --with boto3 --with cloudpathlib \
+        uv run --quiet $(py_run_deps "$dir") \
           ${sdk[@]+"${sdk[@]}"} \
           python -m uvicorn "$target" --host 127.0.0.1 --port "$port" \
             --log-level warning --no-access-log ) >"$WORK/$label.log" 2>&1 &
@@ -274,6 +296,23 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
   "$WORK/loadgen" -plan -ir "$case_dir/ir.json" -seed "$scenario" -app "$EXAMPLE" \
     > "$case_dir/plan.json" || fail "$EXAMPLE: could not derive a plan"
 
+  # An application whose writes fan out to Lambda subscribers is bounded by the
+  # emulator rather than by itself: it starts a container per delivery and does
+  # not reap them, so a few hundred published messages exhaust it whatever the
+  # VM is sized at -- 2 GB, 6 GB and 10 GB all died at the same point. The
+  # symptom is an emulator killed for memory partway through, and then a
+  # subscription reported as dead because nothing was delivered after it went.
+  #
+  # So a scenario may name the scale its own fan-out can survive. It is not a
+  # statement about the application; it is the emulator's ceiling, written
+  # where the next person will see it.
+  scale="$SCALE"
+  scenario_scale="$(jq -r '.load.scale // empty' "$scenario")"
+  if [ -n "$scenario_scale" ]; then
+    scale="$(awk -v a="$SCALE" -v b="$scenario_scale" 'BEGIN{print (a<b)?a:b}')"
+    log "scale $scale (this example caps it at $scenario_scale)"
+  fi
+
   unit="$(jq -r '.unit' "$case_dir/plan.json")"
   language="$(unit_language "$WORK/cloudcc" "$src" "$unit")"
   target="$(unit_target "$WORK/cloudcc" "$src" "$unit")" \
@@ -296,6 +335,9 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
 
   # From either place: the differential suite declares them at the top level,
   # and an example it skips declares them under "load" instead.
+  ensure_engines "$scenario"
+  reset_engines "$scenario"
+
   for table in $(jq -r '[(.tables // []), (.load.tables // [])] | flatten | .[]' "$scenario"); do
     reset_local_table "$table"
   done
@@ -316,7 +358,7 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
   log "load: the example as written"
   serve "$work_src" "$language" "$target" "$PORT_A" "$EXAMPLE-before" "$(local_aws_env | tr ';' ' ')" yes
   "$WORK/loadgen" -ir "$case_dir/ir.json" -seed "$scenario" -app "$EXAMPLE" \
-    -url "http://127.0.0.1:$PORT_A" -mode uncompiled -scale "$SCALE" \
+    -url "http://127.0.0.1:$PORT_A" -mode uncompiled -scale "$scale" \
     -out "$case_dir/before.json" || fail "$EXAMPLE: the uncompiled run failed"
   stop_app
 
@@ -371,13 +413,24 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
       && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
       pulumi stack output --json --stack ministack ) \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' | tr '\n' ' ')"
+  bindings="$(cache_endpoints_local "$bindings")"
+  seed_secrets "$( ( cd "$app_out_dir" \
+      && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
+      pulumi stack output --json --stack ministack ) )"
 
+  # Again, before the compiled half. The table and the bucket differ between
+  # the two runs -- one is the local name, the other is provisioned -- but the
+  # engines are literally the same containers, because the emulator cannot run
+  # them. Rows the first half wrote would otherwise be counted twice by the
+  # second, and the two runs would differ for a reason that has nothing to do
+  # with compiling.
+  reset_engines "$scenario"
   require_emulator_still_up
   log "load: the compiled application"
   serve "$app_out_dir/$unit" "$language" "$target" "$PORT_B" "$EXAMPLE-after" \
     "$bindings CLOUDCC_AWS_ENDPOINT_URL=$MINISTACK_ENDPOINT"
   "$WORK/loadgen" -ir "$case_dir/ir.json" -seed "$scenario" -app "$EXAMPLE" \
-    -url "http://127.0.0.1:$PORT_B" -mode compiled -scale "$SCALE" \
+    -url "http://127.0.0.1:$PORT_B" -mode compiled -scale "$scale" \
     -out "$case_dir/after.json" || fail "$EXAMPLE: the compiled run failed"
   stop_app
 
@@ -386,8 +439,35 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
   # After the load, not during it: an edge is being checked for evidence that
   # it carried something, and the asynchronous half of an application is still
   # catching up when the last response goes out.
-  log "waiting for the asynchronous half to settle, then checking every edge"
-  sleep 8
+  # Wait for the evidence rather than for a fixed number of seconds.
+  #
+  # A subscriber is invoked some time after the publish that woke it, and how
+  # long depends on what else the emulator is doing. A fixed sleep is a guess
+  # that is either wasteful or wrong, and when it is wrong the harness reports
+  # a dead edge for an application that works -- which is the worst answer it
+  # can give, because it is the one people act on.
+  #
+  # So: poll until every asynchronous edge has evidence, and stop early when
+  # they all do. An edge that really is dead costs the full timeout once.
+  log "waiting for the asynchronous half to settle"
+  async_units="$(jq -r '.expect[] | select(.kind == "invocations") | .target' "$case_dir/plan.json" | sort -u)"
+  waited=0
+  while [ "$waited" -lt 90 ]; do
+    pending=0
+    for unit in $async_units; do
+      [ "$(unit_invocations "$unit")" -gt 0 ] 2>/dev/null || pending=$((pending + 1))
+    done
+    [ "$pending" -eq 0 ] && break
+    sleep 3
+    waited=$((waited + 3))
+  done
+  if [ "${pending:-0}" -gt 0 ]; then
+    log "$pending asynchronous edge(s) still had no evidence after ${waited}s"
+  else
+    log "every asynchronous edge had evidence after ${waited}s"
+  fi
+
+  log "checking every edge"
   require_emulator_still_up
   observe "$case_dir/plan.json" "$app_out_dir"
 

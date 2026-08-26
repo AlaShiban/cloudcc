@@ -119,6 +119,17 @@ func edgeArrow(kind string) string {
 	return "-->"
 }
 
+// dataSourceKinds are resources that are looked up rather than created.
+//
+// The exhaustive view answers "what will exist in the account", and a data
+// source is a query: nothing exists because of it, and it appears in no
+// deployment's resource list. Drawing it makes the diagram disagree with the
+// stack by exactly one, which is the kind of small permanent discrepancy that
+// trains people to ignore the check that found it.
+var dataSourceKinds = map[string]bool{
+	"aws.availabilityzones": true,
+}
+
 // nodes returns the keys to draw for a view, sorted.
 func nodes(p *ir.Program, view View) []ir.Key {
 	var out []ir.Key
@@ -128,6 +139,9 @@ func nodes(p *ir.Program, view View) []ir.Key {
 		}
 	} else {
 		for _, res := range p.Resources() {
+			if dataSourceKinds[res.Key().Kind] {
+				continue
+			}
 			out = append(out, res.Key())
 		}
 	}

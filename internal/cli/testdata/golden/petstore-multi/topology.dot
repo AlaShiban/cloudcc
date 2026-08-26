@@ -9,6 +9,9 @@ digraph "petstore-multi" {
     expose_pet_api [label="pet-api\\nexpose", shape=ellipse];
     persist_fs_petAudit [label="petAudit\\npersist_fs", shape=cylinder];
     persist_kv_petsByOwner [label="petsByOwner\\npersist_kv", shape=cylinder];
+    persist_orm_petsdb [label="petsdb\\npersist_orm", shape=cylinder];
+    persist_redis_petCache [label="petCache\\npersist_redis", shape=cylinder];
+    persist_secret_auditKey [label="auditKey\\npersist_secret", shape=cylinder];
     pubsub_petEvents [label="petEvents\\npubsub", shape=cds];
     static_unit_petstore_site [label="petstore-site\\nstatic_unit", shape=parallelogram];
     expose_pet_api -> execution_unit_api [label="exposes"];
@@ -16,8 +19,11 @@ digraph "petstore-multi" {
     execution_unit_worker -> pubsub_petEvents [label="subscribes", style=dashed];
     execution_unit_api -> config_log_level [label="uses"];
     execution_unit_api -> persist_kv_petsByOwner [label="uses"];
+    execution_unit_api -> persist_orm_petsdb [label="uses"];
+    execution_unit_api -> persist_redis_petCache [label="uses"];
     execution_unit_api -> pubsub_petEvents [label="uses"];
     execution_unit_worker -> persist_fs_petAudit [label="uses"];
     execution_unit_worker -> persist_kv_petsByOwner [label="uses"];
+    execution_unit_worker -> persist_secret_auditKey [label="uses"];
     execution_unit_worker -> pubsub_petEvents [label="uses"];
 }

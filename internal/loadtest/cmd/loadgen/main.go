@@ -184,10 +184,13 @@ func attachChecklist(reportPath, observedPath, out string) error {
 		// to a unit: two units sharing a table means one unit's writes would
 		// otherwise credit the other's edge. So a store edge counts as carried
 		// only when the unit at its source also ran.
-		sourceRan := counts[want.Edge+unitSuffix] > 0
-		if want.Fallback == "" {
-			sourceRan = true // no source unit to corroborate; the count is its own evidence
-		}
+		// Only an edge whose evidence is somebody else's state needs a
+		// corroborating signal. An invocations edge counts the unit itself, and
+		// an http edge counts the run: those are their own evidence, and
+		// running them through the store reasoning produced sentences about
+		// rows for edges that have no rows.
+		corroborated := want.Fallback != "" && want.Kind != "invocations" && want.Kind != "http"
+		sourceRan := !corroborated || counts[want.Edge+unitSuffix] > 0
 		if want.Fallback == report.Unit && successfulRequests(report) > 0 {
 			// The unit behind the gateway is served locally by the harness, the
 			// same way every other test here serves it, so it leaves no Lambda
@@ -197,6 +200,16 @@ func attachChecklist(reportPath, observedPath, out string) error {
 		}
 
 		switch {
+		case want.Kind == "secret":
+			// Not a gap in the run: fetching a secret leaves no trace the
+			// emulator exposes, and inventing one would mean asserting on
+			// something nothing produces.
+			observation.State = loadtest.StateUnverified
+			observation.Why = fmt.Sprintf(
+				"reading secret %q leaves no trace this harness can see. Where the "+
+					"value is used for something observable -- a signed record written to "+
+					"a store -- that write is the evidence, under its own edge", want.Target)
+
 		case !seen:
 			observation.State = loadtest.StateUnverified
 			observation.Why = "nothing looked at this edge. " + want.Why
@@ -222,7 +235,18 @@ func attachChecklist(reportPath, observedPath, out string) error {
 					"that shares it. Nothing here shows this edge carrying anything",
 				want.Target, count, want.Fallback)
 
-		case sourceRan:
+		case corroborated && !sourceRan:
+			// The store is empty and so is the unit. Blaming this edge would
+			// spread one cause across every store the unit holds; the edge that
+			// should have invoked it is the one to look at, and it is reported
+			// on its own line.
+			observation.State = loadtest.StateUnverified
+			observation.Why = fmt.Sprintf(
+				"unit %q never ran, so nothing could have reached %q. Whatever should "+
+					"have invoked that unit is the edge to look at",
+				want.Fallback, want.Target)
+
+		case corroborated && sourceRan:
 			// The store is empty and the unit that uses it ran. A unit that
 			// only reads a table leaves it empty, and an emulator that serves
 			// no read counters cannot tell that from a write path nothing
@@ -348,7 +372,13 @@ func readSeed(path string) (loadtest.Seed, error) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return loadtest.Seed{}, fmt.Errorf("reading the seed: %w", err)
 	}
-	if doc.Load != nil {
+	// The "load" block may exist only to carry settings -- a scale ceiling, the
+	// engines to start -- and still have no requests of its own. Preferring it
+	// unconditionally silently emptied the seed, which meant every request with
+	// a body went out without one: a fifth of the run came back 422 and the
+	// stores it should have written stayed empty, which then read as three dead
+	// edges.
+	if doc.Load != nil && len(doc.Load.Requests) > 0 {
 		return *doc.Load, nil
 	}
 	return loadtest.Seed{Requests: doc.Requests}, nil

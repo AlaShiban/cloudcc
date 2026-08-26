@@ -22,7 +22,17 @@ export REPO_ROOT
 
 # The AWS services the harness points at the emulator. Each becomes one
 # aws:endpoints[0].<service> setting.
-CLOUDCC_E2E_SERVICES=(dynamodb s3 sns lambda apigatewayv2 apigateway secretsmanager iam sts cloudwatchlogs logs)
+#
+# This list must match deploy.EmulatedServices, and a Go test compares them.
+# They drifted once and it was expensive to read: `cloudcc deploy` configures
+# its own endpoints, so the differential suite deployed an RDS instance
+# happily, while a harness that drives pulumi directly sent the availability
+# zone lookup to real AWS and failed with "AuthFailure: AWS was not able to
+# validate the provided access credentials" -- which looks like a credentials
+# problem and is a missing endpoint.
+CLOUDCC_E2E_SERVICES=(apigateway apigatewayv2 cloudwatch cloudwatchlogs dynamodb \
+  ec2 ecr ecs elasticache elbv2 iam lambda logs \
+  memorydb rds s3 secretsmanager sns sts)
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warn\033[0m %s\n' "$*" >&2; }
@@ -179,6 +189,166 @@ PROBE
     arm64|aarch64) printf 'aarch64-%s %s' "$libc" "$version" ;;
     *)             printf 'x86_64-%s %s' "$libc" "$version" ;;
   esac
+}
+
+# ------------------------------------------------------------- real engines
+#
+# The emulator provisions an RDS instance and an ElastiCache cluster -- the
+# resources appear, the stack exports their bindings -- but it does not run a
+# Postgres or a Redis behind them. Nothing would connect.
+#
+# So the engines are real, in Docker, the same way the emulator is real for
+# everything else: a stand-in for the managed service, not a mock of it. A
+# program that talks SQL talks it to an actual Postgres, and a cache miss is an
+# actual cache miss.
+#
+# The credentials and database name are not arbitrary. The compiler emits
+# `postgresql://ccadmin@<address>:<port>/<db>` with no password, because on AWS
+# the master credential is managed and the shim splices it in from the secret.
+# An emulator reports no managed secret, so the URL is used as written -- which
+# means the container has to be the user and database that URL names, and to
+# trust the connection. Anything else and the compiled half would need its
+# binding overridden, which would stop testing the binding.
+
+#: Container names are fixed so a rerun reuses what is already up rather than
+#: paying the start-up cost again, and so a stray one is easy to find.
+CLOUDCC_PG_CONTAINER="${CLOUDCC_PG_CONTAINER:-cloudcc-postgres}"
+CLOUDCC_REDIS_CONTAINER="${CLOUDCC_REDIS_CONTAINER:-cloudcc-redis}"
+
+# ensure_engine <postgres|redis> [database]
+ensure_engine() {
+  local kind="$1" database="${2:-petsdb}"
+  case "$kind" in
+    postgres)
+      if [ "$(docker inspect -f '{{.State.Running}}' "$CLOUDCC_PG_CONTAINER" 2>/dev/null)" != "true" ]; then
+        docker rm -f "$CLOUDCC_PG_CONTAINER" >/dev/null 2>&1 || true
+        docker run -d --name "$CLOUDCC_PG_CONTAINER" -p 5432:5432 \
+          -e POSTGRES_USER=ccadmin \
+          -e POSTGRES_DB="$database" \
+          -e POSTGRES_HOST_AUTH_METHOD=trust \
+          postgres:16-alpine >/dev/null 2>&1 \
+          || fail "could not start Postgres; is Docker running?"
+      fi
+      local waited=0
+      until docker exec "$CLOUDCC_PG_CONTAINER" pg_isready -U ccadmin -d "$database" >/dev/null 2>&1; do
+        waited=$((waited + 1))
+        [ "$waited" -gt 60 ] && fail "Postgres did not become ready in 60s"
+        sleep 1
+      done
+      ;;
+    redis)
+      if [ "$(docker inspect -f '{{.State.Running}}' "$CLOUDCC_REDIS_CONTAINER" 2>/dev/null)" != "true" ]; then
+        docker rm -f "$CLOUDCC_REDIS_CONTAINER" >/dev/null 2>&1 || true
+        docker run -d --name "$CLOUDCC_REDIS_CONTAINER" -p 6379:6379 redis:7-alpine >/dev/null 2>&1 \
+          || fail "could not start Redis; is Docker running?"
+      fi
+      local rwaited=0
+      until docker exec "$CLOUDCC_REDIS_CONTAINER" redis-cli ping >/dev/null 2>&1; do
+        rwaited=$((rwaited + 1))
+        [ "$rwaited" -gt 60 ] && fail "Redis did not become ready in 60s"
+        sleep 1
+      done
+      ;;
+    *) fail "unknown engine $kind" ;;
+  esac
+}
+
+# ensure_engines <scenario.json> -- starts whatever the scenario declares.
+ensure_engines() {
+  local scenario="$1" engine
+  for engine in $(jq -r '[(.engines // []), (.load.engines // [])] | flatten | .[]' "$scenario" 2>/dev/null); do
+    log "starting $engine"
+    ensure_engine "$engine"
+  done
+}
+
+# reset_engines wipes their contents without restarting them, so one example's
+# rows are not another's evidence.
+reset_engines() {
+  local scenario="$1" engine
+  for engine in $(jq -r '[(.engines // []), (.load.engines // [])] | flatten | .[]' "$scenario" 2>/dev/null); do
+    case "$engine" in
+      postgres)
+        docker exec "$CLOUDCC_PG_CONTAINER" psql -U ccadmin -d petsdb -q \
+          -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' >/dev/null 2>&1 || true
+        ;;
+      redis)
+        docker exec "$CLOUDCC_REDIS_CONTAINER" redis-cli FLUSHALL >/dev/null 2>&1 || true
+        ;;
+    esac
+  done
+}
+
+# stop_engines removes them. Not called on every exit: they take a few seconds
+# to start and are reused across runs.
+stop_engines() {
+  docker rm -f "$CLOUDCC_PG_CONTAINER" "$CLOUDCC_REDIS_CONTAINER" >/dev/null 2>&1 || true
+}
+
+# The one binding that has to be redirected, and the reason it is the only one.
+#
+# The compiler emits an RDS URL built from the instance's own address, and the
+# emulator reports that as localhost -- so the compiled program connects to the
+# Postgres container on the published port using the stack's URL exactly as
+# written, and the binding is tested rather than bypassed.
+#
+# An ElastiCache node is different: the emulator reports it under a name on its
+# own container network, which resolves inside the emulator and nowhere else.
+# Nothing about that name is the compiler's doing, so pointing it at the Redis
+# container is redirecting the emulator rather than working around cloudcc.
+#
+# Both spellings exist because the harnesses differ: one builds a string of
+# NAME=VALUE pairs to hand to `env`, the other exports them into its own shell.
+
+# cache_endpoints_local <bindings-string> -- echoes it with cache hosts redirected.
+cache_endpoints_local() {
+  printf '%s' "$1" | sed -E 's/(CLOUDCC_REDIS_[A-Z0-9_]+_ENDPOINT)=[^ ]*/\1=127.0.0.1/g'
+}
+
+# export_cache_endpoints_local -- rewrites them in this shell.
+export_cache_endpoints_local() {
+  local name
+  for name in $(env | sed -n -E 's/^(CLOUDCC_REDIS_[A-Z0-9_]+_ENDPOINT)=.*/\1/p'); do
+    export "$name=127.0.0.1"
+  done
+}
+
+# py_run_deps <dir> -- the uv arguments that give a Python unit its dependencies.
+#
+# From the unit's own requirements.txt rather than a list kept here. A harness
+# that hardcodes "fastapi, boto3" quietly limits which capabilities an example
+# may use: the first example to declare a Redis client fails to start with
+# ModuleNotFoundError, and the fix looks like it belongs in the example.
+#
+# uvicorn is added separately because it is the harness's, not the
+# application's -- nothing in a deployed unit imports it.
+py_run_deps() {
+  local dir="$1"
+  printf -- '--with uvicorn'
+  if [ -s "$dir/requirements.txt" ]; then
+    printf -- ' --with-requirements %s/requirements.txt' "$dir"
+  fi
+}
+
+# seed_secrets gives every provisioned secret a value.
+#
+# The compiler provisions the secret and deliberately not its contents: a value
+# in the generated project would be a value in Pulumi state and in the
+# repository, which is the thing D21 exists to prevent. Setting it is an
+# operator's job, done once, out of band -- so the harness does what an operator
+# would, and a run that skipped it would be testing an application nobody had
+# finished deploying.
+#
+# Reading a secret that has no version raises, and that is the correct
+# behaviour; it is just not what this test is trying to find out.
+seed_secrets() {
+  local outputs="$1" arn
+  for arn in $(printf '%s' "$outputs" \
+      | jq -r 'to_entries[] | select(.key | test("^CLOUDCC_SECRET_.*_ARN$")) | .value'); do
+    [ -n "$arn" ] || continue
+    aws_local secretsmanager put-secret-value \
+      --secret-id "$arn" --secret-string "cloudcc-emulator-secret" >/dev/null 2>&1 || true
+  done
 }
 
 # require_endpoint aborts unless something is answering at the emulator.

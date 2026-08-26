@@ -16,8 +16,28 @@ class Secret:
         self._sm = sm
 
     def get(self):
-        """Return the secret's current value."""
-        response = self._sm.get_secret_value(SecretId=self._arn)
+        """Return the secret's current value.
+
+        A secret that has never been given one raises, and the message says so
+        rather than passing on the API's. The compiler provisions the secret
+        and deliberately not its contents -- a value in the generated project
+        would be a value in the state file and in the repository -- so an
+        unset secret means the deploy is not finished, which is a different
+        problem from the one ResourceNotFoundException describes.
+        """
+        try:
+            response = self._sm.get_secret_value(SecretId=self._arn)
+        except Exception as exc:
+            if type(exc).__name__ in ("ResourceNotFoundException", "InvalidRequestException"):
+                raise RuntimeError(
+                    "secret %r exists but has no value. cloudcc provisions the "
+                    "secret and never its contents, so that nothing sensitive is "
+                    "in the generated project or in the state file -- setting it "
+                    "is a deploy-time step:\n"
+                    "    aws secretsmanager put-secret-value --secret-id %s "
+                    "--secret-string ..." % (self.id, self._arn)
+                ) from None
+            raise
         if "SecretString" in response:
             return response["SecretString"]
         return response["SecretBinary"].decode("utf-8")

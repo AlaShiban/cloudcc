@@ -228,7 +228,14 @@ func (r *Resolver) database(p *ir.Persist) error {
 	)
 	r.resolve(p.Key(), KindRDS, p.ID, "aws.rds.Instance", props, ir.Env(
 		EnvORMURL(p.ID), ir.FromExpr(url),
-		EnvORMSecretARN(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "masterUserSecrets.apply(s => s[0].secretArn)"}),
+		// Optional chaining, not s[0]. A list-valued output can be empty --
+		// during the first up, and permanently against an emulator that
+		// provisions the instance without reporting a managed secret -- and
+		// indexing it then throws a TypeError that takes down the whole Pulumi
+		// program, not just this binding. An empty string here means the shim
+		// fails later with a message naming what is missing, which is a much
+		// better failure than "Cannot read properties of undefined".
+		EnvORMSecretARN(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "masterUserSecrets.apply(s => s?.[0]?.secretArn ?? \"\")"}),
 	), p.Config())
 	return nil
 }
@@ -249,7 +256,7 @@ func (r *Resolver) cache(p *ir.Persist) error {
 		// A list output cannot be indexed directly in TypeScript, so the
 		// element is selected inside an apply.
 		r.resolve(p.Key(), KindMemoryDB, p.ID, "aws.memorydb.Cluster", props, ir.Env(
-			EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "clusterEndpoints.apply(e => e[0].address)"}),
+			EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "clusterEndpoints.apply(e => e?.[0]?.address ?? \"\")"}),
 			EnvRedisPort(p.ID), ir.FromExpr("6379"),
 			EnvRedisTLS(p.ID), ir.FromExpr("true"),
 		), p.Config())
@@ -266,7 +273,7 @@ func (r *Resolver) cache(p *ir.Persist) error {
 	}
 	key := ir.Key{Kind: KindElastiCache, ID: p.ID}
 	r.resolve(p.Key(), KindElastiCache, p.ID, "aws.elasticache.Cluster", props, ir.Env(
-		EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "cacheNodes.apply(n => n[0].address)"}),
+		EnvRedisEndpoint(p.ID), ir.FromExpr(ir.Ref{Key: key, Prop: "cacheNodes.apply(n => n?.[0]?.address ?? \"\")"}),
 		EnvRedisPort(p.ID), ir.FromExpr("6379"),
 		EnvRedisTLS(p.ID), ir.FromExpr("false"),
 	), p.Config())

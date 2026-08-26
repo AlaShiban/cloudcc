@@ -380,7 +380,9 @@ func resourceScope(key ir.Key) []any {
 		// ListBucket is authorised on the bucket; object actions on its keys.
 		return []any{arn, ir.Lit(arn, "/*")}
 	case KindRDS:
-		return []any{ir.Ref{Key: key, Prop: "masterUserSecrets.apply(s => s[0].secretArn)"}}
+		// Optional chaining for the same reason as the binding in resolve.go:
+		// an empty list output must not take the program down.
+		return []any{ir.Ref{Key: key, Prop: "masterUserSecrets.apply(s => s?.[0]?.secretArn ?? \"\")"}}
 	}
 	return []any{arn}
 }

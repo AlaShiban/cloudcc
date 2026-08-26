@@ -206,13 +206,38 @@ starts skipping, that is a signal, not noise.
 | `expose` | API Gateway v2 | probe-dependent | via local uvicorn/Mangum instead |
 | `execution_unit` (lambda) | Lambda | probe-dependent | direct handler invoke |
 | `execution_unit` (ecs) | ECS Fargate | preview only | Dockerfile shape only |
-| `persist(create_engine(...))` | RDS Postgres | preview only | optional, against a local Postgres |
-| `persist(Redis())` | ElastiCache | preview only | optional, against a local Redis |
+| `persist(create_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
+| `persist(Redis())` | ElastiCache | yes | yes, against a real Redis in Docker |
 
 "Preview only" means the resource is checked through `pulumi preview` rather
-than actually created: creating an RDS instance or a Fargate service in an
-emulator is slow and its behaviour is not faithful enough for the result to
-mean much.
+than actually created: creating a Fargate service in an emulator is slow and
+its behaviour is not faithful enough for the result to mean much.
+
+**RDS and ElastiCache are no longer preview only.** The emulator does provision
+them -- the instance and the cluster appear, and the stack exports their
+bindings -- it simply runs no engine behind them. So the engines are real, in
+Docker, and a scenario declares which it needs:
+
+```json
+"engines": ["postgres", "redis"]
+```
+
+That is the same bargain as the emulator itself: a stand-in for the managed
+service rather than a mock of it. A program that talks SQL talks it to an actual
+Postgres, and a cache miss is an actual cache miss.
+
+Only one binding is redirected, and it is worth knowing which. The RDS URL the
+compiler emits is used exactly as written, because the emulator reports the
+instance's address as localhost and the container is the user and database that
+URL names -- so the binding is tested rather than bypassed. An ElastiCache node
+is reported under a name on the emulator's own container network, which resolves
+nowhere else; pointing that at the Redis container redirects the emulator, not
+the compiler.
+
+`examples/petstore-multi` is the example that exercises this: two units, a
+DynamoDB table, an S3 bucket, an SNS topic, a relational catalogue, a cache, a
+managed secret, a static site and a config value -- ten capability kinds, all
+deployed and all driven.
 
 Keep this table current. It is the honest answer to "is that capability really
 tested?", and a stale one is worse than none.

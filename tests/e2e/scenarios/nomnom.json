@@ -30,6 +30,8 @@
       "nomnom-reservations",
       "nomnom-assignments",
       "nomnom-tracking"
-    ]
+    ],
+    "scale": 0.08,
+    "_scale_why": "Two topics and three subscribers, so one order fans out to several Lambda containers in the emulator, none of which are reaped. Same ceiling as petstore-multi, reached sooner."
   }
 }

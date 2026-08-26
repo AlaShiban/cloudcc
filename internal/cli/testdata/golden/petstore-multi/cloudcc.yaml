@@ -37,10 +37,16 @@ exposed:
   pet-api:
     type: apigateway
 persisted:
+  auditKey:
+    type: secretsmanager
   petAudit:
     type: s3
+  petCache:
+    type: elasticache
   petsByOwner:
     type: dynamodb
+  petsdb:
+    type: rds_postgres
 pubsub:
   petEvents:
     type: sns

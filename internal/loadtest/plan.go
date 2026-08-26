@@ -80,6 +80,23 @@ const (
 	edgeCalls      = "calls"
 )
 
+// storeEvidence maps a persist capability to the kind of evidence that shows it
+// carried something. They differ because the things are different: a table has
+// rows, a bucket has objects, a cache has keys, a database has rows in a schema
+// it had to create first.
+//
+// A secret has none of those. Reading one leaves no trace the emulator exposes,
+// so the honest answer is that this harness cannot settle it -- and where the
+// value is *used* for something observable, that write is the evidence, under
+// whichever edge produced it.
+var storeEvidence = map[string]string{
+	"persist_kv":     "store",
+	"persist_fs":     "bucket",
+	"persist_orm":    "orm",
+	"persist_redis":  "cache",
+	"persist_secret": "secret",
+}
+
 // Phase is where a step sits in a session. Ordering matters: a read that runs
 // before the write it depends on measures the latency of a 404, which is a
 // number with no relationship to the one being asked for.
@@ -355,9 +372,9 @@ func expectations(p *Program, exposed exposePayload) []Evidence {
 		label := e.From.String() + " -" + e.Kind + "-> " + e.To.String()
 		switch {
 		case e.Kind == edgeUses && strings.HasPrefix(e.To.Kind, "persist_"):
-			kind := "store"
-			if e.To.Kind == "persist_fs" {
-				kind = "bucket"
+			kind := storeEvidence[e.To.Kind]
+			if kind == "" {
+				kind = "store"
 			}
 			add(Evidence{
 				Edge: label, Kind: kind, Target: e.To.ID, Fallback: e.From.ID,

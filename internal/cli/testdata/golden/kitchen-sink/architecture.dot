@@ -10,7 +10,6 @@ digraph "kitchen-sink" {
     aws_apigatewayv2_route_shop_api [label="shop-api\\napigatewayv2.route", shape=box];
     aws_apigatewayv2_stage_shop_api [label="shop-api\\napigatewayv2.stage", shape=box];
     aws_apigatewayv2_shop_api [label="shop-api\\napigatewayv2", shape=ellipse];
-    aws_availabilityzones_network [label="network\\navailabilityzones", shape=box];
     aws_cloudwatch_loggroup_api [label="api\\ncloudwatch.loggroup", shape=box];
     aws_cloudwatch_loggroup_reporter [label="reporter\\ncloudwatch.loggroup", shape=box];
     aws_dynamodb_catalogue [label="catalogue\\ndynamodb", shape=cylinder];
@@ -94,9 +93,7 @@ digraph "kitchen-sink" {
     aws_vpc_routetable_network -> aws_vpc_gateway_network [label="depends_on"];
     aws_vpc_routetable_network -> aws_vpc_network [label="depends_on"];
     aws_vpc_securitygroup_network -> aws_vpc_network [label="depends_on"];
-    aws_vpc_subnet_network_0 -> aws_availabilityzones_network [label="depends_on"];
     aws_vpc_subnet_network_0 -> aws_vpc_network [label="depends_on"];
-    aws_vpc_subnet_network_1 -> aws_availabilityzones_network [label="depends_on"];
     aws_vpc_subnet_network_1 -> aws_vpc_network [label="depends_on"];
     aws_ecs_service_reporter -> aws_dynamodb_catalogue [label="uses"];
     aws_ecs_service_reporter -> aws_elasticache_itemCache [label="uses"];
