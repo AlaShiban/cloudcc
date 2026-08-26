@@ -20,6 +20,8 @@ clients must match, and a parity test compares the two.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import os
 import pathlib
 import shutil
@@ -125,9 +127,19 @@ class Topic:
         self._subscribers: list[Callable[[dict], Any]] = []
 
     def publish(self, message: dict) -> None:
-        """Deliver ``message`` to every subscriber."""
+        """Deliver ``message`` to every subscriber.
+
+        A subscriber that has to call another execution unit is ``async def``,
+        because that call is a network round trip once compiled. Running the
+        coroutine here rather than discarding it is what keeps the uncompiled
+        program behaving like the compiled one -- the alternative is a handler
+        that appears to have run, wrote nothing, and warned about a coroutine
+        that was never awaited.
+        """
         for fn in list(self._subscribers):
-            fn(message)
+            result = fn(message)
+            if inspect.iscoroutine(result):
+                asyncio.run(result)
 
     def subscribe(self, fn: Callable[[dict], Any]) -> Callable[[dict], Any]:
         """Register ``fn`` as a subscriber. Usable as a decorator."""

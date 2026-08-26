@@ -216,7 +216,7 @@ Recompiling overwrites this file. Copy it before editing.
 	// generic one is dropped.
 	said := map[string]bool{}
 	for _, e := range p.Edges() {
-		if e.Kind == ir.EdgePublishes || e.Kind == ir.EdgeSubscribes {
+		if e.Kind == ir.EdgePublishes || e.Kind == ir.EdgeSubscribes || e.Kind == ir.EdgeCalls {
 			said[e.From.String()+"->"+e.To.String()] = true
 		}
 	}
@@ -234,9 +234,24 @@ Recompiling overwrites this file. Copy it before editing.
 		if e.Kind == ir.EdgeUses && said[e.From.String()+"->"+e.To.String()] {
 			continue
 		}
+		// A unit is wired to every topic declared in a module it bundles, so
+		// that the client the module builds at import has an ARN to build it
+		// with. That is a deployment fact, and it is in architecture.mmd. It is
+		// not an architecture fact: a unit that neither publishes to a topic nor
+		// subscribes to it is not part of that topic's flow, and an arrow saying
+		// otherwise would have a reader looking for a message that is not there.
+		if e.Kind == ir.EdgeUses && e.To.Kind == config.KindPubSub {
+			continue
+		}
 		switch e.Kind {
 		case ir.EdgeExposes, ir.EdgeUses:
 			fmt.Fprintf(&b, "    %s >> %s\n", from, to)
+		case ir.EdgeCalls:
+			// Bold, and pointing the way the request goes. This is the only
+			// edge in the picture the caller waits on, and a reader tracing a
+			// latency budget needs to be able to see which arrows those are.
+			fmt.Fprintf(&b, "    %s >> Edge(label=%q, color=%q, style=%q) >> %s\n",
+				from, "calls", "darkorange", "bold", to)
 		case ir.EdgePublishes:
 			fmt.Fprintf(&b, "    %s >> Edge(label=%q) >> %s\n", from, "publishes", to)
 		case ir.EdgeSubscribes:

@@ -15,4 +15,11 @@ def connect(id):
 
     from cloudpathlib import S3Client, S3Path
 
-    return S3Path("s3://%s" % bucket, client=S3Client(**_client.aws_kwargs()))
+    # cloudpathlib's S3Client is not a boto3 client and does not take a boto3
+    # client's keyword arguments: passing region_name to it is a TypeError at
+    # import, which is where this shim runs. The region belongs on a session.
+    kwargs = {"boto3_session": _client.session()}
+    if _client.endpoint():
+        kwargs["endpoint_url"] = _client.endpoint()
+
+    return S3Path("s3://%s" % bucket, client=S3Client(**kwargs))

@@ -1,0 +1,22 @@
+app: nomnom
+provider: aws
+
+# Six units, every one of them a Lambda. Nothing here says which units talk to
+# which: that is in the code, and the compiler reads it.
+execution_units:
+  storefront:
+    type: lambda
+  pricing:
+    type: lambda
+  inventory:
+    type: lambda
+  dispatch:
+    type: lambda
+  tracking:
+    type: lambda
+  notify:
+    type: lambda
+
+logging:
+  type: cloudwatch
+  retention_days: 14

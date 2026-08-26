@@ -6,6 +6,7 @@ Do not edit: recompiling overwrites this file.
 import importlib
 
 from _cloudcc_runtime import pubsub as _cloudcc_pubsub
+from _cloudcc_runtime import rpc as _cloudcc_rpc
 
 _module = importlib.import_module("app")
 
@@ -17,10 +18,13 @@ _asgi = Mangum(getattr(_module, "app"), lifespan="off")
 def handler(event, context):
     """Route the invocation to the right adapter.
 
-    A single unit can be both an HTTP handler and a topic subscriber, so the
-    event shape decides: SNS deliveries go to the registered subscribers, and
+    A single unit can be an HTTP handler, a topic subscriber and callable by
+    other units all at once, so the event shape decides: a call envelope goes
+    to the named function, SNS deliveries go to the registered subscribers, and
     anything else is treated as an HTTP request.
     """
+    if _cloudcc_rpc.is_call(event):
+        return _cloudcc_rpc.dispatch(_module, event)
     if _cloudcc_pubsub.is_sns_event(event):
         return _cloudcc_pubsub.dispatch(event)
     return _asgi(event, context)

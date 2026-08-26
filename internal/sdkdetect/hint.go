@@ -24,6 +24,7 @@ const PackageName = "cloudcompiler"
 // uses and keep its type all the way through.
 const (
 	FnPersist       = "persist"
+	FnRemote        = "remote"
 	FnExecutionUnit = "execution_unit"
 	FnExpose        = "expose"
 	FnConfigValue   = "config_value"
@@ -34,6 +35,15 @@ const (
 // CapEmbedAssets is the pseudo-capability for embed_assets, which claims files
 // but produces no intent of its own.
 const CapEmbedAssets = "embed_assets"
+
+// CapRemote is the pseudo-capability for remote. Like embed_assets it produces
+// no intent of its own and so is not one of config.Kinds: the thing being
+// called is an execution unit that already exists in the graph, and what a
+// remote() call adds is an edge to it rather than a node. It is therefore also
+// the one capability with nothing to configure -- there is no choice of
+// backing service to make, because the callee's own configuration already made
+// it.
+const CapRemote = "remote"
 
 // ParamKind says how an argument is validated. It is a property of the SDK's
 // surface, not of any one language: an id is a string literal whether it is
@@ -100,6 +110,13 @@ var signatures = map[string]Signature{
 		{Name: "client", Kind: ParamClient, Required: true},
 		{Name: "id", Kind: ParamString, Required: true, KeywordOnly: true},
 		{Name: "models", Kind: ParamStringList, KeywordOnly: true},
+	}},
+	// remote names the unit being called, so its capability is fixed. The
+	// target is an expression only so that the uncompiled program keeps
+	// working: the compiler reads the id, never the module.
+	FnRemote: {CapRemote, []Param{
+		{Name: "target", Kind: ParamExpr, Required: true},
+		{Name: "id", Kind: ParamString, Required: true, KeywordOnly: true},
 	}},
 	FnExecutionUnit: {config.KindExecutionUnit, []Param{
 		{Name: "id", Kind: ParamString, Required: true},

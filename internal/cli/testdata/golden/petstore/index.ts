@@ -121,4 +121,5 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
 //   eval "$(pulumi output --json | jq -r 'to_entries[]|"export \(.key)=\(.value)"')"
 export const CLOUDCC_GATEWAY_PET_API_URL = pulumi.interpolate`${petApiApi.apiEndpoint}`;
 export const CLOUDCC_KV_PETSBYOWNER_TABLE = pulumi.interpolate`${petsByOwnerTable.name}`;
+export const CLOUDCC_UNIT_MAIN_FUNCTION = pulumi.interpolate`${mainFn.name}`;
 export const petApiUrl = petApiApi.apiEndpoint;

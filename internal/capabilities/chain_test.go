@@ -32,6 +32,7 @@ func TestChainSchedule(t *testing.T) {
 		PluginExpose,
 		PluginPersist,
 		PluginPubSub,
+		PluginRemote,
 		PluginValidate,
 		PluginShims,
 		PluginResolveAWS,

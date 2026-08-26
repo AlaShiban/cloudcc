@@ -255,7 +255,39 @@ func buildHint(f *source.File, call *ts.Node, fn string) (sdkdetect.Hint, *hintE
 			return h, err
 		}
 	}
+	if fn == sdkdetect.FnRemote {
+		if err := checkRemoteTarget(f, call, h); err != nil {
+			return h, err
+		}
+	}
 	return h, nil
+}
+
+// checkRemoteTarget requires the module being called to be named by a plain
+// identifier.
+//
+// Compiling the call means the caller stops carrying the callee's code, so the
+// import that bound the name has to go with it -- and an import can only be
+// removed safely when the compiler can see exactly which binding it created.
+// `from nomnom import pricing` binds one name and is unambiguous;
+// `import nomnom.pricing` binds `nomnom`, which the rest of the file may well
+// still be using for something else.
+func checkRemoteTarget(f *source.File, call *ts.Node, h sdkdetect.Hint) *hintError {
+	args := call.ChildByFieldName("arguments")
+	target := positionalArg(f, args, 0)
+	if target == nil {
+		return &hintError{"remote() requires the module to call", call.StartByte()}
+	}
+	if target.Kind() == "identifier" {
+		return nil
+	}
+	return &hintError{
+		msgf("remote() needs the other unit's module named by a plain identifier, "+
+			"not %s. Import it as one -- `from %s import %s` -- so that the compiler "+
+			"can remove that import when the call stops being local",
+			describe(f, target), "<package>", h.ID()),
+		target.StartByte(),
+	}
 }
 
 // resolveClient reads the capability from the type of the client being

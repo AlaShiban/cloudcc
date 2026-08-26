@@ -238,13 +238,18 @@ for example in "${EXAMPLES[@]}"; do
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' \
     | tr '\n' ' ')"
 
+  # The compiled *sources*, for both languages.
+  #
   # A Node unit's build/<unit> holds only the bundled index.mjs, which exports a
-  # Lambda handler rather than the app, so the unit directory is what to serve.
-  # A Python unit's build/<unit> is the unpacked bundle and is exactly right.
+  # Lambda handler rather than the app. A Python unit's build/<unit> is the
+  # unpacked deployment bundle, and its wheels are resolved for the deployment
+  # target -- Linux, and a libc and architecture that are usually not this
+  # machine's -- so a compiled extension in it cannot be imported here. That is
+  # correct for what gets deployed and useless for running locally.
+  #
+  # What this suite compares is behaviour before and after the rewrite, so the
+  # rewritten source is the thing to run, with the host's own dependencies.
   unit_dir="$app_out_dir/$unit"
-  if [ "$language" != "node" ] && [ -d "$app_out_dir/build/$unit" ]; then
-    unit_dir="$app_out_dir/build/$unit"
-  fi
 
   log "running the compiled copy against the emulator"
   serve "$unit_dir" "$language" "$target" "$PORT_B" "compiled" \

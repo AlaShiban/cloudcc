@@ -228,8 +228,17 @@ func TestPackagingFragments(t *testing.T) {
 	if !strings.Contains(zip, `"../api.zip"`) {
 		t.Errorf("a zip-packaged unit produces an archive:\n%s", zip)
 	}
-	if !strings.Contains(zip, "--python-version \""+PythonVersion+"\"") {
-		t.Errorf("the fragment should pin the interpreter:\n%s", zip)
+	// Both halves of the target are pinned, and both default to what the
+	// deployed function actually is. A wheel with a compiled extension carries
+	// the interpreter and the architecture in its filename, so getting either
+	// wrong produces a bundle that installs, zips and deploys cleanly and then
+	// cannot import itself.
+	if !strings.Contains(zip, "${CLOUDCC_PYTHON_VERSION:-"+PythonVersion+"}") {
+		t.Errorf("the fragment should default to the declared interpreter:\n%s", zip)
+	}
+	if !strings.Contains(zip, "${CLOUDCC_PYTHON_PLATFORM:-x86_64-manylinux2014}") {
+		t.Errorf("the fragment should default to Lambda's own architecture rather "+
+			"than to whatever machine is doing the packaging:\n%s", zip)
 	}
 
 	container := PackagingScript("reporter", true)

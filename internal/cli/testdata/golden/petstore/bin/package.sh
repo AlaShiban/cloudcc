@@ -18,10 +18,30 @@ mkdir -p "$unit_build"
 cp -R "main/." "$unit_build/"
 
 if [ -s "main/requirements.txt" ]; then
+  # Wheels are resolved for the *target*, not for whoever is running this.
+  #
+  # A dependency with a compiled extension -- pydantic, cryptography, numpy --
+  # ships a different wheel per platform, and without this the build picks the
+  # one matching the machine doing the packaging. Compiling on a Mac then
+  # produced a bundle that installed cleanly, zipped cleanly, deployed cleanly
+  # and failed on its first invocation with "No module named
+  # pydantic_core._pydantic_core" -- which says nothing about the actual cause.
+  #
+  # x86_64 is Lambda's default architecture and 3.12 is the
+  # runtime this unit declares, so those are the defaults and a real deploy
+  # needs neither override.
+  #
+  # The two variables exist for a runtime that does not honour what the function
+  # declares. A local emulator generally runs containers of whatever the host
+  # is, with whatever Python it has: on an arm64 machine with Python 3.13 that
+  # is aarch64-manylinux2014 and 3.13, even though the deployed function would
+  # be x86_64 and 3.12. Both have to match or a compiled extension
+  # will not import -- the ABI tag is in the filename.
   uv pip install \
     --quiet \
     --target "$unit_build" \
-    --python-version "3.12" \
+    --python-version "${CLOUDCC_PYTHON_VERSION:-3.12}" \
+    --python-platform "${CLOUDCC_PYTHON_PLATFORM:-x86_64-manylinux2014}" \
     --only-binary=:all: \
     -r "main/requirements.txt"
 fi

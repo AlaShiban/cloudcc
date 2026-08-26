@@ -247,3 +247,90 @@ func TestUnusedFromImportIsStripped(t *testing.T) {
 		t.Errorf("an unused from-import survived:\n%s", got)
 	}
 }
+
+// A remote call becomes a client of the other unit, and the import that made
+// the uncompiled program work has to go with it: the callee's module is
+// deliberately not in this unit's bundle, so the import would be the first
+// line to fail.
+func TestRewriteRemote(t *testing.T) {
+	got := rewritten(t, `import cloudcompiler as cloudcc
+
+from nomnom import pricing
+
+pricing = cloudcc.remote(pricing, id="pricing")
+`)
+
+	if !strings.Contains(got, `_cloudcc_rpc.connect("pricing")`) {
+		t.Errorf("expected an rpc connect call:\n%s", got)
+	}
+	if strings.Contains(got, "from nomnom import pricing") {
+		t.Errorf("the callee's import survived; the module is not in this bundle:\n%s", got)
+	}
+	if !strings.Contains(got, "from _cloudcc_runtime import rpc as _cloudcc_rpc") {
+		t.Errorf("the rpc shim was not imported:\n%s", got)
+	}
+}
+
+// One import statement can serve two purposes, and only one of them has moved
+// over the wire. Removing the whole line would take a module the unit still
+// bundles and still uses.
+func TestRewriteRemoteKeepsTheRestOfASharedImport(t *testing.T) {
+	got := rewritten(t, `import cloudcompiler as cloudcc
+
+from nomnom import menu, pricing
+
+pricing = cloudcc.remote(pricing, id="pricing")
+
+print(menu)
+`)
+
+	if strings.Contains(got, "pricing,") || strings.Contains(got, ", pricing") {
+		t.Errorf("the remote module is still imported:\n%s", got)
+	}
+	if !strings.Contains(got, "from nomnom import menu") {
+		t.Errorf("menu is still used by this unit and must still be imported:\n%s", got)
+	}
+}
+
+// The name has to be one the compiler can find an import for, because the
+// import is what it has to remove. `import nomnom.pricing` binds `nomnom`,
+// which the rest of the file may still need for something else.
+func TestRemoteRejectsATargetThatIsNotAPlainName(t *testing.T) {
+	f := &source.File{Path: "app.py", Content: []byte(
+		"import cloudcompiler as cloudcc\nimport nomnom.pricing\n\np = cloudcc.remote(nomnom.pricing, id=\"pricing\")\n")}
+	if err := f.ParsePython(); err != nil {
+		t.Fatal(err)
+	}
+	var d diag.Diagnostics
+	detectHints(f, &d)
+	if !d.HasErrors() {
+		t.Fatalf("expected an error for an attribute-lookup target")
+	}
+	if !strings.Contains(d.Items()[0].String(), "plain identifier") {
+		t.Errorf("diagnostic = %v", d.Items()[0].String())
+	}
+}
+
+// Three units declared remote from one package is one import statement, not
+// three. Removing each name independently leaves `from nomnom import` behind,
+// which is a syntax error -- and one that only shows up in a program with more
+// than one remote unit in the same package, which is to say in any real one.
+func TestRewriteRemoteRemovesASharedImportEntirely(t *testing.T) {
+	got := rewritten(t, `import cloudcompiler as cloudcc
+
+from nomnom import inventory, pricing, tracking
+
+pricing = cloudcc.remote(pricing, id="pricing")
+inventory = cloudcc.remote(inventory, id="inventory")
+tracking = cloudcc.remote(tracking, id="tracking")
+`)
+
+	if strings.Contains(got, "from nomnom import") {
+		t.Errorf("a dangling import survived:\n%s", got)
+	}
+	for _, id := range []string{"pricing", "inventory", "tracking"} {
+		if !strings.Contains(got, `_cloudcc_rpc.connect("`+id+`")`) {
+			t.Errorf("%s was not connected:\n%s", id, got)
+		}
+	}
+}

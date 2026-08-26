@@ -269,5 +269,7 @@ export const CLOUDCC_KV_PETSBYOWNER_TABLE = pulumi.interpolate`${petsByOwnerTabl
 export const CLOUDCC_STATIC_PETSTORE_SITE_BUCKET = pulumi.interpolate`${petstoreSiteBucket.bucket}`;
 export const CLOUDCC_STATIC_PETSTORE_SITE_URL = pulumi.interpolate`${petstoreSiteWebsite.websiteEndpoint}`;
 export const CLOUDCC_TOPIC_PETEVENTS_ARN = pulumi.interpolate`${petEventsTopic.arn}`;
+export const CLOUDCC_UNIT_API_FUNCTION = pulumi.interpolate`${apiFn.name}`;
+export const CLOUDCC_UNIT_WORKER_FUNCTION = pulumi.interpolate`${workerFn.name}`;
 export const petApiUrl = petApiApi.apiEndpoint;
 export const petstoreSiteUrl = petstoreSiteWebsite.websiteEndpoint;

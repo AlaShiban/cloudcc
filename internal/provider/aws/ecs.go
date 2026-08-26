@@ -73,11 +73,6 @@ func (r *Resolver) ecsServiceUnit(u *ir.ExecUnit) error {
 	}, nil)
 	r.Program.Resolve(u.Key(), taskRole)
 
-	if policy := r.unitPolicy(u, taskRoleKey); policy != nil {
-		policy.K = ir.Key{Kind: KindECSTaskPolicy, ID: u.ID}
-		r.Program.Resolve(u.Key(), policy)
-	}
-
 	task := ir.NewResource(KindECSTask, u.ID, "aws.ecs.TaskDefinition", map[string]any{
 		"family":                  sanitize.LambdaFunction(r.App, u.ID),
 		"requiresCompatibilities": []any{"FARGATE"},
@@ -105,11 +100,6 @@ func (r *Resolver) ecsServiceUnit(u *ir.ExecUnit) error {
 		}}},
 	}, nil)
 	r.Program.Resolve(u.Key(), task)
-	// The task definition is what carries the unit's environment, so it is
-	// what must be declared after everything that environment references.
-	for _, dep := range r.usedResourceKeys(u) {
-		r.Program.Connect(task.Key(), dep, ir.EdgeUses)
-	}
 
 	service := ir.NewResource(KindECSService, u.ID, "aws.ecs.Service", map[string]any{
 		"name":           sanitize.LambdaFunction(r.App, u.ID),
@@ -124,10 +114,6 @@ func (r *Resolver) ecsServiceUnit(u *ir.ExecUnit) error {
 		},
 	}, nil)
 	r.Program.Resolve(u.Key(), service)
-
-	for _, dep := range r.usedResourceKeys(u) {
-		r.Program.Connect(service.Key(), dep, ir.EdgeUses)
-	}
 	return nil
 }
 

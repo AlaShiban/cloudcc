@@ -54,6 +54,10 @@ func (Frontend) MethodCalls(files *source.Set, unitFiles []string) []lang.Method
 	return methodCalls(files, unitFiles)
 }
 
+func (Frontend) RemoteFunctions(files *source.Set, entry string) ([]lang.RemoteFunction, bool) {
+	return remoteFunctions(files, entry), true
+}
+
 // EntrypointCandidates orders the modules that could serve as the entry for an
 // undeclared single unit.
 //

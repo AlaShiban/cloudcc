@@ -90,6 +90,18 @@ func (r *Resolver) Resolve() error {
 			return err
 		}
 	}
+	// Policies and environment ordering read what a unit uses, and a unit can
+	// use another unit, so this needs every unit to already exist.
+	//
+	// It also has to come *before* subscriptions. A subscription resolves from
+	// the topic intent, so once it exists every publisher's `uses` edge reaches
+	// it too -- and a subscription depends on the subscriber's function, which
+	// uses the topic, which is a cycle in the emitted project's declaration
+	// order. Running first means this sees the topic and not the plumbing
+	// hanging off it.
+	if err := r.unitWiring(); err != nil {
+		return err
+	}
 	// Subscriptions reference both a topic and a function, so they come last.
 	if err := r.subscriptions(); err != nil {
 		return err

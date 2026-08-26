@@ -1,0 +1,4 @@
+{
+  "description": "Six units talking two ways: awaited calls that compile to Lambda invocations, and published messages that compile to SNS.",
+  "skip": "this example is deliberately not identical before and after compiling, so a differential comparison would be measuring the wrong thing. Uncompiled it is one process: the storefront imports pricing, inventory and tracking and calls them directly, and a published message reaches only the subscribers that process happens to have imported -- which is none of them, because nothing imports dispatch or notify. Compiled, the same publish fans out to two units that then wake, call a third and write to four stores. Both behaviours are correct; they are not the same, and that difference is the feature. It is covered by tests/e2e/nomnom.sh instead, which deploys all six units and follows the whole chain -- including one deployed unit invoking another -- through to the state left in every store."
+}
