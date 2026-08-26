@@ -94,13 +94,29 @@ func (p *RemotePlugin) declaration(ctx *compiler.Context, h sdkdetect.Hint) {
 }
 
 // languagesSupported reports whether a call between these two units can be
-// compiled today, and explains it when not.
+// compiled, and explains it when not.
 //
-// Nothing about the design is language-specific -- the wire format is JSON and
-// each side is independent -- but a callee needs a dispatcher in its own
-// runtime to answer, and only Python has one so far. Saying which half is
-// missing beats a program that compiles and then answers every call with a
-// shape its caller cannot read.
+// Two conditions, and they fail for different reasons.
+//
+// A runtime must be able to answer an inbound call at all. That is a
+// dispatcher in the generated entrypoint, and a language without one would
+// compile cleanly and then reply to every call with a shape its caller cannot
+// read.
+//
+// The two units must also be written in the *same* language, and that one is a
+// property of the design rather than something left to build. What makes a
+// remote call worth writing is that uncompiled it is an ordinary call:
+//
+//	from nomnom import pricing
+//	pricing = cloudcc.remote(pricing, id="pricing")
+//
+// The argument is the callee's module, imported the ordinary way, and one
+// process cannot import both a Python module and a JavaScript one. Across
+// languages there would be nothing to pass and nothing to type-check against,
+// and the program would only run once compiled -- which is the property this
+// compiler exists to avoid depending on. Units in different languages talk
+// through a topic, which is a message rather than a call and needs no shared
+// module; examples/mixed does exactly that.
 func (p *RemotePlugin) languagesSupported(ctx *compiler.Context, h sdkdetect.Hint, caller, callee string) bool {
 	for _, unit := range []struct{ id, role string }{{caller, "calls"}, {callee, "is called"}} {
 		front, ok := ctx.Frontend(unit.id)
@@ -109,12 +125,25 @@ func (p *RemotePlugin) languagesSupported(ctx *compiler.Context, h sdkdetect.Hin
 		}
 		if _, supported := front.RemoteFunctions(ctx.Files, ""); !supported {
 			ctx.Diags.Errorf(ctx.HintPos(h), sdkdetect.CapRemote,
-				"execution unit %q %s over the wire, but it is written in %s, and "+
-					"cloudcc can only compile remote calls between Python units today. "+
-					"A topic carries messages between units in any language",
-				unit.id, unit.role, front.Name())
+				"execution unit %q %s over the wire, but nothing in the %s runtime "+
+					"dispatches an inbound call yet. A topic carries messages between "+
+					"units in any language", unit.id, unit.role, front.Name())
 			return false
 		}
+	}
+
+	callerFront, okA := ctx.Frontend(caller)
+	calleeFront, okB := ctx.Frontend(callee)
+	if okA && okB && callerFront.Name() != calleeFront.Name() {
+		ctx.Diags.Errorf(ctx.HintPos(h), sdkdetect.CapRemote,
+			"execution unit %q is written in %s and %q in %s, so %q cannot import "+
+				"the module it would be calling. A remote call is an ordinary call "+
+				"until it is compiled, and that is what makes it worth writing; across "+
+				"languages there is nothing to pass to remote() and nothing to check "+
+				"the call against. Send a message through a topic instead, which needs "+
+				"no shared module",
+			caller, callerFront.Name(), callee, calleeFront.Name(), caller)
+		return false
 	}
 	return true
 }

@@ -318,3 +318,38 @@ assigned.subscribe(on_assigned)
 		t.Errorf("a unit that only subscribes was granted publish:\n%s", index)
 	}
 }
+
+// Across languages there is nothing to pass to remote(): one process cannot
+// import both a Python module and a JavaScript one, so the uncompiled program
+// -- which is the whole reason a remote call is written as an ordinary call --
+// could not run. A topic is the answer, and it needs no shared module.
+func TestACallBetweenLanguagesIsRejected(t *testing.T) {
+	files := map[string]string{
+		"nomnom/__init__.py": "",
+		"nomnom/pricing.py": `import cloudcompiler as cloudcc
+
+cloudcc.execution_unit(id="pricing")
+
+
+async def quote(items):
+    return items
+`,
+		"api.js": `import * as pricingModule from "./nomnom/pricing.py";
+import { executionUnit, remote } from "@cloudcompiler/sdk";
+
+executionUnit({ id: "api" });
+
+const pricing = remote(pricingModule, { id: "pricing" });
+export { pricing };
+`,
+		"package.json": `{"name": "x", "type": "module"}`,
+	}
+	ctx := compileExpectingErrors(t, files)
+
+	if !containsDiag(ctx, "cannot import the module it would be calling") {
+		t.Errorf("expected an error about the language boundary: %v", diagStrings(ctx))
+	}
+	if !containsDiag(ctx, "topic") {
+		t.Errorf("the error should name the thing that does work: %v", diagStrings(ctx))
+	}
+}

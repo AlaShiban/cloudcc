@@ -8,11 +8,14 @@ digraph "petstore-node" {
     aws_apigatewayv2_stage_pet_api [label="pet-api\\napigatewayv2.stage", shape=box];
     aws_apigatewayv2_pet_api [label="pet-api\\napigatewayv2", shape=ellipse];
     aws_cloudwatch_loggroup_main [label="main\\ncloudwatch.loggroup", shape=box];
+    aws_cloudwatch_loggroup_summary [label="summary\\ncloudwatch.loggroup", shape=box];
     aws_dynamodb_petsByOwner [label="petsByOwner\\ndynamodb", shape=cylinder];
     aws_iam_policy_main [label="main\\niam.policy", shape=box];
     aws_iam_role_main [label="main\\niam.role", shape=box];
+    aws_iam_role_summary [label="summary\\niam.role", shape=box];
     aws_lambda_permission_pet_api [label="pet-api\\nlambda.permission", shape=box];
     aws_lambda_main [label="main\\nlambda", shape=box];
+    aws_lambda_summary [label="summary\\nlambda", shape=box];
     aws_apigatewayv2_integration_pet_api -> aws_apigatewayv2_pet_api [label="depends_on"];
     aws_apigatewayv2_integration_pet_api -> aws_lambda_main [label="depends_on"];
     aws_apigatewayv2_route_pet_api -> aws_apigatewayv2_integration_pet_api [label="depends_on"];
@@ -21,9 +24,15 @@ digraph "petstore-node" {
     aws_apigatewayv2_stage_pet_api -> aws_apigatewayv2_pet_api [label="depends_on"];
     aws_iam_policy_main -> aws_dynamodb_petsByOwner [label="depends_on"];
     aws_iam_policy_main -> aws_iam_role_main [label="depends_on"];
+    aws_iam_policy_main -> aws_lambda_summary [label="depends_on"];
     aws_lambda_permission_pet_api -> aws_apigatewayv2_pet_api [label="depends_on"];
     aws_lambda_permission_pet_api -> aws_lambda_main [label="depends_on"];
     aws_lambda_main -> aws_cloudwatch_loggroup_main [label="depends_on"];
     aws_lambda_main -> aws_iam_role_main [label="depends_on"];
+    aws_lambda_summary -> aws_cloudwatch_loggroup_summary [label="depends_on"];
+    aws_lambda_summary -> aws_iam_role_summary [label="depends_on"];
+    aws_lambda_main -> aws_cloudwatch_loggroup_summary [label="uses"];
     aws_lambda_main -> aws_dynamodb_petsByOwner [label="uses"];
+    aws_lambda_main -> aws_iam_role_summary [label="uses"];
+    aws_lambda_main -> aws_lambda_summary [label="uses"];
 }

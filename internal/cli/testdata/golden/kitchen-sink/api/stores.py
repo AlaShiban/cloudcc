@@ -33,3 +33,20 @@ signing_key = _cloudcc_secret.connect("signingKey")
 db = _cloudcc_orm.connect("shopdb", library="sqlalchemy")
 cache = _cloudcc_redis.connect("itemCache")
 events = _cloudcc_pubsub.connect("itemEvents")
+
+
+# Both units write documents, so the spelling lives here once -- and it is
+# pathlib's spelling, because `docs` is a Path locally and a cloudpathlib
+# S3Path once compiled. Neither has a `write(name, data)` method; that belonged
+# to an SDK class this project deliberately no longer has.
+def write_doc(name: str, data: bytes) -> None:
+    path = docs / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def count_docs() -> int:
+    """How many documents exist. Empty is a count, not an error."""
+    if not docs.exists():
+        return 0
+    return sum(1 for _ in docs.iterdir())

@@ -5,11 +5,14 @@ flowchart LR
     aws_apigatewayv2_stage_pet_api["pet-api\napigatewayv2.stage"]
     aws_apigatewayv2_pet_api(["pet-api\napigatewayv2"])
     aws_cloudwatch_loggroup_main["main\ncloudwatch.loggroup"]
+    aws_cloudwatch_loggroup_summary["summary\ncloudwatch.loggroup"]
     aws_dynamodb_petsByOwner[("petsByOwner\ndynamodb")]
     aws_iam_policy_main["main\niam.policy"]
     aws_iam_role_main["main\niam.role"]
+    aws_iam_role_summary["summary\niam.role"]
     aws_lambda_permission_pet_api["pet-api\nlambda.permission"]
     aws_lambda_main["main\nlambda"]
+    aws_lambda_summary["summary\nlambda"]
     aws_apigatewayv2_integration_pet_api --> aws_apigatewayv2_pet_api
     aws_apigatewayv2_integration_pet_api --> aws_lambda_main
     aws_apigatewayv2_route_pet_api --> aws_apigatewayv2_integration_pet_api
@@ -18,8 +21,14 @@ flowchart LR
     aws_apigatewayv2_stage_pet_api --> aws_apigatewayv2_pet_api
     aws_iam_policy_main --> aws_dynamodb_petsByOwner
     aws_iam_policy_main --> aws_iam_role_main
+    aws_iam_policy_main --> aws_lambda_summary
     aws_lambda_permission_pet_api --> aws_apigatewayv2_pet_api
     aws_lambda_permission_pet_api --> aws_lambda_main
     aws_lambda_main --> aws_cloudwatch_loggroup_main
     aws_lambda_main --> aws_iam_role_main
+    aws_lambda_summary --> aws_cloudwatch_loggroup_summary
+    aws_lambda_summary --> aws_iam_role_summary
+    aws_lambda_main -->|uses| aws_cloudwatch_loggroup_summary
     aws_lambda_main -->|uses| aws_dynamodb_petsByOwner
+    aws_lambda_main -->|uses| aws_iam_role_summary
+    aws_lambda_main -->|uses| aws_lambda_summary

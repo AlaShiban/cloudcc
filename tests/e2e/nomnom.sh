@@ -212,7 +212,10 @@ aws_local lambda invoke \
   --cli-binary-format raw-in-base64-out \
   --payload '{"cloudcc_call":{"function":"set_price","args":["margherita",1500],"kwargs":{}}}' \
   "$WORK/setprice.json" >/dev/null
-jq -e '.cents == 1500' "$WORK/setprice.json" >/dev/null \
+# Through the envelope: a reply is always an object carrying either a result
+# or an error, so that a function returning a bare string is not indistinguishable
+# from a truncated document.
+jq -e '.cloudcc_result.cents == 1500' "$WORK/setprice.json" >/dev/null \
   || fail "the deployed pricing unit did not answer set_price: $(cat "$WORK/setprice.json")"
 pass "L5a a deployed unit answers a call envelope"
 
@@ -224,8 +227,8 @@ pass "L5a the call persisted to the callee's own store"
 # An async def really was awaited. Had the entrypoint returned the coroutine
 # instead, the reply would have been null and every assertion above would have
 # failed in a way that pointed at the wrong thing -- so this says it plainly.
-jq -e 'type == "object"' "$WORK/setprice.json" >/dev/null \
-  || fail "the reply was not an object; an async def was probably not awaited"
+jq -e 'has("cloudcc_result") and (.cloudcc_result | type == "object")' "$WORK/setprice.json" >/dev/null \
+  || fail "the reply carried no result; an async def was probably not awaited: $(cat "$WORK/setprice.json")"
 pass "L5a the callee awaited its async def"
 
 # ------------------------- L5b: a caller reaches a callee over the wire

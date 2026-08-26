@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 import cloudcompiler as cloudcc
 
-from stores import catalogue, docs, events
+from stores import catalogue, count_docs, events, write_doc
 
 cloudcc.execution_unit(id="reporter")
 
@@ -19,11 +19,11 @@ def health():
 @app.get("/summary")
 def summary():
     stored = catalogue.scan(ProjectionExpression="id").get("Items", [])
-    return {"items": len(stored), "documents": len(docs.list())}
+    return {"items": len(stored), "documents": count_docs()}
 
 
 def on_item_event(message: dict):
-    docs.write(f"audit/{message['id']}.txt", message["action"].encode("utf-8"))
+    write_doc(f"audit/{message['id']}.txt", message["action"].encode("utf-8"))
     return {"audited": message["id"]}
 
 

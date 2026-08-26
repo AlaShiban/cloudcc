@@ -28,8 +28,10 @@ with Diagram(
     direction="LR",
 ):
     n_execution_unit_main = Lambda("main\nLambda")
+    n_execution_unit_summary = Lambda("summary\nLambda")
     n_expose_pet_api = APIGateway("pet-api\nAPI Gateway")
     n_persist_kv_petsByOwner = Dynamodb("petsByOwner\nDynamoDB")
 
+    n_execution_unit_main >> Edge(label="calls", color="darkorange", style="bold") >> n_execution_unit_summary
     n_expose_pet_api >> n_execution_unit_main
     n_execution_unit_main >> n_persist_kv_petsByOwner

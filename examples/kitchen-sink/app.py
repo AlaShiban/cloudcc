@@ -10,7 +10,7 @@ import json
 from fastapi import FastAPI, HTTPException
 import cloudcompiler as cloudcc
 
-from stores import cache, catalogue, db, docs, events, signing_key
+from stores import cache, catalogue, db, events, signing_key, write_doc
 
 cloudcc.execution_unit(id="api")
 
@@ -46,7 +46,7 @@ def get_item(item_id: str):
 def put_item(item_id: str, item: dict):
     catalogue.put_item(Item={"id": item_id, "item": json.dumps(item)})
     cache.delete(item_id)
-    docs.write(f"{item_id}.json", json.dumps(item).encode("utf-8"))
+    write_doc(f"{item_id}.json", json.dumps(item).encode("utf-8"))
     events.publish({"action": "upserted", "id": item_id})
     return {"ok": True, "id": item_id}
 

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "app": "petstore-multi",
-  "fingerprint": "d162e66f4dfbff5e373a71d54ca8c97065767b9b97eee8f1a5410231ae0c3110",
+  "fingerprint": "2edf449f199fb00c0f5b5a1280945d1f13e4079c42a9a384eb423f064ad3a709",
   "units": [
     "api",
     "worker"

@@ -29,6 +29,8 @@ defaults:
 execution_units:
   main:
     type: lambda
+  summary:
+    type: lambda
 exposed:
   pet-api:
     type: apigateway

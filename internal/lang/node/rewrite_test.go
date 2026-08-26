@@ -195,3 +195,42 @@ func sortedFileNames(files map[string][]byte) []string {
 	sort.Strings(out)
 	return out
 }
+
+// A remote call becomes a client of the other unit, and the import that made
+// the uncompiled program work has to go with it: the callee's module is
+// deliberately not in this unit's bundle.
+func TestRewriteRemote(t *testing.T) {
+	got := rewritten(t, `import * as pricingModule from "./pricing.js";
+import { remote } from "@cloudcompiler/sdk";
+
+const pricing = remote(pricingModule, { id: "pricing" });
+`)
+
+	if !strings.Contains(got, `_cloudccRpc.connect("pricing")`) {
+		t.Errorf("expected an rpc connect call:\n%s", got)
+	}
+	if strings.Contains(got, "pricingModule") {
+		t.Errorf("the callee's import survived; the module is not in this bundle:\n%s", got)
+	}
+	if !strings.Contains(got, `import * as _cloudccRpc from "./_cloudcc_runtime/rpc.js"`) {
+		t.Errorf("the rpc shim was not imported:\n%s", got)
+	}
+}
+
+// One statement can serve two purposes, and only one of them has moved over
+// the wire.
+func TestRewriteRemoteKeepsTheRestOfASharedImport(t *testing.T) {
+	got := rewritten(t, `import { menu, pricing } from "./lib.js";
+import { remote } from "@cloudcompiler/sdk";
+
+const priced = remote(pricing, { id: "pricing" });
+console.log(menu);
+`)
+
+	if strings.Contains(got, "pricing,") || strings.Contains(got, ", pricing") {
+		t.Errorf("the remote module is still imported:\n%s", got)
+	}
+	if !strings.Contains(got, "menu") {
+		t.Errorf("menu is still used by this unit and must still be imported:\n%s", got)
+	}
+}
