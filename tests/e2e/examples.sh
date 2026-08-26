@@ -94,7 +94,7 @@ SERVE
     ( cd "$dir" && exec env $env_pairs node cloudcc_e2e_serve.mjs ) &
   else
     ( cd "$dir" && exec env $env_pairs PYTHONPATH="$dir" \
-        uv run --quiet --with fastapi --with uvicorn --with boto3 \
+        uv run --quiet $(py_run_deps "$dir") \
           --with-editable "$REPO_ROOT/sdk/python" \
           python -m uvicorn "$target" --host 127.0.0.1 --port "$port" --log-level error ) &
   fi
@@ -185,6 +185,13 @@ for example in "${EXAMPLES[@]}"; do
   rm -rf "$work_src"
   cp -R "$src" "$work_src"
 
+  # A relational store and a cache are real engines rather than emulator
+  # resources: the emulator provisions RDS and ElastiCache but runs nothing
+  # behind them. Both halves talk to the same containers, which is what makes
+  # the comparison a comparison.
+  ensure_engines "$scenario"
+  reset_engines "$scenario"
+
   for table in $(jq -r '.tables // [] | .[]' "$scenario"); do
     reset_local_table "$table"
   done
@@ -237,6 +244,7 @@ for example in "${EXAMPLES[@]}"; do
     pulumi stack output --json --stack ministack \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' \
     | tr '\n' ' ')"
+  bindings="$(cache_endpoints_local "$bindings")"
 
   # The compiled *sources*, for both languages.
   #
@@ -251,6 +259,13 @@ for example in "${EXAMPLES[@]}"; do
   # rewritten source is the thing to run, with the host's own dependencies.
   unit_dir="$app_out_dir/$unit"
 
+  # Again, before the compiled half. The table and the bucket differ between
+  # the two runs -- one is the local name, the other is provisioned -- but the
+  # engines are literally the same containers, because the emulator cannot run
+  # them. Rows the first half wrote would otherwise be counted twice by the
+  # second, and the two runs would differ for a reason that has nothing to do
+  # with compiling.
+  reset_engines "$scenario"
   log "running the compiled copy against the emulator"
   serve "$unit_dir" "$language" "$target" "$PORT_B" "compiled" \
     "$bindings CLOUDCC_AWS_ENDPOINT_URL=$MINISTACK_ENDPOINT"
@@ -287,8 +302,14 @@ for example in "${EXAMPLES[@]}"; do
   [ "$deployed_count" -gt 0 ] \
     || fail "$example: read no resources out of the deployed stack, so the diagram was not checked"
 
+  # A few resources are named for the service that hosts them and drawn under
+  # the thing they are. A VPC, its subnets and its route tables all live in the
+  # ec2 API; nobody calls them ec2 resources, and the compiler does not either.
   missing=0
   for service in $(printf '%s\n' "$deployed_types" | cut -d: -f2 | cut -d/ -f1 | sort -u); do
+    case "$service" in
+      ec2) service=vpc ;;
+    esac
     grep -q "aws_${service}" "$app_out_dir/architecture.mmd" \
       || { warn "$example: $service is deployed but appears nowhere in architecture.mmd"; missing=$((missing + 1)); }
   done

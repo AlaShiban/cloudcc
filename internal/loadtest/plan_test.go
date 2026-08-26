@@ -235,3 +235,56 @@ func TestExpectationsRecordReachability(t *testing.T) {
 		t.Error("notify is not reachable in this fixture and should not be marked so")
 	}
 }
+
+// A "load" block often exists only to carry settings -- a scale ceiling, the
+// engines to start -- and preferring it unconditionally emptied the seed: every
+// request with a body went out without one, a fifth of the run came back 422,
+// and the stores those writes should have filled stayed empty. Three edges then
+// read as dead, none of which had anything wrong with them.
+//
+// This is the seed-selection rule on its own, because the failure it produces
+// points everywhere except at the seed.
+func TestASettingsOnlyLoadBlockDoesNotEmptyTheSeed(t *testing.T) {
+	for _, tc := range []struct {
+		name, doc string
+		wantBody  string
+	}{
+		{
+			name: "settings only",
+			doc: `{"requests":[{"method":"PUT","path":"/pets/1","body":{"name":"rex"}}],
+			       "load":{"scale":0.1}}`,
+			wantBody: "rex",
+		},
+		{
+			name: "load requests win when it has them",
+			doc: `{"requests":[{"method":"PUT","path":"/pets/1","body":{"name":"rex"}}],
+			       "load":{"requests":[{"method":"PUT","path":"/pets/1","body":{"name":"mia"}}]}}`,
+			wantBody: "mia",
+		},
+		{
+			name:     "no load block at all",
+			doc:      `{"requests":[{"method":"PUT","path":"/pets/1","body":{"name":"rex"}}]}`,
+			wantBody: "rex",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc struct {
+				Requests []SeedRequest `json:"requests"`
+				Load     *Seed         `json:"load"`
+			}
+			if err := json.Unmarshal([]byte(tc.doc), &doc); err != nil {
+				t.Fatal(err)
+			}
+			seed := Seed{Requests: doc.Requests}
+			if doc.Load != nil && len(doc.Load.Requests) > 0 {
+				seed = *doc.Load
+			}
+			if len(seed.Requests) == 0 {
+				t.Fatal("the seed is empty; every request with a body would go out without one")
+			}
+			if !strings.Contains(string(seed.Requests[0].Body), tc.wantBody) {
+				t.Errorf("body = %s, want one containing %q", seed.Requests[0].Body, tc.wantBody)
+			}
+		})
+	}
+}

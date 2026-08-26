@@ -158,3 +158,24 @@ func TestTheFallbackRenderDoesNotClaimTheArchitectureName(t *testing.T) {
 			ResourcePNGFile("demo"))
 	}
 }
+
+// The exhaustive view answers "what will exist in the account", and the e2e
+// harness checks it against the deployed stack resource for resource. A data
+// source is a query rather than a thing: it appears in no deployment's
+// resource list, so drawing it makes the diagram permanently disagree with
+// the stack by one -- which trains people to ignore the check that found it.
+func TestDataSourcesAreNotDrawnAsResources(t *testing.T) {
+	p := archProgram(t)
+	zones := ir.NewResource("aws.availabilityzones", "vpc", "aws.getAvailabilityZones", nil, nil)
+	p.AddResource(zones)
+
+	got := string(Mermaid(p, Options{App: "demo", View: Resources}))
+	if strings.Contains(got, "availabilityzones") {
+		t.Errorf("a data source is drawn as a resource:\n%s", got)
+	}
+	// And the resources around it still are, so this is not just an empty
+	// diagram passing the check.
+	if !strings.Contains(got, "aws_dynamodb_pets") {
+		t.Errorf("real resources went missing with it:\n%s", got)
+	}
+}

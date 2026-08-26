@@ -48,6 +48,14 @@ log "workdir:  $WORK"
 log "building cloudcc"
 ( cd "$REPO_ROOT" && go build -o "$WORK/cloudcc" ./cmd/cloudcc )
 
+# Whatever the example needs that the emulator provisions but does not run:
+# a Postgres behind its RDS instance, a Redis behind its ElastiCache cluster.
+SCENARIO="$REPO_ROOT/tests/e2e/scenarios/$EXAMPLE.json"
+if [ -f "$SCENARIO" ]; then
+  ensure_engines "$SCENARIO"
+  reset_engines "$SCENARIO"
+fi
+
 log "compiling examples/$EXAMPLE"
 "$WORK/cloudcc" "$REPO_ROOT/examples/$EXAMPLE" -o "$OUT"
 
@@ -127,6 +135,8 @@ fi
 log "wiring the compiled application from stack outputs"
 eval "$(pulumi stack output --json --stack "$STACK" \
         | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "export \(.key)=\(.value|@sh)"')"
+export_cache_endpoints_local
+seed_secrets "$(pulumi stack output --json --stack "$STACK")"
 
 [ -n "${CLOUDCC_KV_PETSBYOWNER_TABLE:-}" ] || fail "the stack did not export CLOUDCC_KV_PETSBYOWNER_TABLE"
 log "table: $CLOUDCC_KV_PETSBYOWNER_TABLE"
@@ -211,7 +221,7 @@ else
     cd "$UNIT_DIR"
     exec env CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
       PYTHONPATH="$UNIT_DIR" \
-      uv run --quiet --with fastapi --with uvicorn --with boto3 \
+      uv run --quiet $(py_run_deps "$UNIT_DIR") \
         python -m uvicorn "$PY_TARGET" --host 127.0.0.1 --port 8099 --log-level warning
   ) &
 fi

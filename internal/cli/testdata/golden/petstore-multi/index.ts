@@ -8,6 +8,10 @@ const petApiApi = new aws.apigatewayv2.Api("pet-api", {
     protocolType: "HTTP",
 });
 
+const networkZones = aws.getAvailabilityZonesOutput({
+    state: "available",
+});
+
 const apiLogs = new aws.cloudwatch.LogGroup("api", {
     name: "/aws/lambda/petstore-multi-api",
     retentionInDays: 14,
@@ -73,6 +77,37 @@ const petAuditBucket = new aws.s3.BucketV2("petAudit", {
     forceDestroy: true,
 });
 
+const petstoreSiteBucket = new aws.s3.BucketV2("petstore-site", {
+    bucket: "petstore-multi-petstore-site",
+    forceDestroy: true,
+});
+
+const petstoreSiteIndexHtmlObject = new aws.s3.BucketObject("petstore-site/index.html", {
+    bucket: petstoreSiteBucket.id,
+    contentType: "text/html; charset=utf-8",
+    key: "index.html",
+    source: new pulumi.asset.FileAsset("static/petstore-site/index.html"),
+});
+
+const petstoreSiteStyleCssObject = new aws.s3.BucketObject("petstore-site/style.css", {
+    bucket: petstoreSiteBucket.id,
+    contentType: "text/css; charset=utf-8",
+    key: "style.css",
+    source: new pulumi.asset.FileAsset("static/petstore-site/style.css"),
+});
+
+const petstoreSiteWebsite = new aws.s3.BucketWebsiteConfigurationV2("petstore-site", {
+    bucket: petstoreSiteBucket.id,
+    indexDocument: {
+        suffix: "index.html",
+    },
+});
+
+const auditKeySecret = new aws.secretsmanager.Secret("auditKey", {
+    name: "petstore-multi-auditKey",
+    recoveryWindowInDays: 0,
+});
+
 const workerPolicy = new aws.iam.RolePolicy("worker", {
     name: "petstore-multi-worker-policy",
     policy: pulumi.jsonStringify({
@@ -106,40 +141,177 @@ const workerPolicy = new aws.iam.RolePolicy("worker", {
                 pulumi.interpolate`${petsByOwnerTable.arn}/index/*`,
             ],
         },
+        {
+            Action: [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:PutSecretValue",
+            ],
+            Effect: "Allow",
+            Resource: [
+                auditKeySecret.arn,
+            ],
+        },
     ],
     Version: "2012-10-17",
 }),
     role: workerRole.id,
 });
 
-const petstoreSiteBucket = new aws.s3.BucketV2("petstore-site", {
-    bucket: "petstore-multi-petstore-site",
-    forceDestroy: true,
+const petEventsTopic = new aws.sns.Topic("petEvents", {
+    name: "petstore-multi-petEvents",
 });
 
-const petstoreSiteIndexHtmlObject = new aws.s3.BucketObject("petstore-site/index.html", {
-    bucket: petstoreSiteBucket.id,
-    contentType: "text/html; charset=utf-8",
-    key: "index.html",
-    source: new pulumi.asset.FileAsset("static/petstore-site/index.html"),
+const workerEnv: { [key: string]: pulumi.Input<string> } = {
+    CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
+    CLOUDCC_FS_PETAUDIT_BUCKET: pulumi.interpolate`${petAuditBucket.bucket}`,
+    CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_SECRET_AUDITKEY_ARN: pulumi.interpolate`${auditKeySecret.arn}`,
+    CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
+    CLOUDCC_UNIT: `worker`,
+};
+
+const workerFn = new aws.lambda.Function("worker", {
+    code: new pulumi.asset.FileArchive("build/worker.zip"),
+    environment: { variables: workerEnv },
+    handler: "cloudcc_lambda_entry.handler",
+    memorySize: 512,
+    name: "petstore-multi-worker",
+    role: workerRole.arn,
+    runtime: "python3.12",
+    timeout: 30,
 });
 
-const petstoreSiteStyleCssObject = new aws.s3.BucketObject("petstore-site/style.css", {
-    bucket: petstoreSiteBucket.id,
-    contentType: "text/css; charset=utf-8",
-    key: "style.css",
-    source: new pulumi.asset.FileAsset("static/petstore-site/style.css"),
+const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents-sns", {
+    action: "lambda:InvokeFunction",
+    function: workerFn.name,
+    principal: "sns.amazonaws.com",
+    sourceArn: petEventsTopic.arn,
+    statementId: "petstore-multi-worker-petEvents-sns",
 });
 
-const petstoreSiteWebsite = new aws.s3.BucketWebsiteConfigurationV2("petstore-site", {
-    bucket: petstoreSiteBucket.id,
-    indexDocument: {
-        suffix: "index.html",
+const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEvents", {
+    endpoint: workerFn.arn,
+    protocol: "lambda",
+    topic: petEventsTopic.arn,
+});
+
+const networkVpc = new aws.ec2.Vpc("network", {
+    cidrBlock: "10.0.0.0/16",
+    enableDnsHostnames: true,
+    enableDnsSupport: true,
+    tags: {
+        Name: "petstore-multi-network",
     },
 });
 
-const petEventsTopic = new aws.sns.Topic("petEvents", {
-    name: "petstore-multi-petEvents",
+const networkGateway = new aws.ec2.InternetGateway("network", {
+    vpcId: networkVpc.id,
+});
+
+const networkRoutes = new aws.ec2.RouteTable("network", {
+    routes: [
+        {
+            cidrBlock: "0.0.0.0/0",
+            gatewayId: networkGateway.id,
+        },
+    ],
+    vpcId: networkVpc.id,
+});
+
+const networkSecurityGroup = new aws.ec2.SecurityGroup("network", {
+    description: "Managed by cloudcc: traffic between compiled units and their datastores",
+    egress: [
+        {
+            cidrBlocks: [
+                "0.0.0.0/0",
+            ],
+            fromPort: 0,
+            protocol: "-1",
+            toPort: 0,
+        },
+    ],
+    ingress: [
+        {
+            cidrBlocks: [
+                "0.0.0.0/0",
+            ],
+            description: "inbound from the load balancer and within the VPC",
+            fromPort: 0,
+            protocol: "-1",
+            toPort: 0,
+        },
+    ],
+    vpcId: networkVpc.id,
+});
+
+const network0Subnet = new aws.ec2.Subnet("network-0", {
+    availabilityZone: networkZones.names.apply(n => n[0]),
+    cidrBlock: "10.0.0.0/24",
+    mapPublicIpOnLaunch: true,
+    tags: {
+        Name: "petstore-multi-network-0",
+    },
+    vpcId: networkVpc.id,
+});
+
+const network0RouteAssoc = new aws.ec2.RouteTableAssociation("network-0", {
+    routeTableId: networkRoutes.id,
+    subnetId: network0Subnet.id,
+});
+
+const network1Subnet = new aws.ec2.Subnet("network-1", {
+    availabilityZone: networkZones.names.apply(n => n[1]),
+    cidrBlock: "10.0.1.0/24",
+    mapPublicIpOnLaunch: true,
+    tags: {
+        Name: "petstore-multi-network-1",
+    },
+    vpcId: networkVpc.id,
+});
+
+const elasticacheSubnetGroup = new aws.elasticache.SubnetGroup("elasticache", {
+    name: "petstore-multi-elasticache",
+    subnetIds: [
+        network0Subnet.id,
+        network1Subnet.id,
+    ],
+});
+
+const petCacheCache = new aws.elasticache.Cluster("petCache", {
+    clusterId: "petstore-multi-petcache",
+    engine: "redis",
+    nodeType: "cache.t4g.micro",
+    numCacheNodes: 1,
+    port: 6379,
+    securityGroupIds: [
+        networkSecurityGroup.id,
+    ],
+    subnetGroupName: elasticacheSubnetGroup.name,
+});
+
+const rdsSubnetGroup = new aws.rds.SubnetGroup("rds", {
+    name: "petstore-multi-rds",
+    subnetIds: [
+        network0Subnet.id,
+        network1Subnet.id,
+    ],
+});
+
+const petsdbDb = new aws.rds.Instance("petsdb", {
+    allocatedStorage: 20,
+    dbName: "petsdb",
+    dbSubnetGroupName: rdsSubnetGroup.name,
+    engine: "postgres",
+    identifier: "petstore-multi-petsdb",
+    instanceClass: "db.t4g.micro",
+    manageMasterUserPassword: true,
+    publiclyAccessible: false,
+    skipFinalSnapshot: true,
+    username: "ccadmin",
+    vpcSecurityGroupIds: [
+        networkSecurityGroup.id,
+    ],
 });
 
 const apiPolicy = new aws.iam.RolePolicy("api", {
@@ -164,6 +336,15 @@ const apiPolicy = new aws.iam.RolePolicy("api", {
         },
         {
             Action: [
+                "secretsmanager:GetSecretValue",
+            ],
+            Effect: "Allow",
+            Resource: [
+                petsdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? ""),
+            ],
+        },
+        {
+            Action: [
                 "sns:Publish",
             ],
             Effect: "Allow",
@@ -182,6 +363,11 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_CONFIG_LOG_LEVEL: "info",
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
     CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_ORM_PETSDB_SECRET_ARN: pulumi.interpolate`${petsdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`,
+    CLOUDCC_ORM_PETSDB_URL: pulumi.interpolate`postgresql://ccadmin@${petsdbDb.address}:${petsdbDb.port}/petsdb`,
+    CLOUDCC_REDIS_PETCACHE_ENDPOINT: pulumi.interpolate`${petCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`,
+    CLOUDCC_REDIS_PETCACHE_PORT: "6379",
+    CLOUDCC_REDIS_PETCACHE_TLS: "false",
     CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
     CLOUDCC_UNIT: `api`,
     LOG_LEVEL: "info",
@@ -226,38 +412,9 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
     statementId: "petstore-multi-pet-api-invoke",
 });
 
-const workerEnv: { [key: string]: pulumi.Input<string> } = {
-    CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
-    CLOUDCC_FS_PETAUDIT_BUCKET: pulumi.interpolate`${petAuditBucket.bucket}`,
-    CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
-    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
-    CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
-    CLOUDCC_UNIT: `worker`,
-};
-
-const workerFn = new aws.lambda.Function("worker", {
-    code: new pulumi.asset.FileArchive("build/worker.zip"),
-    environment: { variables: workerEnv },
-    handler: "cloudcc_lambda_entry.handler",
-    memorySize: 512,
-    name: "petstore-multi-worker",
-    role: workerRole.arn,
-    runtime: "python3.12",
-    timeout: 30,
-});
-
-const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents-sns", {
-    action: "lambda:InvokeFunction",
-    function: workerFn.name,
-    principal: "sns.amazonaws.com",
-    sourceArn: petEventsTopic.arn,
-    statementId: "petstore-multi-worker-petEvents-sns",
-});
-
-const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEvents", {
-    endpoint: workerFn.arn,
-    protocol: "lambda",
-    topic: petEventsTopic.arn,
+const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {
+    routeTableId: networkRoutes.id,
+    subnetId: network1Subnet.id,
 });
 
 // Stack outputs. Every environment binding is exported under the exact
@@ -266,6 +423,12 @@ const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEve
 export const CLOUDCC_FS_PETAUDIT_BUCKET = pulumi.interpolate`${petAuditBucket.bucket}`;
 export const CLOUDCC_GATEWAY_PET_API_URL = pulumi.interpolate`${petApiApi.apiEndpoint}`;
 export const CLOUDCC_KV_PETSBYOWNER_TABLE = pulumi.interpolate`${petsByOwnerTable.name}`;
+export const CLOUDCC_ORM_PETSDB_SECRET_ARN = pulumi.interpolate`${petsdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`;
+export const CLOUDCC_ORM_PETSDB_URL = pulumi.interpolate`postgresql://ccadmin@${petsdbDb.address}:${petsdbDb.port}/petsdb`;
+export const CLOUDCC_REDIS_PETCACHE_ENDPOINT = pulumi.interpolate`${petCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`;
+export const CLOUDCC_REDIS_PETCACHE_PORT = "6379";
+export const CLOUDCC_REDIS_PETCACHE_TLS = "false";
+export const CLOUDCC_SECRET_AUDITKEY_ARN = pulumi.interpolate`${auditKeySecret.arn}`;
 export const CLOUDCC_STATIC_PETSTORE_SITE_BUCKET = pulumi.interpolate`${petstoreSiteBucket.bucket}`;
 export const CLOUDCC_STATIC_PETSTORE_SITE_URL = pulumi.interpolate`${petstoreSiteWebsite.websiteEndpoint}`;
 export const CLOUDCC_TOPIC_PETEVENTS_ARN = pulumi.interpolate`${petEventsTopic.arn}`;

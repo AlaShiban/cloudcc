@@ -1,13 +1,67 @@
 {
-  "description": "Two units sharing a module, a table and a topic; the api unit serves.",
+  "description": "Two units sharing a module, a table and a topic, plus a relational catalogue, a cache and a managed secret -- the breadth of capabilities that an emulator plus a real engine can actually run.",
   "unit": "api",
-  "tables": ["pets"],
+  "tables": [
+    "pets"
+  ],
   "requests": [
-    {"method": "GET", "path": "/health"},
-    {"method": "GET", "path": "/pets/1"},
-    {"method": "PUT", "path": "/pets/1", "body": {"name": "rex", "species": "dog"}},
-    {"method": "GET", "path": "/pets/1"},
-    {"method": "DELETE", "path": "/pets/1"},
-    {"method": "GET", "path": "/pets/1"}
-  ]
+    {
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "method": "GET",
+      "path": "/breeds"
+    },
+    {
+      "method": "GET",
+      "path": "/pets/1"
+    },
+    {
+      "method": "PUT",
+      "path": "/pets/1",
+      "body": {
+        "name": "rex",
+        "species": "dog",
+        "breed": "labrador"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/pets/1"
+    },
+    {
+      "method": "GET",
+      "path": "/pets/1"
+    },
+    {
+      "method": "PUT",
+      "path": "/pets/2",
+      "body": {
+        "name": "mia",
+        "species": "cat",
+        "breed": "siamese"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/breeds"
+    },
+    {
+      "method": "DELETE",
+      "path": "/pets/1"
+    },
+    {
+      "method": "GET",
+      "path": "/pets/1"
+    }
+  ],
+  "engines": [
+    "postgres",
+    "redis"
+  ],
+  "load": {
+    "scale": 0.06,
+    "_scale_why": "One PUT publishes one message, and the emulator starts a Lambda container per delivery without reaping it -- a few hundred exhausts it regardless of how much memory the VM has. This is the emulator's ceiling, not the application's."
+  }
 }

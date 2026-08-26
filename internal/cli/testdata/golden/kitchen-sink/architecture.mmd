@@ -7,7 +7,6 @@ flowchart LR
     aws_apigatewayv2_route_shop_api["shop-api\napigatewayv2.route"]
     aws_apigatewayv2_stage_shop_api["shop-api\napigatewayv2.stage"]
     aws_apigatewayv2_shop_api(["shop-api\napigatewayv2"])
-    aws_availabilityzones_network["network\navailabilityzones"]
     aws_cloudwatch_loggroup_api["api\ncloudwatch.loggroup"]
     aws_cloudwatch_loggroup_reporter["reporter\ncloudwatch.loggroup"]
     aws_dynamodb_catalogue[("catalogue\ndynamodb")]
@@ -91,9 +90,7 @@ flowchart LR
     aws_vpc_routetable_network --> aws_vpc_gateway_network
     aws_vpc_routetable_network --> aws_vpc_network
     aws_vpc_securitygroup_network --> aws_vpc_network
-    aws_vpc_subnet_network_0 --> aws_availabilityzones_network
     aws_vpc_subnet_network_0 --> aws_vpc_network
-    aws_vpc_subnet_network_1 --> aws_availabilityzones_network
     aws_vpc_subnet_network_1 --> aws_vpc_network
     aws_ecs_service_reporter -->|uses| aws_dynamodb_catalogue
     aws_ecs_service_reporter -->|uses| aws_elasticache_itemCache

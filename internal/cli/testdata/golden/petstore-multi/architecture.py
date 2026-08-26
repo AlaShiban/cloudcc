@@ -17,9 +17,10 @@ Recompiling overwrites this file. Copy it before editing.
 
 from diagrams import Diagram, Edge
 from diagrams.aws.compute import Lambda
-from diagrams.aws.database import Dynamodb
+from diagrams.aws.database import Dynamodb, ElastiCache, RDS
 from diagrams.aws.integration import SNS
 from diagrams.aws.network import APIGateway
+from diagrams.aws.security import SecretsManager
 from diagrams.aws.storage import S3, SimpleStorageServiceS3BucketWithObjects
 
 with Diagram(
@@ -34,6 +35,9 @@ with Diagram(
     n_expose_pet_api = APIGateway("pet-api\nAPI Gateway")
     n_persist_fs_petAudit = S3("petAudit\nS3")
     n_persist_kv_petsByOwner = Dynamodb("petsByOwner\nDynamoDB")
+    n_persist_orm_petsdb = RDS("petsdb\nRDS")
+    n_persist_redis_petCache = ElastiCache("petCache\nElastiCache")
+    n_persist_secret_auditKey = SecretsManager("auditKey\nSecrets Manager")
     n_pubsub_petEvents = SNS("petEvents\nSNS")
     n_static_unit_petstore_site = SimpleStorageServiceS3BucketWithObjects("petstore-site\nS3 website")
 
@@ -41,5 +45,8 @@ with Diagram(
     n_execution_unit_api >> Edge(label="publishes") >> n_pubsub_petEvents
     n_pubsub_petEvents >> Edge(label="subscribes", style="dashed") >> n_execution_unit_worker
     n_execution_unit_api >> n_persist_kv_petsByOwner
+    n_execution_unit_api >> n_persist_orm_petsdb
+    n_execution_unit_api >> n_persist_redis_petCache
     n_execution_unit_worker >> n_persist_fs_petAudit
     n_execution_unit_worker >> n_persist_kv_petsByOwner
+    n_execution_unit_worker >> n_persist_secret_auditKey

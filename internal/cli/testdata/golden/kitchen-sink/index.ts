@@ -277,9 +277,9 @@ const reporterEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_FS_ITEMDOCS_BUCKET: pulumi.interpolate`${itemDocsBucket.bucket}`,
     CLOUDCC_KV_CATALOGUE_TABLE: pulumi.interpolate`${catalogueTable.name}`,
     CLOUDCC_LOG_DESTINATION: `cloudwatch`,
-    CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s[0].secretArn)}`,
+    CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`,
     CLOUDCC_ORM_SHOPDB_URL: pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`,
-    CLOUDCC_REDIS_ITEMCACHE_ENDPOINT: pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n[0].address)}`,
+    CLOUDCC_REDIS_ITEMCACHE_ENDPOINT: pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`,
     CLOUDCC_REDIS_ITEMCACHE_PORT: "6379",
     CLOUDCC_REDIS_ITEMCACHE_TLS: "false",
     CLOUDCC_SECRET_SIGNINGKEY_ARN: pulumi.interpolate`${signingKeySecret.arn}`,
@@ -382,7 +382,7 @@ const reporterPolicy = new aws.iam.RolePolicy("reporter", {
             ],
             Effect: "Allow",
             Resource: [
-                shopdbDb.masterUserSecrets.apply(s => s[0].secretArn),
+                shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? ""),
             ],
         },
         {
@@ -440,7 +440,7 @@ const apiPolicy = new aws.iam.RolePolicy("api", {
             ],
             Effect: "Allow",
             Resource: [
-                shopdbDb.masterUserSecrets.apply(s => s[0].secretArn),
+                shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? ""),
             ],
         },
         {
@@ -475,9 +475,9 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_FS_ITEMDOCS_BUCKET: pulumi.interpolate`${itemDocsBucket.bucket}`,
     CLOUDCC_KV_CATALOGUE_TABLE: pulumi.interpolate`${catalogueTable.name}`,
     CLOUDCC_LOG_DESTINATION: `cloudwatch`,
-    CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s[0].secretArn)}`,
+    CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`,
     CLOUDCC_ORM_SHOPDB_URL: pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`,
-    CLOUDCC_REDIS_ITEMCACHE_ENDPOINT: pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n[0].address)}`,
+    CLOUDCC_REDIS_ITEMCACHE_ENDPOINT: pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`,
     CLOUDCC_REDIS_ITEMCACHE_PORT: "6379",
     CLOUDCC_REDIS_ITEMCACHE_TLS: "false",
     CLOUDCC_SECRET_SIGNINGKEY_ARN: pulumi.interpolate`${signingKeySecret.arn}`,
@@ -537,9 +537,9 @@ export const CLOUDCC_FS_ITEMDOCS_BUCKET = pulumi.interpolate`${itemDocsBucket.bu
 export const CLOUDCC_GATEWAY_REPORTER_WEB_URL = pulumi.interpolate`http://${reporterWebAlb.dnsName}`;
 export const CLOUDCC_GATEWAY_SHOP_API_URL = pulumi.interpolate`${shopApiApi.apiEndpoint}`;
 export const CLOUDCC_KV_CATALOGUE_TABLE = pulumi.interpolate`${catalogueTable.name}`;
-export const CLOUDCC_ORM_SHOPDB_SECRET_ARN = pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s[0].secretArn)}`;
+export const CLOUDCC_ORM_SHOPDB_SECRET_ARN = pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`;
 export const CLOUDCC_ORM_SHOPDB_URL = pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`;
-export const CLOUDCC_REDIS_ITEMCACHE_ENDPOINT = pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n[0].address)}`;
+export const CLOUDCC_REDIS_ITEMCACHE_ENDPOINT = pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`;
 export const CLOUDCC_REDIS_ITEMCACHE_PORT = "6379";
 export const CLOUDCC_REDIS_ITEMCACHE_TLS = "false";
 export const CLOUDCC_SECRET_SIGNINGKEY_ARN = pulumi.interpolate`${signingKeySecret.arn}`;

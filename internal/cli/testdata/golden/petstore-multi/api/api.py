@@ -1,4 +1,17 @@
-"""The HTTP-facing execution unit."""
+"""The HTTP-facing execution unit.
+
+It holds four kinds of state, each declared by wrapping the client that
+provides it, and each becoming a different AWS service once compiled:
+
+    a boto3 Table          -> DynamoDB      the pets themselves
+    a SQLAlchemy engine    -> RDS Postgres  the breed catalogue
+    a redis.Redis          -> ElastiCache   a cache in front of the reads
+    a cloudcc.Topic        -> SNS           what the worker reacts to
+
+Nothing below says any of those service names. The client's type decides the
+capability and cloudcc.yaml chooses between variants of it, so moving the cache
+to MemoryDB is a configuration change rather than a code change.
+"""
 # Injected by cloudcc: runtime clients for this program's declared capabilities.
 from _cloudcc_runtime import config as _cloudcc_config
 from _cloudcc_runtime import expose as _cloudcc_expose
@@ -6,6 +19,14 @@ from _cloudcc_runtime import expose as _cloudcc_expose
 
 from fastapi import FastAPI, HTTPException
 
+from shared.catalogue import (
+    breeds,
+    cache_summary,
+    cached_summary,
+    ensure_schema,
+    forget,
+    record_sighting,
+)
 from shared.store import delete_pet as drop_pet, events, read_pet, summarize, write_pet
 
 None
@@ -19,26 +40,48 @@ _cloudcc_expose.register(app, id="pet-api")
 
 log_level = _cloudcc_config.value("log_level", default="info")
 
+ensure_schema()
+
 
 @app.get("/pets/{pet_id}")
 def get_pet(pet_id: str):
     pet = read_pet(pet_id)
     if pet is None:
         raise HTTPException(status_code=404, detail="no such pet")
-    return pet
+    # The cache is consulted for the summary only. The pet itself comes from
+    # the table either way, so a stale cache costs a description rather than a
+    # wrong record.
+    summary = cached_summary(pet_id)
+    if summary is None:
+        summary = summarize(pet)
+        cache_summary(pet_id, summary)
+        cached = False
+    else:
+        cached = True
+    return {**pet, "summary": summary, "cached": cached}
 
 
 @app.put("/pets/{pet_id}")
 def put_pet(pet_id: str, pet: dict):
     write_pet(pet_id, pet)
-    events.publish({"action": "created", "id": pet_id, "summary": summarize(pet)})
-    return {"ok": True, "id": pet_id}
+    summary = summarize(pet)
+    cache_summary(pet_id, summary)
+    seen = record_sighting(pet.get("breed", "unrecorded"), pet.get("species", "unknown"))
+    events.publish({"action": "created", "id": pet_id, "summary": summary})
+    return {"ok": True, "id": pet_id, "breed_seen": seen}
 
 
 @app.delete("/pets/{pet_id}")
 def delete_pet(pet_id: str):
     drop_pet(pet_id)
+    forget(pet_id)
     return {"ok": True}
+
+
+@app.get("/breeds")
+def list_breeds():
+    """The relational read path: a query rather than a key lookup."""
+    return {"breeds": breeds()}
 
 
 @app.get("/health")
