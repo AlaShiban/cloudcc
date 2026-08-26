@@ -236,6 +236,35 @@ COUNT="$(aws_local dynamodb scan --table-name "$CLOUDCC_KV_PETSBYOWNER_TABLE" | 
 [ "$COUNT" = "1" ] || fail "expected exactly one item in $CLOUDCC_KV_PETSBYOWNER_TABLE, found $COUNT"
 pass "L5 the write reached DynamoDB"
 
+# The subscriber, if this application has one.
+#
+# The PUT above published an event. In a multi-unit application that wakes a
+# second, deployed unit, which writes to its own store -- and nothing in this
+# harness went anywhere near that unit. petstore-multi's worker was never
+# invoked by any test at all, which is how four calls to a method its client
+# does not have survived in the examples.
+#
+# Derived from the stack rather than named per example: an application that
+# exported a file-store bucket has a unit writing to one, and this waits for it.
+FS_BUCKET="$(pulumi stack output --json --stack "$STACK" \
+             | jq -r 'to_entries[] | select(.key | test("^CLOUDCC_FS_.*_BUCKET$")) | .value' \
+             | head -1)"
+if [ -n "$FS_BUCKET" ] && skip_unless_service s3; then
+  log "waiting for the subscriber to write to $FS_BUCKET"
+  OBJECTS=0
+  for _ in $(seq 1 20); do
+    OBJECTS="$(aws_local s3api list-objects-v2 --bucket "$FS_BUCKET" --output json 2>/dev/null \
+               | jq -r '(.Contents // []) | length')"
+    [ "${OBJECTS:-0}" -ge 1 ] && break
+    sleep 2
+  done
+  [ "${OBJECTS:-0}" -ge 1 ] \
+    || fail "nothing reached $FS_BUCKET. The published event should have woken a
+  subscribing unit, which writes to its own store -- so either the message was
+  not delivered, or the handler raised."
+  pass "L5 the published event reached a subscriber, which wrote to its own store"
+fi
+
 curl -sf -X DELETE http://127.0.0.1:8099/pets/1 >/dev/null || fail "DELETE /pets/1 failed"
 COUNT="$(aws_local dynamodb scan --table-name "$CLOUDCC_KV_PETSBYOWNER_TABLE" | jq -r '.Count')"
 [ "$COUNT" = "0" ] || fail "expected the item to be deleted, found $COUNT"

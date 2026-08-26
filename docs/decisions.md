@@ -121,9 +121,26 @@ Three decisions in it are worth stating, because each was a choice:
   failure ordinary testing misses, because the cycle only closes when both
   branches are taken in one request.
 
-Only SNS-backed topics and Python units are supported so far; a Node unit on
-either end of a call is a clean error naming the gap, since nothing dispatches
-an inbound call in that runtime yet.
+Both runtimes implement it, and they implement the *same* JSON envelope, so a
+unit does not need to know what the unit it is calling was written in. A parity
+test pins the two spellings together.
+
+**A call is nevertheless same-language, and that is a design consequence rather
+than a gap.** The argument to `remote` is the callee's module, imported the
+ordinary way, and one process cannot import both a Python module and a
+JavaScript one. Across languages there would be nothing to pass and nothing to
+check the call against, and the program would only run once compiled — which is
+exactly the property this compiler exists to avoid depending on. Units in
+different languages talk through a topic, which is a message rather than a call
+and needs no shared module; `examples/mixed` does that.
+
+**A reply is always an envelope**, never the returned value on its own. A
+function returning a string would otherwise put a bare scalar on the wire, and
+whether it arrives quoted turns out to depend on the Lambda implementation
+rather than on the program: the same code worked on one and failed on another
+with `the reply was not JSON: rex (dog)`. Wrapping it costs nine bytes, makes
+every reply parseable the same way, and keeps "returned null" and "answered
+nothing at all" different answers.
 
 ## Deviations from the brief
 

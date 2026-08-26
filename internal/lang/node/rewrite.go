@@ -56,6 +56,7 @@ var libraryShims = map[string]shimTarget{
 var verbShims = map[string]shimTarget{
 	sdkdetect.FnConfigValue:   {Module: "config", Alias: "_cloudccConfig", Call: "value", Args: []string{"id", "default"}},
 	sdkdetect.FnExpose:        {Module: "expose", Alias: "_cloudccExpose", Call: "register", Args: []string{"app", "id", "target"}},
+	sdkdetect.FnRemote:        {Module: "rpc", Alias: "_cloudccRpc", Call: "connect", Args: []string{"id"}},
 	sdkdetect.FnExecutionUnit: {Erase: "undefined"},
 	sdkdetect.FnStaticUnit:    {Erase: "undefined"},
 	sdkdetect.FnEmbedAssets:   {Erase: "pattern"},
@@ -145,6 +146,27 @@ func rewrite(f *source.File, hints []sdkdetect.Hint, esm bool) error {
 	}
 
 	for _, span := range imp.spans {
+		splices = append(splices, splice{span[0], span[1], ""})
+	}
+
+	// A module reached through cloudcc.remote is another unit's entry module,
+	// and this unit's bundle deliberately does not carry it, so the import that
+	// made the uncompiled program work goes with the call it served.
+	//
+	// Every remote target in the file is resolved together rather than one hint
+	// at a time: three units imported from one statement should take the whole
+	// statement with them, and three independent passes would each see one
+	// specifier out of three and leave `import {} from "./x.js"` behind.
+	remoteNames := map[string]bool{}
+	for _, h := range hints {
+		if h.File != f.Path || h.Func != sdkdetect.FnRemote {
+			continue
+		}
+		if target, ok := h.Args["target"].(string); ok && target != "" {
+			remoteNames[target] = true
+		}
+	}
+	for _, span := range importBindingSpans(f, remoteNames) {
 		splices = append(splices, splice{span[0], span[1], ""})
 	}
 	if len(splices) == 0 {

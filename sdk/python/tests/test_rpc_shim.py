@@ -102,8 +102,9 @@ def test_dispatch_awaits_an_async_function(rpc):
     event = {rpc.CALL_KEY: {"function": "quote", "args": [["a", "b"]], "kwargs": {"surge": 3}}}
 
     # The value, not a coroutine: a handler that returned the coroutine would
-    # serialise as null and the caller would see None.
-    assert rpc.dispatch(module, event) == {"total": 6}
+    # serialise as null and the caller would see None. And wrapped, because a
+    # reply is always an envelope.
+    assert rpc.dispatch(module, event) == {rpc.RESULT_KEY: {"total": 6}}
 
 
 def test_dispatch_turns_a_failure_into_an_error_envelope(rpc):
@@ -140,7 +141,7 @@ def test_is_call_distinguishes_a_call_from_other_events(rpc):
 
 def test_a_call_sends_the_function_and_arguments(rpc):
     remote = rpc.Remote("pricing", "nomnom-pricing")
-    fake = FakeLambda(reply={"total": 12})
+    fake = FakeLambda(reply={rpc.RESULT_KEY: {"total": 12}})
     remote._lambda = fake
 
     assert asyncio.run(remote.quote(["a"], surge=2)) == {"total": 12}
@@ -205,3 +206,58 @@ def test_connect_reads_the_function_name_from_the_environment(rpc):
     remote = rpc.connect("pricing")
     assert remote.id == "pricing"
     assert remote._function == "deployed-pricing"
+
+
+def test_a_bare_scalar_survives_the_round_trip(rpc):
+    """The reason a reply is an envelope at all.
+
+    A function returning a string used to put a bare scalar on the wire, and
+    whether it arrived quoted turned out to depend on the runtime rather than
+    on the program -- so the same code worked on one Lambda implementation and
+    failed on another with "the reply was not JSON: rex (dog)". Wrapping it
+    makes the reply self-describing everywhere.
+    """
+    module = types.SimpleNamespace()
+
+    async def describe(pet):
+        return "%s (%s)" % (pet["name"], pet["species"])
+
+    module.describe = describe
+    event = {rpc.CALL_KEY: {"function": "describe", "args": [{"name": "rex", "species": "dog"}]}}
+    reply = rpc.dispatch(module, event)
+    assert reply == {rpc.RESULT_KEY: "rex (dog)"}
+
+    remote = rpc.Remote("pricing", "fn")
+    remote._lambda = FakeLambda(reply=reply)
+    assert asyncio.run(remote.describe({})) == "rex (dog)"
+
+
+def test_returning_none_is_not_the_same_as_answering_nothing(rpc):
+    remote = rpc.Remote("pricing", "fn")
+    remote._lambda = FakeLambda(reply={rpc.RESULT_KEY: None})
+    assert asyncio.run(remote.quote([])) is None
+
+    empty = rpc.Remote("pricing", "fn")
+    empty._lambda = FakeLambda(reply=None)
+    empty._lambda.reply = None
+    # An empty payload is a failure, not a null return.
+    empty._lambda = _EmptyLambda()
+    with pytest.raises(rpc.RemoteError) as caught:
+        asyncio.run(empty.quote([]))
+    assert "empty" in str(caught.value)
+
+
+class _EmptyLambda:
+    """A runtime that answered with no payload at all."""
+
+    def invoke(self, **kwargs):
+        return {"Payload": types.SimpleNamespace(read=lambda: b"")}
+
+
+def test_a_reply_from_something_else_is_refused(rpc):
+    """A unit answering a shape this caller was not compiled for."""
+    remote = rpc.Remote("pricing", "fn")
+    remote._lambda = FakeLambda(reply={"statusCode": 200, "body": "hello"})
+    with pytest.raises(rpc.RemoteError) as caught:
+        asyncio.run(remote.quote([]))
+    assert "neither a result nor an error" in str(caught.value)

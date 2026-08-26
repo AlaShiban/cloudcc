@@ -27,6 +27,17 @@ from . import _client
 CALL_KEY = "cloudcc_call"
 ERROR_KEY = "cloudcc_error"
 
+#: A reply is always an object, never the returned value on its own.
+#:
+#: A function returning a string would otherwise put a bare scalar on the wire,
+#: and a bare scalar is where the reply stops being self-describing: `rex (dog)`
+#: is a valid return value and also exactly what a truncated document looks
+#: like, and whether it arrives quoted depends on the runtime rather than on
+#: the program. Wrapping it costs nine bytes and makes every reply parseable
+#: the same way, which is also what lets "returned None" and "answered nothing
+#: at all" stay different answers.
+RESULT_KEY = "cloudcc_result"
+
 
 def connect(id):
     """Return a client for the execution unit declared as remote(id=...)."""
@@ -92,7 +103,10 @@ class Remote:
             raise RemoteError(self.id, function, _describe(body))
 
         if not body:
-            return None
+            # Not the same as returning None, which arrives as a result
+            # envelope carrying null. An empty payload means the other unit
+            # answered nothing at all.
+            raise RemoteError(self.id, function, "the reply was empty")
         try:
             result = json.loads(body)
         except ValueError:
@@ -107,7 +121,14 @@ class Remote:
                 function,
                 "%s: %s" % (detail.get("type", "Exception"), detail.get("message", "")),
             )
-        return result
+        if isinstance(result, dict) and RESULT_KEY in result:
+            return result[RESULT_KEY]
+        raise RemoteError(
+            self.id,
+            function,
+            "the reply carried neither a result nor an error, so this unit is "
+            "not answering the protocol its caller was compiled for: %r" % (result,),
+        )
 
     def __repr__(self):
         return "<Remote %r (lambda %s)>" % (self.id, self._function)
@@ -183,6 +204,6 @@ def dispatch(module, event):
             # module's to own. Nothing else is running one: a unit answers a
             # single invocation at a time.
             result = asyncio.run(result)
-        return result
+        return {RESULT_KEY: result}
     except Exception as exc:  # noqa: BLE001 -- the caller gets every failure
         return {ERROR_KEY: {"type": type(exc).__name__, "message": str(exc)}}

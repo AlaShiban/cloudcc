@@ -59,16 +59,8 @@ func (Frontend) MethodCalls(files *source.Set, unitFiles []string) []lang.Method
 	return methodCalls(files, unitFiles)
 }
 
-// RemoteFunctions reports that a Node unit cannot yet take part in a remote
-// call: nothing in this runtime dispatches an inbound one.
-//
-// Nothing about the design is Node-specific -- the wire format is JSON and the
-// two halves are independent -- so this is a missing dispatcher rather than a
-// decision. Saying so is the point: a Python unit that names a Node unit gets
-// an error about the gap, not one claiming the function it asked for does not
-// exist.
-func (Frontend) RemoteFunctions(*source.Set, string) ([]lang.RemoteFunction, bool) {
-	return nil, false
+func (Frontend) RemoteFunctions(files *source.Set, entry string) ([]lang.RemoteFunction, bool) {
+	return remoteFunctions(files, entry), true
 }
 
 // EntrypointCandidates orders the modules that could serve as the entry for an

@@ -15,6 +15,7 @@
 // Injected by cloudcc: runtime clients for this program's declared capabilities.
 import * as _cloudccExpose from "./_cloudcc_runtime/expose.js";
 import * as _cloudccKv from "./_cloudcc_runtime/kv.js";
+import * as _cloudccRpc from "./_cloudcc_runtime/rpc.js";
 
 import {
   DeleteItemCommand,
@@ -25,8 +26,17 @@ import {
 } from "@aws-sdk/client-dynamodb";
 import express from "express";
 
+
+undefined;
+
 const app = express();
 app.use(express.json());
+
+// The seam. Uncompiled this is the module imported above and the await below
+// is an ordinary in-process call, so `node local.js` runs the whole
+// application as one process. Compiled, that import is removed, summary.js is
+// not in this bundle, and the same await is a Lambda invocation.
+const summary = _cloudccRpc.connect("summary");
 
 const TABLE = "pets";
 const pets = _cloudccKv.connect("petsByOwner");
@@ -57,7 +67,7 @@ app.put("/pets/:petId", async (req, res) => {
       Item: { id: { S: req.params.petId }, pet: { S: JSON.stringify(req.body) } },
     }),
   );
-  res.json({ ok: true, id: req.params.petId });
+  res.json({ ok: true, id: req.params.petId, summary: await summary.describe(req.body) });
 });
 
 app.delete("/pets/:petId", async (req, res) => {

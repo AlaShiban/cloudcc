@@ -113,6 +113,46 @@ export function persist<T>(client: T, options: { id: string; models?: string[] }
 }
 
 /**
+ * Call another execution unit's functions over the wire.
+ *
+ * `target` is the module the other unit is built around, imported the ordinary
+ * way, and `id` is that unit's `executionUnit` id:
+ *
+ * ```js
+ * import * as pricingModule from "./pricing.js";
+ *
+ * const pricing = remote(pricingModule, { id: "pricing" });
+ * const quote = await pricing.quoteBasket(items);
+ * ```
+ *
+ * Uncompiled this returns the module unchanged, so the await is an ordinary
+ * in-process call and the program runs as one process. Compiled, the same
+ * expression becomes a client of the deployed unit and the await is a request.
+ *
+ * Three things follow from the call becoming a request, and the compiler
+ * checks all three rather than letting them surface in production:
+ *
+ * - **The functions must be `async`.** A remote call is a network round trip,
+ *   and a signature that hides one behind a synchronous call cannot be
+ *   corrected later without changing every caller.
+ * - **The names must exist.** A misspelled call is a compile error listing the
+ *   functions the unit does offer.
+ * - **The calls may not form a cycle.** Two units awaiting each other deadlock
+ *   until both time out. If units need to talk both ways, one direction is a
+ *   `Topic`.
+ *
+ * Arguments and return values cross the wire as JSON, in the same envelope the
+ * Python runtime uses -- so a unit does not need to know what the unit it is
+ * calling was written in.
+ *
+ * Returns `target`, unchanged.
+ */
+export function remote<T>(target: T, options: { id: string }): T {
+  void options;
+  return target;
+}
+
+/**
  * A runtime configuration value, delivered as an environment variable.
  *
  * `secret: true` makes the compiled project store the value as a Pulumi stack

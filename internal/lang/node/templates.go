@@ -43,6 +43,7 @@ const (
 var shimDependencies = map[string]map[string]string{
 	"base": {
 		"@aws-sdk/client-dynamodb":        "^3.700.0",
+		"@aws-sdk/client-lambda":          "^3.700.0",
 		"@aws-sdk/client-s3":              "^3.700.0",
 		"@aws-sdk/client-sns":             "^3.700.0",
 		"@aws-sdk/client-secrets-manager": "^3.700.0",

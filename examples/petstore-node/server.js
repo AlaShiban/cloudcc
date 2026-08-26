@@ -20,10 +20,20 @@ import {
   ScanCommand,
 } from "@aws-sdk/client-dynamodb";
 import express from "express";
-import { expose, persist } from "@cloudcompiler/sdk";
+import { executionUnit, expose, persist, remote } from "@cloudcompiler/sdk";
+
+import * as summaryModule from "./summary.js";
+
+executionUnit({ id: "main" });
 
 const app = express();
 app.use(express.json());
+
+// The seam. Uncompiled this is the module imported above and the await below
+// is an ordinary in-process call, so `node local.js` runs the whole
+// application as one process. Compiled, that import is removed, summary.js is
+// not in this bundle, and the same await is a Lambda invocation.
+const summary = remote(summaryModule, { id: "summary" });
 
 const TABLE = "pets";
 const pets = persist(new DynamoDBClient({}), { id: "petsByOwner" });
@@ -54,7 +64,7 @@ app.put("/pets/:petId", async (req, res) => {
       Item: { id: { S: req.params.petId }, pet: { S: JSON.stringify(req.body) } },
     }),
   );
-  res.json({ ok: true, id: req.params.petId });
+  res.json({ ok: true, id: req.params.petId, summary: await summary.describe(req.body) });
 });
 
 app.delete("/pets/:petId", async (req, res) => {

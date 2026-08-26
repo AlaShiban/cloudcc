@@ -51,4 +51,43 @@ find "$unit_build" -exec touch -t 198001010000 {} +
 ( cd "$unit_build" && find . -type f | LC_ALL=C sort | zip -q -X -@ "../main.zip" )
 echo "  wrote $build/main.zip"
 
+echo "packaging execution unit summary"
+unit_build="$build/summary"
+mkdir -p "$unit_build"
+
+# The bundler resolves imports against node_modules, so the unit's
+# dependencies have to be on disk first.
+#
+# npm install, never npm ci: cloudcc adds the runtime's own dependencies to
+# package.json, so any lockfile copied from the source tree no longer matches
+# it and npm ci would refuse. The stale lockfile is removed for the same
+# reason -- keeping it would only mislead.
+if [ -f "summary/package.json" ]; then
+  rm -f "summary/package-lock.json"
+  ( cd "summary" && npm install --silent --omit=dev --no-audit --no-fund )
+fi
+
+# esbuild resolves and inlines the unit's dependencies, which sidesteps
+# shipping node_modules in a zip -- the part of Node Lambda packaging that
+# usually hurts. Native modules cannot be bundled; list them under
+# `externals` in cloudcc.yaml if you have any.
+bundler="npx --yes esbuild"
+if command -v esbuild >/dev/null 2>&1; then
+  bundler="esbuild"
+fi
+
+$bundler "summary/cloudcc_lambda_entry.mjs" \
+  --bundle \
+  --platform=node \
+  --target=node22 \
+  --format=esm \
+  --outfile="$unit_build/index.mjs" \
+  --log-level=warning
+
+# Deterministic zip: fixed timestamps and sorted entries, so an unchanged unit
+# produces a byte-identical artefact and Pulumi sees no diff.
+find "$unit_build" -exec touch -t 198001010000 {} +
+( cd "$unit_build" && find . -type f | LC_ALL=C sort | zip -q -X -@ "../summary.zip" )
+echo "  wrote $build/summary.zip"
+
 echo "packaging complete"

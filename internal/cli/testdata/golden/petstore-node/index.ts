@@ -13,6 +13,11 @@ const mainLogs = new aws.cloudwatch.LogGroup("main", {
     retentionInDays: 14,
 });
 
+const summaryLogs = new aws.cloudwatch.LogGroup("summary", {
+    name: "/aws/lambda/petstore-node-summary",
+    retentionInDays: 14,
+});
+
 const petsByOwnerTable = new aws.dynamodb.Table("petsByOwner", {
     attributes: [
         {
@@ -44,6 +49,42 @@ const mainRole = new aws.iam.Role("main", {
     name: "petstore-node-main-role",
 });
 
+const summaryRole = new aws.iam.Role("summary", {
+    assumeRolePolicy: pulumi.jsonStringify({
+    Statement: [
+        {
+            Action: "sts:AssumeRole",
+            Effect: "Allow",
+            Principal: {
+                Service: "lambda.amazonaws.com",
+            },
+        },
+    ],
+    Version: "2012-10-17",
+}),
+    managedPolicyArns: [
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    ],
+    name: "petstore-node-summary-role",
+});
+
+const summaryEnv: { [key: string]: pulumi.Input<string> } = {
+    CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_UNIT: `summary`,
+};
+
+const summaryFn = new aws.lambda.Function("summary", {
+    code: new pulumi.asset.FileArchive("build/summary.zip"),
+    environment: { variables: summaryEnv },
+    handler: "index.handler",
+    memorySize: 512,
+    name: "petstore-node-summary",
+    role: summaryRole.arn,
+    runtime: "nodejs22.x",
+    timeout: 30,
+});
+
 const mainPolicy = new aws.iam.RolePolicy("main", {
     name: "petstore-node-main-policy",
     policy: pulumi.jsonStringify({
@@ -64,6 +105,15 @@ const mainPolicy = new aws.iam.RolePolicy("main", {
                 pulumi.interpolate`${petsByOwnerTable.arn}/index/*`,
             ],
         },
+        {
+            Action: [
+                "lambda:InvokeFunction",
+            ],
+            Effect: "Allow",
+            Resource: [
+                summaryFn.arn,
+            ],
+        },
     ],
     Version: "2012-10-17",
 }),
@@ -75,6 +125,7 @@ const mainEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
     CLOUDCC_LOG_DESTINATION: `cloudwatch`,
     CLOUDCC_UNIT: `main`,
+    CLOUDCC_UNIT_SUMMARY_FUNCTION: pulumi.interpolate`${summaryFn.name}`,
 };
 
 const mainFn = new aws.lambda.Function("main", {
@@ -122,4 +173,5 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
 export const CLOUDCC_GATEWAY_PET_API_URL = pulumi.interpolate`${petApiApi.apiEndpoint}`;
 export const CLOUDCC_KV_PETSBYOWNER_TABLE = pulumi.interpolate`${petsByOwnerTable.name}`;
 export const CLOUDCC_UNIT_MAIN_FUNCTION = pulumi.interpolate`${mainFn.name}`;
+export const CLOUDCC_UNIT_SUMMARY_FUNCTION = pulumi.interpolate`${summaryFn.name}`;
 export const petApiUrl = petApiApi.apiEndpoint;
