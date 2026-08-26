@@ -55,7 +55,9 @@ func TestTheCompilePathCannotReachTheNetwork(t *testing.T) {
 }
 
 // TestDeployIsIsolated pins the other half: the deploy package may reach the
-// network, and nothing else may depend on it.
+// network, and nothing else may depend on it. internal/loadtest is in the same
+// position -- it drives a running application over HTTP, which is the opposite
+// of what a compile does, and it exists as a separate binary for that reason.
 func TestDeployIsIsolated(t *testing.T) {
 	for _, pkg := range []string{
 		"github.com/cloudcompiler/cloudcc/internal/capabilities",
@@ -67,8 +69,11 @@ func TestDeployIsIsolated(t *testing.T) {
 		if err != nil {
 			t.Fatalf("listing dependencies of %s failed: %v", pkg, err)
 		}
-		if strings.Contains(string(out), "cloudcompiler/cloudcc/internal/deploy") {
-			t.Errorf("%s depends on internal/deploy; deployment must stay isolated from compilation", pkg)
+		for _, banned := range []string{"internal/deploy", "internal/loadtest"} {
+			if strings.Contains(string(out), "cloudcompiler/cloudcc/"+banned) {
+				t.Errorf("%s depends on %s; both reach the network and must stay "+
+					"isolated from compilation", pkg, banned)
+			}
 		}
 	}
 }

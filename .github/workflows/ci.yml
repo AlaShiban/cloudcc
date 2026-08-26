@@ -206,6 +206,33 @@ jobs:
       - name: Every example, uncompiled vs compiled
         run: ./tests/e2e/examples.sh
 
+      # Throughput before and after compiling, and -- the part a load test does
+      # not usually do -- a check that every edge the compiler drew actually
+      # carried traffic. A store nothing wrote to and a subscriber that never
+      # woke are both green deploys and broken applications.
+      #
+      # Scaled down, and one example rather than all of them. What dominates
+      # here is npm install and `pulumi up`, not the load, so a smaller scale
+      # saves little and running every example would roughly double this job --
+      # for coverage the differential suite above already provides.
+      #
+      # nomnom is the one worth the minutes: fourteen runtime edges, including
+      # every kind this can check -- a call between deployed units, two topics
+      # with three subscribers between them, five tables and a bucket. Run the
+      # rest locally with `make load`.
+      - name: Load, connectedness and the before/after benchmark
+        run: CLOUDCC_LOAD_SCALE=0.25 ./tests/e2e/load.sh nomnom
+        env:
+          CLOUDCC_LOAD_REPORTS: ${{ runner.temp }}/loadtest
+
+      - name: Upload the load-test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-reports
+          path: ${{ runner.temp }}/loadtest
+          if-no-files-found: ignore
+
       - name: cloudcc deploy end to end
         run: ./tests/e2e/deploy.sh
 
