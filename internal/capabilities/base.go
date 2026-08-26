@@ -20,6 +20,7 @@ const (
 	PluginExpose      = "expose"
 	PluginPersist     = "persist"
 	PluginPubSub      = "pubsub"
+	PluginRemote      = "remote"
 	PluginConfigVars  = "config-vars"
 	PluginValidate    = "validate"
 	PluginShims       = "shims"

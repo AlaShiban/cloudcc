@@ -199,6 +199,23 @@ func (p *PubSubPlugin) Transform(ctx *compiler.Context) error {
 				"the topic is not assigned to a variable, so no publisher or subscriber can be detected")
 		}
 
+		// Every unit that bundles the declaring file is wired to the topic,
+		// exactly as it is for a store -- and for the same reason, which has
+		// nothing to do with whether it sends or receives anything.
+		//
+		// The declaration is executed at import: the shim reads the topic's ARN
+		// out of the environment when the module loads. A module that declares
+		// two topics is one import, so a unit that subscribes to the second one
+		// still runs the line that connects the first. Without this edge that
+		// unit is handed an ARN for one topic and not the other, and dies on
+		// startup with a message about an environment variable -- deployed,
+		// where the two topics happen to be declared side by side.
+		//
+		// It is invisible locally, because a locally run unit is usually given
+		// every stack output at once. That is what makes it worth an edge
+		// rather than a rule about how to write modules.
+		p.connectHolders(ctx, h, topic.Key())
+
 		for _, unitID := range config.SortedKeys(ctx.UnitFiles) {
 			unitKey := ir.Key{Kind: config.KindExecutionUnit, ID: unitID}
 			if _, ok := ctx.Graph.Intent(unitKey); !ok {
@@ -231,6 +248,20 @@ func (p *PubSubPlugin) Transform(ctx *compiler.Context) error {
 		}
 	}
 	return nil
+}
+
+// connectHolders records a uses edge from every unit that bundles the file
+// declaring a topic, which is what puts the topic's ARN in that unit's
+// environment. Publishing and subscribing are recorded separately, and they are
+// what IAM and the subscriptions are derived from -- holding a handle grants
+// nothing.
+func (p *PubSubPlugin) connectHolders(ctx *compiler.Context, h sdkdetect.Hint, target ir.Key) {
+	for _, unit := range ctx.UnitsFor(h.File) {
+		unitKey := ir.Key{Kind: config.KindExecutionUnit, ID: unit}
+		if _, ok := ctx.Graph.Intent(unitKey); ok {
+			ctx.Graph.Connect(unitKey, target, ir.EdgeUses)
+		}
+	}
 }
 
 // ConfigVarsPlugin turns config_value hints into ConfigVar intents. There is

@@ -138,12 +138,19 @@ log "table: $CLOUDCC_KV_PETSBYOWNER_TABLE"
 # exports a Lambda handler rather than the app -- so the unit directory, with
 # its node_modules and its entry module, is the thing to run. A Python unit's
 # build/main is the unpacked bundle and is exactly right.
+#
+# For a Python unit it is the compiled *source* directory, not build/. The
+# bundle under build/ carries wheels resolved for the deployment target --
+# Linux, and a different libc and architecture than a developer's machine --
+# which is right for what is deployed and unimportable here. What this test is
+# for is that the compiled code runs unchanged; the host's own dependencies
+# come from uv, exactly as uvicorn itself does.
 if [ -f "$OUT/$UNIT/package.json" ]; then
   UNIT_DIR="$OUT/$UNIT"
-elif [ -d "$OUT/build/$UNIT" ]; then
-  UNIT_DIR="$OUT/build/$UNIT"
-else
+elif [ -d "$OUT/$UNIT" ]; then
   UNIT_DIR="$OUT/$UNIT"
+else
+  UNIT_DIR="$OUT/build/$UNIT"
 fi
 [ -d "$UNIT_DIR" ] || fail "unit $UNIT has no directory in the compiled output; pass the unit name as the second argument"
 

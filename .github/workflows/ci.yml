@@ -188,6 +188,16 @@ jobs:
       - name: Provisioning and functional tests (mixed languages)
         run: ./tests/e2e/ministack.sh mixed api
 
+      # Six units talking to each other two ways. This is the only test in the
+      # suite where a deployed unit calls another deployed unit -- dispatch,
+      # woken by a message, invokes inventory and waits for the answer -- and
+      # the only one that follows a chain across five units to the state it
+      # leaves in every store. It also probes each unit for a clean start,
+      # which is the check that catches an environment binding a unit needs but
+      # has no edge for: invisible locally, fatal on the first invocation.
+      - name: Provisioning and functional tests (cross-unit calls and messages)
+        run: ./tests/e2e/nomnom.sh
+
       # Every example, run as written and again after compiling, with the same
       # requests replayed against both. The generated-program harness below
       # covers more shapes; this covers the code a newcomer actually reads, and

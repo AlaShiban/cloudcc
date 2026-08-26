@@ -51,6 +51,12 @@ PAIRS = [
 #: offer connect(), which the entrypoint test below checks.
 TYPE_PRESERVING = ["fs", "kv", "orm", "redis_"]
 
+#: Shims that stand in for something the SDK never supplied a class for. `rpc`
+#: replaces another unit's *module*, so there is no pair to compare and no
+#: library type to preserve -- but it is entered the same way as every other
+#: shim, and that entrypoint is worth pinning.
+STANDS_IN = ["rpc"]
+
 
 def load_shim(module_name):
     """Parse a shim module without importing boto3."""
@@ -110,7 +116,7 @@ def test_public_api_matches(cls, module, shim_class):
 
 
 @pytest.mark.parametrize(
-    "module", sorted([p[1] for p in PAIRS] + TYPE_PRESERVING)
+    "module", sorted([p[1] for p in PAIRS] + TYPE_PRESERVING + STANDS_IN)
 )
 def test_every_shim_has_a_connect_entrypoint(module):
     import ast

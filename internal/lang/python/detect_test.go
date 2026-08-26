@@ -292,7 +292,8 @@ func TestResolveImportsRecordsAlias(t *testing.T) {
 func TestSignaturesCoverEveryFunctionName(t *testing.T) {
 	want := []string{
 		sdkdetect.FnConfigValue, sdkdetect.FnEmbedAssets, sdkdetect.FnExecutionUnit,
-		sdkdetect.FnExpose, sdkdetect.FnPersist, sdkdetect.FnStaticUnit,
+		sdkdetect.FnExpose, sdkdetect.FnPersist, sdkdetect.FnRemote,
+		sdkdetect.FnStaticUnit,
 	}
 	if got := sdkdetect.FunctionNames(); !reflect.DeepEqual(got, want) {
 		t.Errorf("sdkdetect.FunctionNames() = %v, want %v", got, want)

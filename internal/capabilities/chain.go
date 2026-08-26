@@ -24,6 +24,7 @@ func IntentChain() []compiler.Plugin {
 		NewExposePlugin(),
 		NewPersistPlugin(),
 		NewPubSubPlugin(),
+		NewRemotePlugin(),
 		NewConfigVarsPlugin(),
 		NewValidatePlugin(),
 	}

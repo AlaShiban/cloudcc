@@ -5,6 +5,8 @@ the subscription itself is infrastructure, created by the generated Pulumi
 project, and the Lambda entrypoint routes the delivered records here.
 """
 
+import asyncio
+import inspect
 import json
 
 from . import _client
@@ -58,8 +60,24 @@ def dispatch(event):
             message = {"message": raw}
         for handlers in _HANDLERS.values():
             for handler in handlers:
-                results.append(handler(message))
+                results.append(_run(handler(message)))
     return results
+
+
+def _run(result):
+    """Finish a handler that turned out to be a coroutine.
+
+    A subscriber that calls another execution unit is ``async def``, because
+    that call is a network round trip. Returning the coroutine unawaited would
+    leave the handler looking as though it had run: no write, no error, and a
+    warning on a stream nobody reads.
+
+    The Lambda handler this is reached through is synchronous, so there is no
+    loop already running to join.
+    """
+    if inspect.iscoroutine(result):
+        return asyncio.run(result)
+    return result
 
 
 def is_sns_event(event):

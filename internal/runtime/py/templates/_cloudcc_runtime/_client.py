@@ -33,6 +33,22 @@ def aws_kwargs():
     return _common()
 
 
+def session():
+    """A boto3 Session carrying the region and credentials, but no endpoint.
+
+    For libraries that take a session rather than a client -- cloudpathlib is
+    one -- and that reject the keyword arguments a client constructor accepts.
+    """
+    return boto3.session.Session(
+        **{k: v for k, v in _common().items() if k != "endpoint_url"}
+    )
+
+
+def endpoint():
+    """The emulator endpoint override, or None when talking to real AWS."""
+    return os.environ.get("CLOUDCC_AWS_ENDPOINT_URL") or None
+
+
 def client(service):
     """A boto3 client for ``service``."""
     return boto3.client(service, **_common())

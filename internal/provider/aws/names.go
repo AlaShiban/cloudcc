@@ -18,10 +18,16 @@ func EnvRedisEndpoint(id string) string { return "CLOUDCC_REDIS_" + sanitize.Env
 func EnvRedisPort(id string) string     { return "CLOUDCC_REDIS_" + sanitize.EnvVar(id) + "_PORT" }
 func EnvRedisTLS(id string) string      { return "CLOUDCC_REDIS_" + sanitize.EnvVar(id) + "_TLS" }
 func EnvTopicARN(id string) string      { return "CLOUDCC_TOPIC_" + sanitize.EnvVar(id) + "_ARN" }
-func EnvConfig(id string) string        { return "CLOUDCC_CONFIG_" + sanitize.EnvVar(id) }
-func EnvGatewayURL(id string) string    { return "CLOUDCC_GATEWAY_" + sanitize.EnvVar(id) + "_URL" }
-func EnvStaticBucket(id string) string  { return "CLOUDCC_STATIC_" + sanitize.EnvVar(id) + "_BUCKET" }
-func EnvStaticURL(id string) string     { return "CLOUDCC_STATIC_" + sanitize.EnvVar(id) + "_URL" }
+
+// EnvUnitFunction carries a unit's deployed function name to the units that
+// call it. Every other binding here points at a store; this one points at
+// another piece of the same program.
+func EnvUnitFunction(id string) string { return "CLOUDCC_UNIT_" + sanitize.EnvVar(id) + "_FUNCTION" }
+
+func EnvConfig(id string) string       { return "CLOUDCC_CONFIG_" + sanitize.EnvVar(id) }
+func EnvGatewayURL(id string) string   { return "CLOUDCC_GATEWAY_" + sanitize.EnvVar(id) + "_URL" }
+func EnvStaticBucket(id string) string { return "CLOUDCC_STATIC_" + sanitize.EnvVar(id) + "_BUCKET" }
+func EnvStaticURL(id string) string    { return "CLOUDCC_STATIC_" + sanitize.EnvVar(id) + "_URL" }
 
 func EnvECRRepo(id string) string { return "CLOUDCC_ECR_" + sanitize.EnvVar(id) + "_URL" }
 

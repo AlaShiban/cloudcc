@@ -46,6 +46,15 @@ const (
 	// EdgePublishes / EdgeSubscribes connect execution units to topics.
 	EdgePublishes  = "publishes"
 	EdgeSubscribes = "subscribes"
+	// EdgeCalls connects one execution unit to another it calls directly, in
+	// the sense of awaiting a return value rather than sending a message.
+	//
+	// It is deliberately not EdgeUses: the two say different things about
+	// runtime. A unit that uses a store fails when the store is unavailable; a
+	// unit that calls another unit fails when *that unit's* code raises, and
+	// its latency is the other unit's latency plus a round trip. A cycle in
+	// uses edges is ordinary, and a cycle in these is a deadlock.
+	EdgeCalls = "calls"
 )
 
 // Intent is a provider-agnostic capability node.

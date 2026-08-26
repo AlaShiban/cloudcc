@@ -8,6 +8,7 @@ import (
 	"github.com/cloudcompiler/cloudcc/internal/diag"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
 	"github.com/cloudcompiler/cloudcc/internal/lang"
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 )
 
 // DefaultUnitID is the single unit every program gets when it declares none.
@@ -84,9 +85,11 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 		ctx.Language[id] = front.Name()
 		unit.Language = front.Name()
 
+		excluded := p.closureBarriers(ctx, id, entrypoints)
+
 		var files []string
 		for _, entry := range entrypoints[id] {
-			reached, unresolved := front.Closure(ctx.Files, entry, ctx.ClaimedFiles)
+			reached, unresolved := front.Closure(ctx.Files, entry, excluded)
 			files = union(files, reached)
 			for _, imp := range unresolved {
 				ctx.Diags.Warnf(ctx.Pos(entry, imp.Offset), config.KindExecutionUnit,
@@ -122,6 +125,51 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 
 	p.warnUnreachable(ctx, assigned)
 	return nil
+}
+
+// closureBarriers returns the files unit id's import walk must stop at: those
+// claimed by a static unit, plus the entry module of every unit some part of
+// the program reaches through cloudcc.remote.
+//
+// The second half is what makes a remote call a boundary rather than a comment.
+// A caller imports the callee's module so that the uncompiled program runs in
+// one process and so that an editor can check the call; without this cut that
+// import would also drag the callee's module into the caller's bundle, and
+// then:
+//
+//   - the caller would be granted IAM on the callee's stores and handed their
+//     environment, because both are derived from the files a unit bundles --
+//     so the isolation the boundary exists to create would not exist;
+//   - the caller's bundle would carry the callee's dependencies, which is the
+//     cost a service split is supposed to avoid.
+//
+// A unit named by a remote() call anywhere is a barrier for every unit except
+// itself. That is a property of the program rather than of any one caller,
+// which is what keeps this from needing to know a unit's files before it has
+// computed them.
+func (p *ExecUnitsPlugin) closureBarriers(ctx *compiler.Context, id string, entrypoints map[string][]string) map[string]string {
+	targets := map[string]bool{}
+	for _, h := range ctx.HintsFor(sdkdetect.CapRemote) {
+		if target := h.ID(); target != "" && target != id {
+			targets[target] = true
+		}
+	}
+	if len(targets) == 0 {
+		return ctx.ClaimedFiles
+	}
+
+	// Copied rather than written through: ClaimedFiles is shared, and the
+	// barrier set is per unit.
+	out := make(map[string]string, len(ctx.ClaimedFiles)+len(targets))
+	for path, claimer := range ctx.ClaimedFiles {
+		out[path] = claimer
+	}
+	for target := range targets {
+		for _, entry := range entrypoints[target] {
+			out[entry] = target
+		}
+	}
+	return out
 }
 
 // defaultEntrypoint picks the entry module for the implicit single unit by

@@ -24,6 +24,7 @@ const Package = "@cloudcompiler/sdk"
 // capability surface is one thing across languages; only the spelling differs.
 var sdkFunction = map[string]string{
 	"persist":       sdkdetect.FnPersist,
+	"remote":        sdkdetect.FnRemote,
 	"executionUnit": sdkdetect.FnExecutionUnit,
 	"expose":        sdkdetect.FnExpose,
 	"configValue":   sdkdetect.FnConfigValue,

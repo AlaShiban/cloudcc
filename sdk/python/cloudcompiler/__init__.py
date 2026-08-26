@@ -54,6 +54,7 @@ from ._emulation import (
 
 __all__ = [
     "persist",
+    "remote",
     "expose",
     "execution_unit",
     "config_value",
@@ -107,6 +108,50 @@ def persist(client: T, *, id: str, models: list | None = None) -> T:
     Returns ``client``, unchanged.
     """
     return client
+
+
+def remote(target: T, *, id: str) -> T:
+    """Call another execution unit's functions over the wire.
+
+    ``target`` is the module the other unit is built around, imported the
+    ordinary way, and ``id`` is that unit's ``execution_unit`` id::
+
+        from nomnom import pricing
+
+        pricing = cloudcc.remote(pricing, id="pricing")
+        quote = await pricing.quote_basket(items)
+
+    Uncompiled this returns the module unchanged, so the await is an ordinary
+    in-process call and the program runs as one process. Compiled, the same
+    expression becomes a client of the deployed unit and the await is a
+    request: the arguments are serialised, the other unit runs the function,
+    and the return value comes back.
+
+    So the seam between two services is one line at the top of a file, and
+    moving it -- merging two units, splitting one in three -- is a change to
+    that line rather than to any call site.
+
+    Three things follow from the call becoming a request, and the compiler
+    checks all three rather than letting them surface in production:
+
+    * **The functions must be ``async def``.** A remote call takes a network
+      round trip, and a signature that hides that behind a synchronous call is
+      the one thing that cannot be made true later. Calling a ``def`` through
+      ``remote`` is a compile error.
+    * **The names must exist.** ``pricing.quote_baskets(...)`` is a compile
+      error naming the functions the unit does offer, not an AttributeError in
+      whichever request first takes that branch.
+    * **The calls may not form a cycle.** Two units awaiting each other
+      synchronously deadlock, holding both invocations open until they time
+      out. If units need to talk both ways, one direction is a ``Topic``.
+
+    Arguments and return values cross the wire as JSON, which is what makes
+    the two halves independently deployable. What survives the trip is what
+    JSON can carry.
+
+    Returns ``target``, unchanged.
+    """
+    return target
 
 
 def expose(app: Any, id: str = "main", target: str = "public") -> Gateway:

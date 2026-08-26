@@ -115,6 +115,72 @@ local_aws_env() {
     "${AWS_ACCESS_KEY_ID:-cloudcc-local}" "${AWS_SECRET_ACCESS_KEY:-cloudcc-local}"
 }
 
+# emulator_python_target prints "<platform> <version>" for the Lambda runtime
+# the emulator actually uses, by deploying a three-line function and asking it.
+#
+# It has to be asked rather than assumed. The emulator runs containers of
+# whatever the host is, with whatever Python it has, regardless of the
+# architecture and runtime the function declares -- so a bundle built for what
+# a real deployment wants cannot be imported here. A compiled dependency then
+# fails with "No module named pydantic_core._pydantic_core", which says nothing
+# about the actual cause, so guessing wrong is expensive to diagnose.
+emulator_python_target() {
+  local dir probe
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/cloudcc-probe-XXXXXX")"
+  # sysconfig's SOABI is the authority: it is the exact tag a compiled
+  # extension's filename has to carry to be importable here, libc included.
+  cat > "$dir/probe.py" <<'PROBE'
+import platform, sys, sysconfig
+def handler(event, context):
+    return {"machine": platform.machine(),
+            "python": "%d.%d" % sys.version_info[:2],
+            "soabi": sysconfig.get_config_var("SOABI") or ""}
+PROBE
+  ( cd "$dir" && zip -q probe.zip probe.py )
+
+  aws_local lambda delete-function --function-name cloudcc-target-probe >/dev/null 2>&1 || true
+  aws_local lambda create-function --function-name cloudcc-target-probe \
+    --runtime python3.12 --handler probe.handler \
+    --role arn:aws:iam::000000000000:role/cloudcc-probe \
+    --zip-file "fileb://$dir/probe.zip" >/dev/null 2>&1 || { rm -rf "$dir"; return 1; }
+
+  local waited=0
+  while [ "$waited" -lt 30 ]; do
+    if aws_local lambda invoke --function-name cloudcc-target-probe \
+         --cli-binary-format raw-in-base64-out --payload '{}' \
+         "$dir/out.json" >/dev/null 2>&1 && [ -s "$dir/out.json" ] \
+         && jq -e '.machine' "$dir/out.json" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  aws_local lambda delete-function --function-name cloudcc-target-probe >/dev/null 2>&1 || true
+
+  if ! jq -e '.machine' "$dir/out.json" >/dev/null 2>&1; then
+    rm -rf "$dir"
+    return 1
+  fi
+  local machine version soabi
+  machine="$(jq -r '.machine' "$dir/out.json")"
+  version="$(jq -r '.python' "$dir/out.json")"
+  soabi="$(jq -r '.soabi' "$dir/out.json")"
+  rm -rf "$dir"
+
+  # Real Lambda is Amazon Linux, which is glibc; this emulator turns out to run
+  # Alpine, which is musl. A manylinux wheel cannot be loaded on musl at all --
+  # different dynamic linker -- so this is not a detail that can be skipped.
+  local libc="manylinux2014"
+  case "$soabi" in
+    *musl*) libc="unknown-linux-musl" ;;
+  esac
+
+  case "$machine" in
+    arm64|aarch64) printf 'aarch64-%s %s' "$libc" "$version" ;;
+    *)             printf 'x86_64-%s %s' "$libc" "$version" ;;
+  esac
+}
+
 # require_endpoint aborts unless something is answering at the emulator.
 require_endpoint() {
   if ! curl -sf -m 5 -o /dev/null "$MINISTACK_ENDPOINT" 2>/dev/null; then

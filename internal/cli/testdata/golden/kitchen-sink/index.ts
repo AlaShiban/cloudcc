@@ -544,4 +544,5 @@ export const CLOUDCC_REDIS_ITEMCACHE_PORT = "6379";
 export const CLOUDCC_REDIS_ITEMCACHE_TLS = "false";
 export const CLOUDCC_SECRET_SIGNINGKEY_ARN = pulumi.interpolate`${signingKeySecret.arn}`;
 export const CLOUDCC_TOPIC_ITEMEVENTS_ARN = pulumi.interpolate`${itemEventsTopic.arn}`;
+export const CLOUDCC_UNIT_API_FUNCTION = pulumi.interpolate`${apiFn.name}`;
 export const shopApiUrl = shopApiApi.apiEndpoint;

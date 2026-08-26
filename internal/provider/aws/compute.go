@@ -51,11 +51,6 @@ func (r *Resolver) lambda(u *ir.ExecUnit) error {
 	}, nil)
 	r.Program.Resolve(u.Key(), logs)
 
-	if policy := r.unitPolicy(u, roleKey); policy != nil {
-		r.Program.Resolve(u.Key(), policy)
-		r.Program.Connect(policy.Key(), roleKey, ir.EdgeDependsOn)
-	}
-
 	fn := ir.NewResource(KindLambda, u.ID, "aws.lambda.Function", map[string]any{
 		"name":    fnName,
 		"runtime": u.Runtime,
@@ -67,13 +62,13 @@ func (r *Resolver) lambda(u *ir.ExecUnit) error {
 		// starts short; raise it through pulumi_params if a unit needs more.
 		"memorySize":  512,
 		"environment": ir.Raw("{ variables: " + envVarsPlaceholder(u.ID) + " }"),
-	}, nil)
+		// The function's own name, published so that units which call this one
+		// can be handed it. Every other binding in this file points at a store;
+		// this one points at another piece of the same program.
+	}, ir.Env(EnvUnitFunction(u.ID), "name"))
 	r.Program.Resolve(u.Key(), fn)
 	r.Program.Connect(fnKey, roleKey, ir.EdgeDependsOn)
 	r.Program.Connect(fnKey, logsKey, ir.EdgeDependsOn)
-	for _, dep := range r.usedResourceKeys(u) {
-		r.Program.Connect(fnKey, dep, ir.EdgeUses)
-	}
 	return nil
 }
 
@@ -210,6 +205,73 @@ func (r *Resolver) subscriptions() error {
 	return nil
 }
 
+// ---------------------------------------------------------- unit wiring
+
+// unitWiring gives every execution unit its role policy and the dependency
+// edges that order the emitted project.
+//
+// This runs after every unit has resolved, and that is the point rather than a
+// tidying-up. Both halves read the resources a unit *uses*, and once a unit can
+// use another unit -- which is what a remote call is -- the answer depends on
+// whether the callee has been expanded yet. Doing it inside r.lambda() meant
+// the answer depended on the alphabet: a caller sorted before its callee saw
+// nothing, got no invoke permission, and failed at runtime with an
+// AccessDeniedException, while the same program with the two units renamed
+// worked. Nothing about that is discoverable from the code that has the bug.
+func (r *Resolver) unitWiring() error {
+	// Two passes, because the first one creates resources and the second one
+	// reads the set of them. Interleaved, whether a unit's ordering edges
+	// included another unit's policy would depend on which of the two sorted
+	// first -- harmless in effect, but a difference the output should not have.
+	for _, in := range r.Program.IntentsOfKind(config.KindExecutionUnit) {
+		u := in.(*ir.ExecUnit)
+		roleKey, policyKey, _ := r.unitRoleAndCarriers(u)
+		if roleKey.IsZero() {
+			continue
+		}
+		if policy := r.unitPolicy(u, roleKey); policy != nil {
+			policy.K = policyKey
+			r.Program.Resolve(u.Key(), policy)
+			r.Program.Connect(policy.Key(), roleKey, ir.EdgeDependsOn)
+		}
+	}
+
+	for _, in := range r.Program.IntentsOfKind(config.KindExecutionUnit) {
+		u := in.(*ir.ExecUnit)
+		_, _, carriers := r.unitRoleAndCarriers(u)
+		deps := r.usedResourceKeys(u)
+		// The resource that carries the unit's environment must be declared
+		// after everything that environment refers to.
+		for _, carrier := range carriers {
+			for _, dep := range deps {
+				if dep == carrier {
+					continue
+				}
+				r.Program.Connect(carrier, dep, ir.EdgeUses)
+			}
+		}
+	}
+	return nil
+}
+
+// unitRoleAndCarriers returns the role a unit's policy attaches to, the key
+// that policy takes, and the resources that carry its environment.
+func (r *Resolver) unitRoleAndCarriers(u *ir.ExecUnit) (role, policy ir.Key, carriers []ir.Key) {
+	switch u.Config().Type {
+	case "lambda":
+		return ir.Key{Kind: KindLambdaRole, ID: u.ID},
+			ir.Key{Kind: KindLambdaPolicy, ID: u.ID},
+			[]ir.Key{{Kind: KindLambda, ID: u.ID}}
+	case "ecs":
+		// The task role, not the execution role: the policy carries what the
+		// application code may reach, and the execution role is ECS's own.
+		return ir.Key{Kind: KindECSTaskRole, ID: u.ID + "-task"},
+			ir.Key{Kind: KindECSTaskPolicy, ID: u.ID},
+			[]ir.Key{{Kind: KindECSTask, ID: u.ID}, {Kind: KindECSService, ID: u.ID}}
+	}
+	return ir.Key{}, ir.Key{}, nil
+}
+
 // ---------------------------------------------------------------- IAM
 
 // actionsByKind is the least-privilege action set each capability grants. The
@@ -249,6 +311,20 @@ func (r *Resolver) unitPolicy(u *ir.ExecUnit, roleKey ir.Key) *ir.GenericResourc
 				"Effect":   "Allow",
 				"Action":   toAny(actions),
 				"Resource": resourceScope(res.Key()),
+			})
+		}
+	}
+	// Calling another unit is a separate grant again, and it is the narrowest
+	// one here: invoke on exactly the functions this unit's code names.
+	for _, e := range r.Program.EdgesFrom(u.Key(), ir.EdgeCalls) {
+		for _, res := range r.Program.ResolvedFrom(e.To) {
+			if res.Key().Kind != KindLambda {
+				continue
+			}
+			statements = append(statements, map[string]any{
+				"Effect":   "Allow",
+				"Action":   []any{"lambda:InvokeFunction"},
+				"Resource": []any{ir.Ref{Key: res.Key(), Prop: "arn"}},
 			})
 		}
 	}

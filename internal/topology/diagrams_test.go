@@ -7,6 +7,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 )
 
 // The generated program is only useful if it runs, and the two ways it can
@@ -159,5 +162,66 @@ if missing:
 	out, err := exec.Command(python, append([]string{"-c", script}, classes...)...).CombinedOutput()
 	if err != nil {
 		t.Errorf("these classes do not exist in the diagrams package:\n%s", out)
+	}
+}
+
+// A call between two units is the one edge in the picture that the caller
+// waits on: its latency and its failures are the callee's. A reader tracing a
+// latency budget has to be able to tell it apart from a message, which costs
+// the sender nothing, and from a store read.
+func TestACallBetweenUnitsIsDrawnDistinctly(t *testing.T) {
+	p := archProgram(t)
+
+	callee := &ir.ExecUnit{Entrypoints: []string{"pricing.py"}}
+	callee.ID = "pricing"
+	if err := callee.Configure(config.ResourceConfig{Type: "lambda"}); err != nil {
+		t.Fatal(err)
+	}
+	p.AddIntent(callee)
+	p.Resolve(callee.Key(), ir.NewResource("aws.lambda", "pricing", "aws.lambda.Function", nil, nil))
+
+	caller := ir.Key{Kind: config.KindExecutionUnit, ID: "main"}
+	p.Connect(caller, callee.Key(), ir.EdgeCalls)
+	p.Connect(caller, callee.Key(), ir.EdgeUses)
+
+	got := string(Python(p, Options{App: "demo", View: Resources}))
+
+	if !strings.Contains(got, `label="calls"`) {
+		t.Errorf("the call is not drawn:\n%s", got)
+	}
+	if !strings.Contains(got, `style="bold"`) {
+		t.Errorf("a call should be visually distinct from a message:\n%s", got)
+	}
+	// One arrow, not two. A caller also `uses` its callee -- that is what the
+	// environment and the policy are derived from -- and drawing both would put
+	// two arrows between the same pair, one of which says less.
+	if strings.Count(got, "n_execution_unit_pricing") != 2 {
+		t.Errorf("expected the callee drawn once and reached once:\n%s", got)
+	}
+}
+
+// Mermaid and DOT carry the same distinction, since they are what the e2e
+// harness checks against the deployed stack.
+func TestTheOtherRenderersLabelACall(t *testing.T) {
+	p := ir.NewProgram()
+	for _, id := range []string{"storefront", "pricing"} {
+		u := &ir.ExecUnit{Entrypoints: []string{id + ".py"}}
+		u.ID = id
+		if err := u.Configure(config.ResourceConfig{Type: "lambda"}); err != nil {
+			t.Fatal(err)
+		}
+		p.AddIntent(u)
+	}
+	from := ir.Key{Kind: config.KindExecutionUnit, ID: "storefront"}
+	to := ir.Key{Kind: config.KindExecutionUnit, ID: "pricing"}
+	p.Connect(from, to, ir.EdgeCalls)
+
+	mermaid := string(Mermaid(p, Options{App: "demo", View: Intents}))
+	if !strings.Contains(mermaid, "|calls|") {
+		t.Errorf("mermaid does not label the call:\n%s", mermaid)
+	}
+	dot := string(DOT(p, Options{App: "demo", View: Intents}))
+	if !strings.Contains(dot, `label="calls"`) {
+		t.Errorf("dot does not label the call:\n%s", dot)
 	}
 }

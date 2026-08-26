@@ -108,6 +108,11 @@ func edgeArrow(kind string) string {
 		return "-->|publishes|"
 	case ir.EdgeSubscribes:
 		return "-.->|subscribes|"
+	case ir.EdgeCalls:
+		// A thick arrow, because it is the one edge here whose direction is
+		// also the direction of a wait: the caller is blocked until the callee
+		// answers. A dashed message arrow costs the sender nothing.
+		return "==>|calls|"
 	case ir.EdgeResolvesTo:
 		return "-.->|resolves to|"
 	}
@@ -180,8 +185,13 @@ func DOT(p *ir.Program, opts Options) []byte {
 	}
 	for _, e := range edges(p, opts.View) {
 		style := ""
-		if e.Kind == ir.EdgeSubscribes {
+		switch e.Kind {
+		case ir.EdgeSubscribes:
 			style = ", style=dashed"
+		case ir.EdgeCalls:
+			// Heavier, for the same reason it is a thick arrow in Mermaid: this
+			// is the edge the caller waits on.
+			style = ", penwidth=2"
 		}
 		fmt.Fprintf(&b, "    %s -> %s [label=%q%s];\n", nodeID(e.From), nodeID(e.To), e.Kind, style)
 	}

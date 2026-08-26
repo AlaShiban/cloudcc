@@ -89,6 +89,42 @@ Three consequences worth naming:
   as one store, so every command it sends belongs to that store, and the local
   run is free to call its table whatever it likes.
 
+**`remote` — a call between units, checked at compile time.** Units could send
+each other messages and share stores, but not ask each other questions, so any
+program needing a synchronous answer across a boundary had to hand-roll an
+invoke and a payload format. The surface mirrors `persist`: you bring the
+module, and what you get back has the same shape.
+
+```python
+from nomnom import pricing
+
+pricing = cloudcc.remote(pricing, id="pricing")
+quote = await pricing.quote_basket(items)
+```
+
+Uncompiled it is the module and the await is in-process, so the whole program
+still runs as one process. Compiled, the import is removed, the callee's code is
+not in the caller's bundle, and the await is a Lambda invocation.
+
+Three decisions in it are worth stating, because each was a choice:
+
+* **`async def` is required, and enforced.** A remote call is a network round
+  trip. A synchronous signature is the one property that cannot be corrected
+  afterwards — by then every caller has been written to block on it — so it
+  costs one keyword now instead of a breaking change later.
+* **The boundary cuts the import closure.** Permissions and environment are both
+  derived from what a unit bundles, so without the cut the caller would be
+  granted IAM on the callee's stores and would carry its dependencies: a split
+  in name only.
+* **Cycles are rejected.** Two units awaiting each other do not run slowly, they
+  deadlock, holding a concurrency slot each until they time out. It is also the
+  failure ordinary testing misses, because the cycle only closes when both
+  branches are taken in one request.
+
+Only SNS-backed topics and Python units are supported so far; a Node unit on
+either end of a call is a clean error naming the gap, since nothing dispatches
+an inbound call in that runtime yet.
+
 ## Deviations from the brief
 
 **`EnvOutputs` returns bindings, not property names.** The brief types it as

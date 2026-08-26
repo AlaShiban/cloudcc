@@ -48,6 +48,22 @@ type MethodCall struct {
 	Offset int
 }
 
+// RemoteFunction is one function a unit's entry module offers to callers, as
+// seen by cloudcc.remote.
+//
+// Async is recorded rather than filtered because the two cases need different
+// answers. A name that is not here at all is a typo, and the fix is to spell it
+// correctly. A name that is here but synchronous is a design question -- the
+// call is going to take a network round trip whatever its signature says -- and
+// the diagnostic has to be able to tell them apart.
+type RemoteFunction struct {
+	Name  string
+	Async bool
+	// Offset is the byte position of the definition, so a diagnostic about the
+	// callee can point at the callee.
+	Offset int
+}
+
 // Packaging is how one execution unit is built and run.
 type Packaging struct {
 	// LambdaRuntime is the managed runtime identifier, e.g. "python3.12".
@@ -91,6 +107,16 @@ type Frontend interface {
 
 	// MethodCalls returns every `receiver.method(...)` site in a unit.
 	MethodCalls(files *source.Set, unitFiles []string) []MethodCall
+
+	// RemoteFunctions returns the module-level functions an entry module
+	// offers to callers of cloudcc.remote, sorted by name.
+	//
+	// The second result is whether this language can be called into at all,
+	// which is a different question from whether a particular module offers
+	// anything: a frontend with no inbound dispatcher returns false, and the
+	// remote stage explains that gap rather than reporting that the function
+	// the author asked for does not exist.
+	RemoteFunctions(files *source.Set, entry string) ([]RemoteFunction, bool)
 
 	// EntrypointCandidates returns the modules that could serve as the entry
 	// for an undeclared single unit, best first.

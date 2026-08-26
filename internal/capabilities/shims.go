@@ -36,7 +36,7 @@ type ShimsPlugin struct{ base }
 func NewShimsPlugin() *ShimsPlugin {
 	return &ShimsPlugin{base{name: PluginShims, deps: []string{
 		PluginExecUnits, PluginStaticUnits, PluginExpose,
-		PluginPersist, PluginPubSub, PluginConfigVars, PluginValidate,
+		PluginPersist, PluginPubSub, PluginRemote, PluginConfigVars, PluginValidate,
 	}}}
 }
 

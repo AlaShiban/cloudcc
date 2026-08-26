@@ -51,6 +51,7 @@ var shims = map[string]shimTarget{
 var verbShims = map[string]shimTarget{
 	sdkdetect.FnConfigValue:   {Module: "config", Alias: "_cloudcc_config", Call: "value", Args: []string{"id", "default"}},
 	sdkdetect.FnExpose:        {Module: "expose", Alias: "_cloudcc_expose", Call: "register", Args: []string{"app", "id", "target"}},
+	sdkdetect.FnRemote:        {Module: "rpc", Alias: "_cloudcc_rpc", Call: "connect", Args: []string{"id"}},
 	sdkdetect.FnExecutionUnit: {Erase: "None"},
 	sdkdetect.FnStaticUnit:    {Erase: "None"},
 	sdkdetect.FnEmbedAssets:   {Erase: "pattern"},
@@ -121,6 +122,31 @@ func rewrite(f *source.File, hints []sdkdetect.Hint) error {
 	// The SDK is compile-time only and is not installed in the bundle, so its
 	// import statements go away with the calls they served.
 	for _, span := range sdkImportSpans(f) {
+		splices = append(splices, splice{span[0], span[1], ""})
+	}
+
+	// A module reached through cloudcc.remote is another unit's entrypoint, and
+	// this unit's bundle deliberately does not carry it. The import that made
+	// the uncompiled program work would therefore be the first line to fail, so
+	// it goes wherever the call it served went.
+	//
+	// Every remote target in the file is resolved together, not one hint at a
+	// time. `from nomnom import inventory, pricing, tracking` with all three
+	// declared remote is a statement that should disappear entirely, and three
+	// independent passes would each see one name out of three, take the
+	// single-name branch, and leave `from nomnom import` behind -- which is a
+	// syntax error, and one that only appears when a program declares more than
+	// one remote unit from the same package.
+	remoteNames := map[string]bool{}
+	for _, h := range hints {
+		if h.File != f.Path || h.Func != sdkdetect.FnRemote {
+			continue
+		}
+		if target, ok := h.Args["target"].(string); ok && target != "" {
+			remoteNames[target] = true
+		}
+	}
+	for _, span := range importBindingSpans(f, remoteNames) {
 		splices = append(splices, splice{span[0], span[1], ""})
 	}
 
@@ -225,6 +251,104 @@ func sdkImportSpans(f *source.File) [][2]int {
 	}
 	walk(root)
 	return spans
+}
+
+// importBindingSpans returns the byte ranges to delete so that none of names is
+// bound by an import in f.
+//
+// A whole statement goes when it bound nothing else; otherwise only the one
+// item does, because `from nomnom import pricing, menu` is one statement
+// serving two purposes and only one of them has moved over the wire.
+func importBindingSpans(f *source.File, names map[string]bool) [][2]int {
+	if len(names) == 0 {
+		return nil
+	}
+	root := f.Root()
+	if root == nil {
+		return nil
+	}
+
+	var spans [][2]int
+	var walk func(n *ts.Node)
+	walk = func(n *ts.Node) {
+		kind := n.Kind()
+		if kind != "import_statement" && kind != "import_from_statement" {
+			for i := uint(0); i < n.NamedChildCount(); i++ {
+				walk(n.NamedChild(i))
+			}
+			return
+		}
+
+		module := n.ChildByFieldName("module_name")
+		var items, matches []*ts.Node
+		for i := uint(0); i < n.NamedChildCount(); i++ {
+			child := n.NamedChild(i)
+			if child.Kind() == "comment" || (module != nil && child.Equals(*module)) {
+				continue
+			}
+			items = append(items, child)
+			if importBinds(f, child, names) {
+				matches = append(matches, child)
+			}
+		}
+		if len(matches) == 0 {
+			return
+		}
+		if len(matches) == len(items) {
+			start, end := int(n.StartByte()), int(n.EndByte())
+			if end < len(f.Content) && f.Content[end] == '\n' {
+				end++
+			}
+			spans = append(spans, [2]int{start, end})
+			return
+		}
+		for _, item := range matches {
+			spans = append(spans, itemSpan(f, item))
+		}
+	}
+	walk(root)
+	return spans
+}
+
+// importBinds reports whether one item of an import statement binds any of the
+// given names.
+func importBinds(f *source.File, item *ts.Node, names map[string]bool) bool {
+	switch item.Kind() {
+	case "dotted_name":
+		// `import a.b` binds `a`; `from pkg import b` binds `b`. Taking the
+		// first segment is right for both, because the second form has no dots.
+		text := f.Text(item)
+		if i := strings.IndexByte(text, '.'); i >= 0 {
+			text = text[:i]
+		}
+		return names[text]
+	case "aliased_import":
+		alias := item.ChildByFieldName("alias")
+		return alias != nil && names[f.Text(alias)]
+	}
+	return false
+}
+
+// itemSpan is one import item plus the separator that would otherwise be left
+// dangling: the comma after it, or the comma before it when it is last.
+func itemSpan(f *source.File, item *ts.Node) [2]int {
+	start, end := int(item.StartByte()), int(item.EndByte())
+	for end < len(f.Content) && (f.Content[end] == ' ' || f.Content[end] == ',') {
+		wasComma := f.Content[end] == ','
+		end++
+		if wasComma {
+			for end < len(f.Content) && f.Content[end] == ' ' {
+				end++
+			}
+			return [2]int{start, end}
+		}
+	}
+	// Nothing followed, so the separator to take is the one in front.
+	end = int(item.EndByte())
+	for start > 0 && (f.Content[start-1] == ' ' || f.Content[start-1] == ',') {
+		start--
+	}
+	return [2]int{start, end}
 }
 
 // insertImports adds the shim imports after the module docstring and any
