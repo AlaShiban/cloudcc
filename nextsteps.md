@@ -301,6 +301,43 @@ catch a rejected promise from an async handler — Node exits the process — so
 
 ---
 
+## Round: two layers of configuration
+
+`type: lambda` named a product where the config should name a shape. Compute
+types are now `function` and `container` -- what the three clouds have in
+common -- and configuration splits to match: portable `memory:` and `timeout:`
+on the unit, everything AWS-specific in a block named after the resource
+(`aws.lambda.Function:`). The old type spellings are errors naming the
+replacement. `docs/decisions.md` has the reasoning, including why the portable
+layer is deliberately only two settings.
+
+Arguments keep the Terraform spelling, which is also Pulumi's Python and YAML
+spelling, so emitting Pulumi TypeScript is a case transform and OpenTofu later
+is the identity. The block *key* is Pulumi's type name by choice, and
+`resourceTypes` in `internal/provider/aws/lambdaargs.go` records the OpenTofu
+name beside it so the eventual backend has one place to look.
+
+**Open, and the natural next step.** A unit becomes several resources -- the
+function, its role, its log group -- and only the function is configurable. The
+key shape extends without changing anything:
+
+```yaml
+    aws.cloudwatch.LogGroup:
+      retention_in_days: 30
+```
+
+which would also give per-unit retention, currently app-wide under `logging:`.
+An unknown resource key is a clear error listing what is configurable, so
+nothing is silently ignored in the meantime.
+
+**Also open.** `type: container` reads no configuration at all. A Fargate
+service is sized in cpu and memory units against a task definition, so `memory:`
+means something different there and is currently refused on a container unit
+rather than guessed at. Deciding whether the portable `memory:` should map onto
+a task definition's memory is a real design question, not an oversight.
+
+---
+
 ## Smaller things noticed but not done
 
 - **`execution_unit` erases to a bare `None` statement** on its own line in
