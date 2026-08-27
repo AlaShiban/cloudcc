@@ -239,22 +239,46 @@ ensure_engine() {
           postgres:16-alpine >/dev/null 2>&1 \
           || fail "could not start Postgres; is Docker running?"
       fi
+      # Readiness is a successful query over TCP, not pg_isready.
+      #
+      # The official image runs its initialisation against a temporary server
+      # that listens on the unix socket *only*, and then restarts. pg_isready
+      # answers "accepting connections" during that window, so a command issued
+      # on the strength of it hits a server that is about to go away. On CI this
+      # failed 1.5 seconds after the container was created, which is not long
+      # enough for Postgres to have started at all; on a desktop where the
+      # container had been up for hours it never appeared.
+      #
+      # `-h 127.0.0.1` is the part that matters, and a query over the socket
+      # would not do: the socket is exactly what the initialisation server
+      # listens on, so a socket query answers "yes" during the window this is
+      # trying to wait out. TCP is also how every program under test reaches it.
       local waited=0
-      until docker exec "$CLOUDCC_PG_CONTAINER" pg_isready -U ccadmin >/dev/null 2>&1; do
+      until docker exec "$CLOUDCC_PG_CONTAINER" \
+              psql -h 127.0.0.1 -U ccadmin -d postgres -tAc 'SELECT 1' >/dev/null 2>&1; do
         waited=$((waited + 1))
-        [ "$waited" -gt 60 ] && fail "Postgres did not become ready in 60s"
+        [ "$waited" -gt 90 ] && fail "Postgres did not accept a TCP query in 90s"
         sleep 1
       done
+
       # POSTGRES_DB creates one database, and only on a container's first
       # start. An application may declare several -- petstore-multi has an
       # async engine on petsdb and a synchronous one on auditdb -- and the
       # container is deliberately reused between runs, so the rest are created
       # here. CREATE DATABASE has no IF NOT EXISTS, hence the guard.
-      docker exec "$CLOUDCC_PG_CONTAINER" psql -U ccadmin -d postgres -tAc \
-        "SELECT 1 FROM pg_database WHERE datname='$database'" 2>/dev/null | grep -q 1 \
-        || docker exec "$CLOUDCC_PG_CONTAINER" psql -U ccadmin -d postgres -q \
-             -c "CREATE DATABASE \"$database\"" >/dev/null 2>&1 \
-        || fail "could not create the $database database"
+      #
+      # Retried because two harnesses may create the same database at once, and
+      # because the check and the create are not atomic: losing that race
+      # returns "already exists", which is the state being asked for.
+      local tries=0
+      until docker exec "$CLOUDCC_PG_CONTAINER" psql -h 127.0.0.1 -U ccadmin -d postgres -tAc \
+              "SELECT 1 FROM pg_database WHERE datname='$database'" 2>/dev/null | grep -q 1; do
+        docker exec "$CLOUDCC_PG_CONTAINER" psql -h 127.0.0.1 -U ccadmin -d postgres -q \
+          -c "CREATE DATABASE \"$database\"" >/dev/null 2>&1 || true
+        tries=$((tries + 1))
+        [ "$tries" -gt 10 ] && fail "could not create the $database database"
+        sleep 1
+      done
       ;;
     redis)
       if [ "$(docker inspect -f '{{.State.Running}}' "$CLOUDCC_REDIS_CONTAINER" 2>/dev/null)" != "true" ]; then
