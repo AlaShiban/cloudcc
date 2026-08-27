@@ -16,6 +16,7 @@ flowchart LR
     aws_lambda_permission_worker_petEvents_sns["worker-petEvents-sns\nlambda.permission"]
     aws_lambda_api["api\nlambda"]
     aws_lambda_worker["worker\nlambda"]
+    aws_rds_auditdb[("auditdb\nrds")]
     aws_rds_petsdb[("petsdb\nrds")]
     aws_s3_object_petstore_site_index_html[/"petstore-site/index.html\ns3.object"/]
     aws_s3_object_petstore_site_style_css[/"petstore-site/style.css\ns3.object"/]
@@ -49,6 +50,7 @@ flowchart LR
     aws_iam_policy_api --> aws_sns_petEvents
     aws_iam_policy_worker --> aws_dynamodb_petsByOwner
     aws_iam_policy_worker --> aws_iam_role_worker
+    aws_iam_policy_worker --> aws_rds_auditdb
     aws_iam_policy_worker --> aws_s3_petAudit
     aws_iam_policy_worker --> aws_secretsmanager_auditKey
     aws_lambda_permission_pet_api --> aws_apigatewayv2_pet_api
@@ -59,6 +61,8 @@ flowchart LR
     aws_lambda_api --> aws_iam_role_api
     aws_lambda_worker --> aws_cloudwatch_loggroup_worker
     aws_lambda_worker --> aws_iam_role_worker
+    aws_rds_auditdb --> aws_subnetgroup_rds
+    aws_rds_auditdb --> aws_vpc_securitygroup_network
     aws_rds_petsdb --> aws_subnetgroup_rds
     aws_rds_petsdb --> aws_vpc_securitygroup_network
     aws_s3_object_petstore_site_index_html --> aws_s3_petstore_site
@@ -85,6 +89,7 @@ flowchart LR
     aws_lambda_api -->|uses| aws_rds_petsdb
     aws_lambda_api -->|uses| aws_sns_petEvents
     aws_lambda_worker -->|uses| aws_dynamodb_petsByOwner
+    aws_lambda_worker -->|uses| aws_rds_auditdb
     aws_lambda_worker -->|uses| aws_s3_petAudit
     aws_lambda_worker -->|uses| aws_secretsmanager_auditKey
     aws_lambda_worker -->|uses| aws_sns_petEvents

@@ -157,3 +157,50 @@ func TestFasterIsNotTheSameAsBetter(t *testing.T) {
 		t.Error("a faster run with a dead edge must still report the dead edge")
 	}
 }
+
+// A run whose traffic never arrived proves nothing, and must not be allowed to
+// report edges as carried.
+//
+// This is not hypothetical. examples/mixed was load tested before its Node unit
+// could start; every request came back "connection refused", every strategy
+// printed `ok 0.0%`, and the harness still concluded "every edge carried
+// traffic" -- because the connectedness evidence it read was state a *previous*
+// run had left in the emulator. A green result from a run that never made a
+// request is worse than a red one.
+func TestARunThatDeliveredNothingIsVoid(t *testing.T) {
+	refused := &Report{
+		App:  "mixed",
+		Mode: "compiled",
+		Runs: []Summary{
+			{Strategy: "steady", Requests: 1000, OKRate: 0,
+				Failures: map[string]int{"connection refused": 1000}},
+			{Strategy: "burst", Requests: 500, OKRate: 0,
+				Failures: map[string]int{"connection refused": 500}},
+		},
+	}
+	if why := refused.Undelivered(); why == "" {
+		t.Error("a run where every request was refused was not reported as void")
+	} else if !strings.Contains(why, "connection refused") {
+		t.Errorf("the reason does not name the failure: %q", why)
+	}
+
+	// A healthy run is not void, and neither is one with a minority of
+	// failures -- a burst strategy is meant to find the edge of what an
+	// application sustains, and finding it is not a broken harness.
+	healthy := &Report{
+		Runs: []Summary{
+			{Strategy: "steady", Requests: 1000, OKRate: 1},
+			{Strategy: "burst", Requests: 500, OKRate: 0.72,
+				Failures: map[string]int{"timeout": 140}},
+		},
+	}
+	if why := healthy.Undelivered(); why != "" {
+		t.Errorf("a healthy run was reported as void: %q", why)
+	}
+
+	// A report with no runs at all cannot support a claim either.
+	empty := &Report{}
+	if empty.Undelivered() == "" {
+		t.Error("a report with no runs was not reported as void")
+	}
+}

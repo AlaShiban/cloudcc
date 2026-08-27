@@ -189,6 +189,32 @@ func percentile(sorted []time.Duration, p float64) time.Duration {
 	return sorted[idx]
 }
 
+// newClient builds an HTTP client that keeps one connection per session alive.
+//
+// This is not tuning. Go's default client holds two idle connections per host,
+// so above two sessions in flight nearly every request opens a fresh TCP
+// connection -- and against localhost, tens of thousands of short-lived
+// connections a second exhaust the ephemeral port range within seconds. What
+// comes back then is "connection refused", from the operating system rather
+// than from the application, and the run measures the harness's socket churn
+// instead of the thing under test.
+//
+// It is a measurement bug that looks exactly like a broken application, and it
+// hides itself: both halves of a comparison hit the same wall at the same rate,
+// so the ratio comes out at a reassuring 1.00x. examples/mixed produced a
+// million refused requests and a table of 1.00x ratios before this existed.
+func newClient(peak int) *http.Client {
+	idle := peak * 2
+	if idle < 8 {
+		idle = 8
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = idle
+	transport.MaxIdleConnsPerHost = idle
+	transport.MaxConnsPerHost = idle
+	return &http.Client{Timeout: 30 * time.Second, Transport: transport}
+}
+
 // Runner drives one plan against one base URL.
 type Runner struct {
 	BaseURL string
@@ -208,7 +234,7 @@ type Runner struct {
 // that does not exist would be a measurement of the 404 path.
 func (r *Runner) Run(ctx context.Context, strategy Strategy) (*Metrics, error) {
 	if r.Client == nil {
-		r.Client = &http.Client{Timeout: 30 * time.Second}
+		r.Client = newClient(strategy.Peak())
 	}
 	metrics := NewMetrics()
 	metrics.started = time.Now()

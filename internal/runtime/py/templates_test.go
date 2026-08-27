@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/cloudcompiler/cloudcc/internal/sdkdetect"
 )
 
 // assertParses runs generated source through the real interpreter's parser.
@@ -247,5 +249,38 @@ func TestPackagingFragments(t *testing.T) {
 	}
 	if strings.Contains(container, ".zip") {
 		t.Errorf("a container unit is not zipped:\n%s", container)
+	}
+}
+
+// Every Python client library the compiler can name has to bring its
+// distribution into the bundle. A library with no entry here installs nothing:
+// the rewritten source imports redis, or SQLAlchemy's async extras, and the
+// Lambda dies at import with ModuleNotFoundError -- eight minutes into a
+// deploy, and only for the one program that used that client.
+//
+// redis-py-async was missing when it was added to the detection table, which is
+// what this test exists to catch the next time.
+func TestEveryPythonClientLibraryDeclaresItsDistribution(t *testing.T) {
+	for _, constructor := range sdkdetect.KnownClients("python") {
+		client, ok := sdkdetect.LookupClient("python", constructor)
+		if !ok {
+			t.Fatalf("KnownClients listed %q but LookupClient does not know it", constructor)
+		}
+		// The two capabilities cloudcc supplies itself have no library and no
+		// third-party distribution behind them.
+		if client.Library == "" {
+			continue
+		}
+		if len(ShimRequirements[client.Library]) == 0 {
+			t.Errorf("client library %q (%s) has no ShimRequirements entry, so its "+
+				"distribution is never installed into the bundle", client.Library, constructor)
+		}
+	}
+	// LookupClient only reaches the synchronous half of a library that ships
+	// both, so the asynchronous variants are named here explicitly.
+	for _, library := range []string{sdkdetect.LibRedisPyAsync, sdkdetect.LibSQLAlchemyA} {
+		if len(ShimRequirements[library]) == 0 {
+			t.Errorf("client library %q has no ShimRequirements entry", library)
+		}
 	}
 }

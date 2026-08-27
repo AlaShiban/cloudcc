@@ -7,6 +7,7 @@ flowchart LR
     aws_cloudwatch_loggroup_api["api\ncloudwatch.loggroup"]
     aws_cloudwatch_loggroup_worker["worker\ncloudwatch.loggroup"]
     aws_dynamodb_petsByOwner[("petsByOwner\ndynamodb")]
+    aws_elasticache_petCache[("petCache\nelasticache")]
     aws_iam_policy_api["api\niam.policy"]
     aws_iam_policy_worker["worker\niam.policy"]
     aws_iam_role_api["api\niam.role"]
@@ -14,21 +15,60 @@ flowchart LR
     aws_lambda_permission_pet_api["pet-api\nlambda.permission"]
     aws_lambda_api["api\nlambda"]
     aws_lambda_worker["worker\nlambda"]
+    aws_rds_shopdb[("shopdb\nrds")]
+    aws_s3_petPhotos[("petPhotos\ns3")]
+    aws_subnetgroup_elasticache["elasticache\nsubnetgroup"]
+    aws_subnetgroup_rds["rds\nsubnetgroup"]
+    aws_vpc_gateway_network["network\nvpc.gateway"]
+    aws_vpc_routeassoc_network_0["network-0\nvpc.routeassoc"]
+    aws_vpc_routeassoc_network_1["network-1\nvpc.routeassoc"]
+    aws_vpc_routetable_network["network\nvpc.routetable"]
+    aws_vpc_securitygroup_network["network\nvpc.securitygroup"]
+    aws_vpc_subnet_network_0["network-0\nvpc.subnet"]
+    aws_vpc_subnet_network_1["network-1\nvpc.subnet"]
+    aws_vpc_network["network\nvpc"]
     aws_apigatewayv2_integration_pet_api --> aws_apigatewayv2_pet_api
     aws_apigatewayv2_integration_pet_api --> aws_lambda_api
     aws_apigatewayv2_route_pet_api --> aws_apigatewayv2_integration_pet_api
     aws_apigatewayv2_route_pet_api --> aws_apigatewayv2_pet_api
     aws_apigatewayv2_stage_pet_api --> aws_apigatewayv2_route_pet_api
     aws_apigatewayv2_stage_pet_api --> aws_apigatewayv2_pet_api
+    aws_elasticache_petCache --> aws_subnetgroup_elasticache
+    aws_elasticache_petCache --> aws_vpc_securitygroup_network
     aws_iam_policy_api --> aws_dynamodb_petsByOwner
     aws_iam_policy_api --> aws_iam_role_api
+    aws_iam_policy_api --> aws_rds_shopdb
+    aws_iam_policy_api --> aws_s3_petPhotos
     aws_iam_policy_worker --> aws_dynamodb_petsByOwner
     aws_iam_policy_worker --> aws_iam_role_worker
+    aws_iam_policy_worker --> aws_rds_shopdb
+    aws_iam_policy_worker --> aws_s3_petPhotos
     aws_lambda_permission_pet_api --> aws_apigatewayv2_pet_api
     aws_lambda_permission_pet_api --> aws_lambda_api
     aws_lambda_api --> aws_cloudwatch_loggroup_api
     aws_lambda_api --> aws_iam_role_api
     aws_lambda_worker --> aws_cloudwatch_loggroup_worker
     aws_lambda_worker --> aws_iam_role_worker
+    aws_rds_shopdb --> aws_subnetgroup_rds
+    aws_rds_shopdb --> aws_vpc_securitygroup_network
+    aws_subnetgroup_elasticache --> aws_vpc_subnet_network_0
+    aws_subnetgroup_elasticache --> aws_vpc_subnet_network_1
+    aws_subnetgroup_rds --> aws_vpc_subnet_network_0
+    aws_subnetgroup_rds --> aws_vpc_subnet_network_1
+    aws_vpc_gateway_network --> aws_vpc_network
+    aws_vpc_routeassoc_network_0 --> aws_vpc_routetable_network
+    aws_vpc_routeassoc_network_0 --> aws_vpc_subnet_network_0
+    aws_vpc_routeassoc_network_1 --> aws_vpc_routetable_network
+    aws_vpc_routeassoc_network_1 --> aws_vpc_subnet_network_1
+    aws_vpc_routetable_network --> aws_vpc_gateway_network
+    aws_vpc_routetable_network --> aws_vpc_network
+    aws_vpc_securitygroup_network --> aws_vpc_network
+    aws_vpc_subnet_network_0 --> aws_vpc_network
+    aws_vpc_subnet_network_1 --> aws_vpc_network
     aws_lambda_api -->|uses| aws_dynamodb_petsByOwner
+    aws_lambda_api -->|uses| aws_elasticache_petCache
+    aws_lambda_api -->|uses| aws_rds_shopdb
+    aws_lambda_api -->|uses| aws_s3_petPhotos
     aws_lambda_worker -->|uses| aws_dynamodb_petsByOwner
+    aws_lambda_worker -->|uses| aws_rds_shopdb
+    aws_lambda_worker -->|uses| aws_s3_petPhotos

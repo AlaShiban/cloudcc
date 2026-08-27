@@ -321,6 +321,11 @@ func resolveClient(f *source.File, call *ts.Node, h *sdkdetect.Hint) *hintError 
 		}
 	}
 
+	// One constructor name can belong to two libraries -- redis-py spells its
+	// asynchronous client `redis.asyncio.Redis` -- so the module it came from
+	// gets a say before the client is settled.
+	client = sdkdetect.RefineClient(client, qualifiedConstructor(f, ctorCall, clientOrigins(f)))
+
 	h.Capability = client.Capability
 	h.ClientType = client.Type
 	h.ClientLibrary = client.Library
@@ -443,6 +448,116 @@ func constructorOf(f *source.File, n *ts.Node) (string, *ts.Node) {
 		}
 	}
 	return "", nil
+}
+
+// qualifiedConstructor returns the full dotted path a client expression names,
+// with its leading segment expanded through the file's imports.
+//
+// The bare constructor is not always enough to say which library a program
+// reached for. `redis.asyncio.Redis` and `redis.Redis` both reduce to "Redis",
+// and they are different libraries whose objects are not interchangeable, so
+// the module the name came from has to be part of the question.
+//
+// Every spelling resolves to the same path: `from redis.asyncio import Redis`
+// binds "Redis" to redis.asyncio.Redis, `import redis.asyncio as aioredis`
+// binds "aioredis" to redis.asyncio, and `from redis import asyncio` binds
+// "asyncio" to redis.asyncio. Returns "" when the head is not a name this file
+// imported, which is the ordinary case and simply leaves the client table's
+// answer standing.
+func qualifiedConstructor(f *source.File, call *ts.Node, origins map[string]string) string {
+	if call == nil || call.Kind() != "call" {
+		return ""
+	}
+	fn := call.ChildByFieldName("function")
+	if fn == nil {
+		return ""
+	}
+	path := f.Text(fn)
+	head, rest := path, ""
+	if i := strings.Index(path, "."); i >= 0 {
+		head, rest = path[:i], path[i:]
+	}
+	origin, ok := origins[head]
+	if !ok {
+		return ""
+	}
+	return origin + rest
+}
+
+// clientOrigins maps each local name a file imports to the dotted path it
+// denotes, for every import except the SDK's own -- those are resolveImports'
+// business, and this one is about the libraries a program wraps.
+func clientOrigins(f *source.File) map[string]string {
+	origins := map[string]string{}
+	root := f.Root()
+	if root == nil {
+		return origins
+	}
+
+	// `import a.b` binds only the top package, and `import a.b as c` binds the
+	// submodule under the alias. Getting that backwards would resolve
+	// `redis.asyncio.Redis` to `redis.asyncio.asyncio.Redis`.
+	bind := func(local, path string) {
+		if local != "" && path != "" && local != sdkdetect.PackageName {
+			origins[local] = path
+		}
+	}
+
+	var walk func(n *ts.Node)
+	walk = func(n *ts.Node) {
+		switch n.Kind() {
+		case "import_statement":
+			for i := uint(0); i < n.NamedChildCount(); i++ {
+				child := n.NamedChild(i)
+				switch child.Kind() {
+				case "dotted_name":
+					path := f.Text(child)
+					top := path
+					if j := strings.Index(path, "."); j >= 0 {
+						top = path[:j]
+					}
+					bind(top, top)
+				case "aliased_import":
+					name := child.ChildByFieldName("name")
+					alias := child.ChildByFieldName("alias")
+					if name != nil && alias != nil {
+						bind(f.Text(alias), f.Text(name))
+					}
+				}
+			}
+		case "import_from_statement":
+			mod := n.ChildByFieldName("module_name")
+			if mod == nil {
+				break
+			}
+			module := f.Text(mod)
+			if module == sdkdetect.PackageName {
+				break
+			}
+			for i := uint(0); i < n.NamedChildCount(); i++ {
+				child := n.NamedChild(i)
+				if child.Equals(*mod) || child.Kind() == "comment" {
+					continue
+				}
+				switch child.Kind() {
+				case "dotted_name":
+					name := f.Text(child)
+					bind(name, module+"."+name)
+				case "aliased_import":
+					name := child.ChildByFieldName("name")
+					alias := child.ChildByFieldName("alias")
+					if name != nil && alias != nil {
+						bind(f.Text(alias), module+"."+f.Text(name))
+					}
+				}
+			}
+		}
+		for i := uint(0); i < n.NamedChildCount(); i++ {
+			walk(n.NamedChild(i))
+		}
+	}
+	walk(root)
+	return origins
 }
 
 // firstStringArg reads the first string literal a call was given, which for a

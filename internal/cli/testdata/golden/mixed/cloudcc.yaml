@@ -35,5 +35,11 @@ exposed:
   pet-api:
     type: apigateway
 persisted:
+  petCache:
+    type: elasticache
+  petPhotos:
+    type: s3
   petsByOwner:
     type: dynamodb
+  shopdb:
+    type: rds_postgres

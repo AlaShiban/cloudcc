@@ -1,15 +1,108 @@
 {
-  "description": "A Node API beside a Python worker, sharing one table.",
+  "description": "A Node API beside a Python worker, sharing a table, a Postgres database and a bucket -- each reached through a different client library on each side.",
   "unit": "api",
-  "tables": ["pets"],
+  "tables": [
+    "pets"
+  ],
+  "buckets": [
+    "pet-photos"
+  ],
+  "engines": [
+    "postgres",
+    "redis"
+  ],
+  "databases": [
+    "shopdb"
+  ],
   "requests": [
-    {"method": "GET", "path": "/health"},
-    {"method": "GET", "path": "/pets"},
-    {"method": "GET", "path": "/pets/1"},
-    {"method": "PUT", "path": "/pets/1", "body": {"name": "rex", "species": "dog"}},
-    {"method": "GET", "path": "/pets/1"},
-    {"method": "GET", "path": "/pets"},
-    {"method": "DELETE", "path": "/pets/1"},
-    {"method": "GET", "path": "/pets"}
+    {
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "method": "GET",
+      "path": "/pets"
+    },
+    {
+      "method": "GET",
+      "path": "/pets/1"
+    },
+    {
+      "method": "PUT",
+      "path": "/pets/1",
+      "body": {
+        "name": "rex",
+        "species": "dog"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/pets/1"
+    },
+    {
+      "method": "GET",
+      "path": "/pets/1"
+    },
+    {
+      "method": "GET",
+      "path": "/pets"
+    },
+    {
+      "method": "GET",
+      "path": "/sightings"
+    },
+    {
+      "method": "POST",
+      "path": "/sightings/labrador",
+      "body": {
+        "species": "dog"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/sightings/labrador",
+      "body": {
+        "species": "dog"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/sightings/siamese",
+      "body": {
+        "species": "cat"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/sightings"
+    },
+    {
+      "method": "GET",
+      "path": "/photos/1"
+    },
+    {
+      "method": "PUT",
+      "path": "/photos/1",
+      "body": {
+        "url": "rex.jpg",
+        "width": 640
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/photos/1"
+    },
+    {
+      "method": "DELETE",
+      "path": "/pets/1"
+    },
+    {
+      "method": "GET",
+      "path": "/pets/1"
+    },
+    {
+      "method": "GET",
+      "path": "/pets"
+    }
   ]
 }

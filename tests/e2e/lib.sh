@@ -112,8 +112,18 @@ reset_local_table() {
     || fail "could not create the local table $1 in the emulator"
 }
 
+# ensure_local_bucket creates the bucket a program-as-written expects, and
+# empties it.
+#
+# Emptying matters as much as creating. reset_local_table drops and recreates
+# its table for exactly this reason, and a bucket left alone is the same bug:
+# the uncompiled half reads objects a previous run wrote, while the compiled
+# half reads a bucket the compiler has just provisioned and is therefore empty.
+# The two runs then differ on the first read -- 200 against 404 -- for a reason
+# that has nothing to do with compiling, and the diff points at the example.
 ensure_local_bucket() {
   aws_local s3api create-bucket --bucket "$1" >/dev/null 2>&1 || true
+  aws_local s3 rm "s3://$1" --recursive >/dev/null 2>&1 || true
 }
 
 # The environment a program as written needs to reach the emulator.
@@ -230,11 +240,21 @@ ensure_engine() {
           || fail "could not start Postgres; is Docker running?"
       fi
       local waited=0
-      until docker exec "$CLOUDCC_PG_CONTAINER" pg_isready -U ccadmin -d "$database" >/dev/null 2>&1; do
+      until docker exec "$CLOUDCC_PG_CONTAINER" pg_isready -U ccadmin >/dev/null 2>&1; do
         waited=$((waited + 1))
         [ "$waited" -gt 60 ] && fail "Postgres did not become ready in 60s"
         sleep 1
       done
+      # POSTGRES_DB creates one database, and only on a container's first
+      # start. An application may declare several -- petstore-multi has an
+      # async engine on petsdb and a synchronous one on auditdb -- and the
+      # container is deliberately reused between runs, so the rest are created
+      # here. CREATE DATABASE has no IF NOT EXISTS, hence the guard.
+      docker exec "$CLOUDCC_PG_CONTAINER" psql -U ccadmin -d postgres -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='$database'" 2>/dev/null | grep -q 1 \
+        || docker exec "$CLOUDCC_PG_CONTAINER" psql -U ccadmin -d postgres -q \
+             -c "CREATE DATABASE \"$database\"" >/dev/null 2>&1 \
+        || fail "could not create the $database database"
       ;;
     redis)
       if [ "$(docker inspect -f '{{.State.Running}}' "$CLOUDCC_REDIS_CONTAINER" 2>/dev/null)" != "true" ]; then
@@ -253,24 +273,43 @@ ensure_engine() {
   esac
 }
 
+# scenario_databases <scenario.json> -- the Postgres databases it needs.
+#
+# From the scenario rather than a list here, because which databases exist is a
+# property of the example: examples/mixed declares one called "shop" and
+# petstore-multi declares two. Defaulting to petsdb keeps the scenarios that
+# predate this from having to say anything.
+scenario_databases() {
+  jq -r '[(.databases // ["petsdb"]), (.load.databases // [])] | flatten | unique | .[]' \
+    "$1" 2>/dev/null
+}
+
 # ensure_engines <scenario.json> -- starts whatever the scenario declares.
 ensure_engines() {
-  local scenario="$1" engine
+  local scenario="$1" engine database
   for engine in $(jq -r '[(.engines // []), (.load.engines // [])] | flatten | .[]' "$scenario" 2>/dev/null); do
     log "starting $engine"
-    ensure_engine "$engine"
+    if [ "$engine" = postgres ]; then
+      for database in $(scenario_databases "$scenario"); do
+        ensure_engine postgres "$database"
+      done
+    else
+      ensure_engine "$engine"
+    fi
   done
 }
 
 # reset_engines wipes their contents without restarting them, so one example's
 # rows are not another's evidence.
 reset_engines() {
-  local scenario="$1" engine
+  local scenario="$1" engine database
   for engine in $(jq -r '[(.engines // []), (.load.engines // [])] | flatten | .[]' "$scenario" 2>/dev/null); do
     case "$engine" in
       postgres)
-        docker exec "$CLOUDCC_PG_CONTAINER" psql -U ccadmin -d petsdb -q \
-          -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' >/dev/null 2>&1 || true
+        for database in $(scenario_databases "$scenario"); do
+          docker exec "$CLOUDCC_PG_CONTAINER" psql -U ccadmin -d "$database" -q \
+            -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' >/dev/null 2>&1 || true
+        done
         ;;
       redis)
         docker exec "$CLOUDCC_REDIS_CONTAINER" redis-cli FLUSHALL >/dev/null 2>&1 || true

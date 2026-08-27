@@ -194,7 +194,12 @@ var ShimRequirements = map[string][]string{
 	// Keyed by client library rather than by capability, because the capability
 	// does not say enough: an async SQLAlchemy engine needs an async driver,
 	// and a bundle without one fails on its first connection.
-	"redis-py":         {"redis>=5.0"},
+	"redis-py":       {"redis>=5.0"},
+	"redis-py-async": {"redis>=5.0"},
+	// Already in "base", and named again so that every client library the
+	// compiler can detect has an entry here rather than relying on a second
+	// list to happen to cover it.
+	"boto3-dynamodb":   {"boto3>=1.34"},
 	"sqlalchemy":       {"SQLAlchemy>=2.0"},
 	"sqlalchemy-async": {"SQLAlchemy[asyncio]>=2.0", "asyncpg>=0.30"},
 	"pathlib":          {"cloudpathlib[s3]>=0.20"},

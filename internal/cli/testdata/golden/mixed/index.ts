@@ -8,6 +8,10 @@ const petApiApi = new aws.apigatewayv2.Api("pet-api", {
     protocolType: "HTTP",
 });
 
+const networkZones = aws.getAvailabilityZonesOutput({
+    state: "available",
+});
+
 const apiLogs = new aws.cloudwatch.LogGroup("api", {
     name: "/aws/lambda/mixed-api",
     retentionInDays: 14,
@@ -49,32 +53,6 @@ const apiRole = new aws.iam.Role("api", {
     name: "mixed-api-role",
 });
 
-const apiPolicy = new aws.iam.RolePolicy("api", {
-    name: "mixed-api-policy",
-    policy: pulumi.jsonStringify({
-    Statement: [
-        {
-            Action: [
-                "dynamodb:GetItem",
-                "dynamodb:PutItem",
-                "dynamodb:DeleteItem",
-                "dynamodb:Query",
-                "dynamodb:Scan",
-                "dynamodb:BatchGetItem",
-                "dynamodb:BatchWriteItem",
-            ],
-            Effect: "Allow",
-            Resource: [
-                petsByOwnerTable.arn,
-                pulumi.interpolate`${petsByOwnerTable.arn}/index/*`,
-            ],
-        },
-    ],
-    Version: "2012-10-17",
-}),
-    role: apiRole.id,
-});
-
 const workerRole = new aws.iam.Role("worker", {
     assumeRolePolicy: pulumi.jsonStringify({
     Statement: [
@@ -94,10 +72,146 @@ const workerRole = new aws.iam.Role("worker", {
     name: "mixed-worker-role",
 });
 
-const workerPolicy = new aws.iam.RolePolicy("worker", {
-    name: "mixed-worker-policy",
+const petPhotosBucket = new aws.s3.BucketV2("petPhotos", {
+    bucket: "mixed-petphotos",
+    forceDestroy: true,
+});
+
+const networkVpc = new aws.ec2.Vpc("network", {
+    cidrBlock: "10.0.0.0/16",
+    enableDnsHostnames: true,
+    enableDnsSupport: true,
+    tags: {
+        Name: "mixed-network",
+    },
+});
+
+const networkGateway = new aws.ec2.InternetGateway("network", {
+    vpcId: networkVpc.id,
+});
+
+const networkRoutes = new aws.ec2.RouteTable("network", {
+    routes: [
+        {
+            cidrBlock: "0.0.0.0/0",
+            gatewayId: networkGateway.id,
+        },
+    ],
+    vpcId: networkVpc.id,
+});
+
+const networkSecurityGroup = new aws.ec2.SecurityGroup("network", {
+    description: "Managed by cloudcc: traffic between compiled units and their datastores",
+    egress: [
+        {
+            cidrBlocks: [
+                "0.0.0.0/0",
+            ],
+            fromPort: 0,
+            protocol: "-1",
+            toPort: 0,
+        },
+    ],
+    ingress: [
+        {
+            cidrBlocks: [
+                "0.0.0.0/0",
+            ],
+            description: "inbound from the load balancer and within the VPC",
+            fromPort: 0,
+            protocol: "-1",
+            toPort: 0,
+        },
+    ],
+    vpcId: networkVpc.id,
+});
+
+const network0Subnet = new aws.ec2.Subnet("network-0", {
+    availabilityZone: networkZones.names.apply(n => n[0]),
+    cidrBlock: "10.0.0.0/24",
+    mapPublicIpOnLaunch: true,
+    tags: {
+        Name: "mixed-network-0",
+    },
+    vpcId: networkVpc.id,
+});
+
+const network0RouteAssoc = new aws.ec2.RouteTableAssociation("network-0", {
+    routeTableId: networkRoutes.id,
+    subnetId: network0Subnet.id,
+});
+
+const network1Subnet = new aws.ec2.Subnet("network-1", {
+    availabilityZone: networkZones.names.apply(n => n[1]),
+    cidrBlock: "10.0.1.0/24",
+    mapPublicIpOnLaunch: true,
+    tags: {
+        Name: "mixed-network-1",
+    },
+    vpcId: networkVpc.id,
+});
+
+const elasticacheSubnetGroup = new aws.elasticache.SubnetGroup("elasticache", {
+    name: "mixed-elasticache",
+    subnetIds: [
+        network0Subnet.id,
+        network1Subnet.id,
+    ],
+});
+
+const petCacheCache = new aws.elasticache.Cluster("petCache", {
+    clusterId: "mixed-petcache",
+    engine: "redis",
+    nodeType: "cache.t4g.micro",
+    numCacheNodes: 1,
+    port: 6379,
+    securityGroupIds: [
+        networkSecurityGroup.id,
+    ],
+    subnetGroupName: elasticacheSubnetGroup.name,
+});
+
+const rdsSubnetGroup = new aws.rds.SubnetGroup("rds", {
+    name: "mixed-rds",
+    subnetIds: [
+        network0Subnet.id,
+        network1Subnet.id,
+    ],
+});
+
+const shopdbDb = new aws.rds.Instance("shopdb", {
+    allocatedStorage: 20,
+    dbName: "shopdb",
+    dbSubnetGroupName: rdsSubnetGroup.name,
+    engine: "postgres",
+    identifier: "mixed-shopdb",
+    instanceClass: "db.t4g.micro",
+    manageMasterUserPassword: true,
+    publiclyAccessible: false,
+    skipFinalSnapshot: true,
+    username: "ccadmin",
+    vpcSecurityGroupIds: [
+        networkSecurityGroup.id,
+    ],
+});
+
+const apiPolicy = new aws.iam.RolePolicy("api", {
+    name: "mixed-api-policy",
     policy: pulumi.jsonStringify({
     Statement: [
+        {
+            Action: [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:ListBucket",
+            ],
+            Effect: "Allow",
+            Resource: [
+                petPhotosBucket.arn,
+                pulumi.interpolate`${petPhotosBucket.arn}/*`,
+            ],
+        },
         {
             Action: [
                 "dynamodb:GetItem",
@@ -114,6 +228,63 @@ const workerPolicy = new aws.iam.RolePolicy("worker", {
                 pulumi.interpolate`${petsByOwnerTable.arn}/index/*`,
             ],
         },
+        {
+            Action: [
+                "secretsmanager:GetSecretValue",
+            ],
+            Effect: "Allow",
+            Resource: [
+                shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? ""),
+            ],
+        },
+    ],
+    Version: "2012-10-17",
+}),
+    role: apiRole.id,
+});
+
+const workerPolicy = new aws.iam.RolePolicy("worker", {
+    name: "mixed-worker-policy",
+    policy: pulumi.jsonStringify({
+    Statement: [
+        {
+            Action: [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:ListBucket",
+            ],
+            Effect: "Allow",
+            Resource: [
+                petPhotosBucket.arn,
+                pulumi.interpolate`${petPhotosBucket.arn}/*`,
+            ],
+        },
+        {
+            Action: [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:BatchGetItem",
+                "dynamodb:BatchWriteItem",
+            ],
+            Effect: "Allow",
+            Resource: [
+                petsByOwnerTable.arn,
+                pulumi.interpolate`${petsByOwnerTable.arn}/index/*`,
+            ],
+        },
+        {
+            Action: [
+                "secretsmanager:GetSecretValue",
+            ],
+            Effect: "Allow",
+            Resource: [
+                shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? ""),
+            ],
+        },
     ],
     Version: "2012-10-17",
 }),
@@ -122,8 +293,14 @@ const workerPolicy = new aws.iam.RolePolicy("worker", {
 
 const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
+    CLOUDCC_FS_PETPHOTOS_BUCKET: pulumi.interpolate`${petPhotosBucket.bucket}`,
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
     CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`,
+    CLOUDCC_ORM_SHOPDB_URL: pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`,
+    CLOUDCC_REDIS_PETCACHE_ENDPOINT: pulumi.interpolate`${petCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`,
+    CLOUDCC_REDIS_PETCACHE_PORT: "6379",
+    CLOUDCC_REDIS_PETCACHE_TLS: "false",
     CLOUDCC_UNIT: `api`,
 };
 
@@ -168,8 +345,11 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
 
 const workerEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
+    CLOUDCC_FS_PETPHOTOS_BUCKET: pulumi.interpolate`${petPhotosBucket.bucket}`,
     CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
     CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`,
+    CLOUDCC_ORM_SHOPDB_URL: pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`,
     CLOUDCC_UNIT: `worker`,
 };
 
@@ -184,11 +364,22 @@ const workerFn = new aws.lambda.Function("worker", {
     timeout: 30,
 });
 
+const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {
+    routeTableId: networkRoutes.id,
+    subnetId: network1Subnet.id,
+});
+
 // Stack outputs. Every environment binding is exported under the exact
 // name the runtime shims read, so a compiled unit can be run locally with:
 //   eval "$(pulumi output --json | jq -r 'to_entries[]|"export \(.key)=\(.value)"')"
+export const CLOUDCC_FS_PETPHOTOS_BUCKET = pulumi.interpolate`${petPhotosBucket.bucket}`;
 export const CLOUDCC_GATEWAY_PET_API_URL = pulumi.interpolate`${petApiApi.apiEndpoint}`;
 export const CLOUDCC_KV_PETSBYOWNER_TABLE = pulumi.interpolate`${petsByOwnerTable.name}`;
+export const CLOUDCC_ORM_SHOPDB_SECRET_ARN = pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`;
+export const CLOUDCC_ORM_SHOPDB_URL = pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`;
+export const CLOUDCC_REDIS_PETCACHE_ENDPOINT = pulumi.interpolate`${petCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`;
+export const CLOUDCC_REDIS_PETCACHE_PORT = "6379";
+export const CLOUDCC_REDIS_PETCACHE_TLS = "false";
 export const CLOUDCC_UNIT_API_FUNCTION = pulumi.interpolate`${apiFn.name}`;
 export const CLOUDCC_UNIT_WORKER_FUNCTION = pulumi.interpolate`${workerFn.name}`;
 export const petApiUrl = petApiApi.apiEndpoint;

@@ -39,6 +39,8 @@ exposed:
 persisted:
   auditKey:
     type: secretsmanager
+  auditdb:
+    type: rds_postgres
   petAudit:
     type: s3
   petCache:

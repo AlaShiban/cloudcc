@@ -329,6 +329,24 @@ for example in "${EXAMPLES[@]}"; do
 
   # ----------------------------------------------------------------- compare
   checked=$((checked + 1))
+
+  # Identical is not the same as working. A route that raises in both halves
+  # produces the same 500 twice and sails through the diff below, which reads
+  # as "the compiler preserved behaviour" when it means "both are broken".
+  #
+  # That is not hypothetical: an async ORM session that expires its attributes
+  # on commit raised MissingGreenlet on every write, in both runs, and this
+  # suite reported the example green. A scenario is a list of requests somebody
+  # expected to succeed, so a server error is a failure of the example whether
+  # or not the two halves agree on it.
+  for half in uncompiled compiled; do
+    if grep -qE ' -> 5[0-9][0-9] ' "$case_dir/$half.txt"; then
+      failures=$((failures + 1))
+      printf '\033[1;31mFAIL\033[0m %s: the %s run returned a server error\n' "$example" "$half"
+      grep -E ' -> 5[0-9][0-9] ' "$case_dir/$half.txt"
+    fi
+  done
+
   if diff -u "$case_dir/uncompiled.txt" "$case_dir/compiled.txt" > "$case_dir/diff.txt"; then
     pass "$example: compiled behaviour is identical to uncompiled"
   else

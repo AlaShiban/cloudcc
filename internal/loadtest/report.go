@@ -54,6 +54,54 @@ type Observation struct {
 	Why string `json:"why,omitempty"`
 }
 
+// minDeliveredRate is the share of a run's requests that must have been
+// answered for the run to be evidence of anything.
+//
+// Deliberately generous. A burst strategy exists to find where an application
+// stops keeping up, and finding it is a result rather than a broken harness --
+// so this is set well below any rate a working application produces, and is
+// meant to separate "the server was never there" from "the server struggled".
+const minDeliveredRate = 0.5
+
+// Undelivered explains why this run cannot support a claim, or "" when it can.
+//
+// A connectedness checklist reads state out of the emulator, and state outlives
+// the run that wrote it. So a run whose requests never arrived still finds rows
+// a previous run left behind and reports every edge as carried -- a green
+// result from a test that did nothing. The traffic has to have been delivered
+// before its evidence means anything, and that is what this checks.
+func (r *Report) Undelivered() string {
+	if r == nil || len(r.Runs) == 0 {
+		return "no strategy ran, so there is no traffic behind any of this"
+	}
+
+	requests, ok := 0, 0.0
+	worst, worstCount := "", 0
+	for _, run := range r.Runs {
+		requests += run.Requests
+		ok += run.OKRate * float64(run.Requests)
+		for reason, n := range run.Failures {
+			if n > worstCount {
+				worst, worstCount = reason, n
+			}
+		}
+	}
+	if requests == 0 {
+		return "no requests were made, so there is no traffic behind any of this"
+	}
+	rate := ok / float64(requests)
+	if rate >= minDeliveredRate {
+		return ""
+	}
+
+	why := fmt.Sprintf("only %.1f%% of %d requests were answered", rate*100, requests)
+	if worst != "" {
+		why += fmt.Sprintf("; the commonest failure was %q (%d)", worst, worstCount)
+	}
+	return why + ". Evidence gathered while the application was unreachable is " +
+		"whatever a previous run left in the emulator, not this one's traffic"
+}
+
 // Delta is one strategy's before-and-after.
 type Delta struct {
 	Strategy string `json:"strategy"`

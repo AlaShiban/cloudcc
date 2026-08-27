@@ -207,7 +207,46 @@ starts skipping, that is a signal, not noise.
 | `execution_unit` (lambda) | Lambda | probe-dependent | direct handler invoke |
 | `execution_unit` (ecs) | ECS Fargate | preview only | Dockerfile shape only |
 | `persist(create_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
+| `persist(create_async_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
 | `persist(Redis())` | ElastiCache | yes | yes, against a real Redis in Docker |
+| `persist(redis.asyncio.Redis())` | ElastiCache | yes | yes, against a real Redis in Docker |
+| `persist(new Pool())` (Node) | RDS Postgres | yes | yes, against a real Postgres in Docker |
+| `persist(new Redis())` (Node) | ElastiCache | yes | yes, against a real Redis in Docker |
+| `persist(new S3Client())` (Node) | S3 | yes | yes, through the running app |
+| `persist(new DynamoDBClient())` (Node) | DynamoDB | yes | yes, through the running app |
+
+### Which client library, and where it is exercised
+
+A capability is not enough to say what a program gets back. Two Redis libraries
+have different APIs and a synchronous SQLAlchemy engine is not an asynchronous
+one, so the compiler records the *library* the source constructed and the shim
+returns one of the same kind. Each of those paths is exercised by a named
+example, deployed and driven, rather than by a unit test alone:
+
+| Client library | Example | What it becomes |
+|---|---|---|
+| `sqlalchemy` | petstore-multi (worker), mixed (worker) | RDS Postgres |
+| `sqlalchemy-async` | petstore-multi (api) | RDS Postgres |
+| `redis-py` | kitchen-sink | ElastiCache |
+| `redis-py-async` | petstore-multi (api) | ElastiCache |
+| `pathlib` | petstore-multi (worker), mixed (worker), nomnom | S3 |
+| `boto3-dynamodb` | petstore, petstore-multi, mixed, nomnom | DynamoDB |
+| `pg` | mixed (api) | RDS Postgres |
+| `ioredis` | mixed (api) | ElastiCache |
+| `aws-sdk-s3` | mixed (api) | S3 |
+| `aws-sdk-dynamodb` | mixed (api), petstore-node | DynamoDB |
+| `knex`, `node-redis` | tests/e2e/node-clients.sh only | RDS Postgres, ElastiCache |
+
+`petstore-multi` deliberately holds both halves of the SQLAlchemy pair: the api
+unit's engine is asynchronous and the worker's is synchronous, against two
+databases in one application. `examples/mixed` holds the cross-language version
+of the same claim -- one Postgres instance reached through `pg` from Node and
+through an ORM from Python, and one bucket reached through an `S3Client` and a
+`pathlib.Path`.
+
+The last row is the honest one: `knex` and `node-redis` are covered against real
+servers by `tests/e2e/node-clients.sh`, but no example declares them, so nothing
+proves they survive a full compile and deploy.
 
 "Preview only" means the resource is checked through `pulumi preview` rather
 than actually created: creating a Fargate service in an emulator is slow and
