@@ -26,6 +26,23 @@ const PythonVersion = "3.12"
 // LambdaRuntime is the managed AWS runtime these bundles target.
 const LambdaRuntime = "python3.12"
 
+// DefaultPlatform is the uv target for Lambda's default architecture, and
+// PlatformFor maps a declared architecture onto one.
+//
+// A bundle's wheels and the function's `architectures` have to agree: the
+// architecture is in a compiled extension's filename, so a mismatch installs
+// cleanly, zips cleanly, deploys cleanly and fails on the first invocation with
+// "No module named X" -- a message about the wrong thing entirely.
+const DefaultPlatform = "x86_64-manylinux2014"
+
+// PlatformFor returns the uv target for a declared Lambda architecture.
+func PlatformFor(architecture string) string {
+	if architecture == "arm64" {
+		return "aarch64-manylinux2014"
+	}
+	return DefaultPlatform
+}
+
 // LambdaEntryModule is the generated entrypoint module for a Lambda unit.
 const LambdaEntryModule = "cloudcc_lambda_entry"
 
@@ -127,15 +144,21 @@ func RenderPackageScript(units []PackageUnit) ([]byte, error) {
 // PackagingScript returns the shell fragment that builds one unit's artefact.
 // It is per-language because how a unit is packaged is the one part of
 // deployment that genuinely depends on what it was written in.
-func PackagingScript(unit string, container bool) string {
+// platform is the uv target the unit's wheels are resolved for; "" means
+// Lambda's default architecture.
+func PackagingScript(unit string, container bool, platform string) string {
 	name := "templates/fragment-zip.sh.tmpl"
 	if container {
 		name = "templates/fragment-container.sh.tmpl"
 	}
+	if platform == "" {
+		platform = DefaultPlatform
+	}
 	out, err := render(name, struct {
 		ID            string
 		PythonVersion string
-	}{ID: unit, PythonVersion: PythonVersion})
+		Platform      string
+	}{ID: unit, PythonVersion: PythonVersion, Platform: platform})
 	if err != nil {
 		// The templates are embedded constants, so a failure here is a
 		// programming error rather than anything a user can cause.

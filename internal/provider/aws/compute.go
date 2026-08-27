@@ -51,7 +51,17 @@ func (r *Resolver) lambda(u *ir.ExecUnit) error {
 	}, nil)
 	r.Program.Resolve(u.Key(), logs)
 
-	fn := ir.NewResource(KindLambda, u.ID, "aws.lambda.Function", map[string]any{
+	// What the unit asked for in cloudcc.yaml, checked and translated. Rejected
+	// here rather than at deploy time: an argument AWS refuses is eight minutes
+	// of packaging and provisioning away from being discovered otherwise, and
+	// the message it comes back with names the API rather than the file the
+	// value was written in.
+	sized, err := LambdaResourceArgs(u.ID, u.Config())
+	if err != nil {
+		return err
+	}
+
+	props := map[string]any{
 		"name":    fnName,
 		"runtime": u.Runtime,
 		"handler": u.Handler,
@@ -59,13 +69,23 @@ func (r *Resolver) lambda(u *ir.ExecUnit) error {
 		"code":    ir.Raw(fmt.Sprintf("new pulumi.asset.FileArchive(%q)", u.Artifact)),
 		"timeout": 30,
 		// 512 MB is enough for a FastAPI app under Mangum and keeps cold
-		// starts short; raise it through pulumi_params if a unit needs more.
+		// starts short; a unit that needs more says so with
+		// `resources: {memory_size: N}`.
 		"memorySize":  512,
 		"environment": ir.Raw("{ variables: " + envVarsPlaceholder(u.ID) + " }"),
 		// The function's own name, published so that units which call this one
 		// can be handed it. Every other binding in this file points at a store;
 		// this one points at another piece of the same program.
-	}, ir.Env(EnvUnitFunction(u.ID), "name"))
+	}
+	// Layered over the defaults, not merged into them: `resources:` is the
+	// user's answer to the same question, and the default was only ever a
+	// guess about a unit this compiler has not seen run.
+	for k, v := range sized {
+		props[k] = v
+	}
+
+	fn := ir.NewResource(KindLambda, u.ID, "aws.lambda.Function", props,
+		ir.Env(EnvUnitFunction(u.ID), "name"))
 	r.Program.Resolve(u.Key(), fn)
 	r.Program.Connect(fnKey, roleKey, ir.EdgeDependsOn)
 	r.Program.Connect(fnKey, logsKey, ir.EdgeDependsOn)

@@ -172,7 +172,12 @@ func (Frontend) Packaging(u *ir.ExecUnit) lang.Packaging {
 }
 
 func (Frontend) PackagingScript(u *ir.ExecUnit) string {
-	return runtimepy.PackagingScript(u.ID, u.Config().Type == "ecs")
+	// The wheels are resolved for the architecture the unit declared, because
+	// the two cannot disagree: an architecture is part of a compiled
+	// extension's filename, so a bundle built for the wrong one deploys and
+	// then fails on its first invocation with a message about a missing module.
+	return runtimepy.PackagingScript(u.ID, u.Config().Type == "ecs",
+		runtimepy.PlatformFor(u.Config().Architecture()))
 }
 
 func (Frontend) Tools() []lang.Tool {

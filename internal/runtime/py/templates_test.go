@@ -223,7 +223,7 @@ func TestPackageScriptStitchesFragments(t *testing.T) {
 }
 
 func TestPackagingFragments(t *testing.T) {
-	zip := PackagingScript("api", false)
+	zip := PackagingScript("api", false, "")
 	if !strings.Contains(zip, "uv pip install") {
 		t.Errorf("a zip-packaged unit installs its dependencies:\n%s", zip)
 	}
@@ -243,7 +243,7 @@ func TestPackagingFragments(t *testing.T) {
 			"than to whatever machine is doing the packaging:\n%s", zip)
 	}
 
-	container := PackagingScript("reporter", true)
+	container := PackagingScript("reporter", true, "")
 	if !strings.Contains(container, `docker build --quiet --tag "cloudcc-reporter:latest"`) {
 		t.Errorf("a container unit is built as an image:\n%s", container)
 	}

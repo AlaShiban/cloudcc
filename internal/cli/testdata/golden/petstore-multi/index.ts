@@ -301,6 +301,9 @@ const workerEnv: { [key: string]: pulumi.Input<string> } = {
 };
 
 const workerFn = new aws.lambda.Function("worker", {
+    architectures: [
+        "arm64",
+    ],
     code: new pulumi.asset.FileArchive("build/worker.zip"),
     environment: { variables: workerEnv },
     handler: "cloudcc_lambda_entry.handler",
@@ -308,7 +311,7 @@ const workerFn = new aws.lambda.Function("worker", {
     name: "petstore-multi-worker",
     role: workerRole.arn,
     runtime: "python3.12",
-    timeout: 30,
+    timeout: 120,
 });
 
 const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents-sns", {
@@ -395,10 +398,13 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
 };
 
 const apiFn = new aws.lambda.Function("api", {
+    architectures: [
+        "arm64",
+    ],
     code: new pulumi.asset.FileArchive("build/api.zip"),
     environment: { variables: apiEnv },
     handler: "cloudcc_lambda_entry.handler",
-    memorySize: 512,
+    memorySize: 1024,
     name: "petstore-multi-api",
     role: apiRole.arn,
     runtime: "python3.12",

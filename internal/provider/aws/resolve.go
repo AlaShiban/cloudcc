@@ -61,6 +61,13 @@ func shortDigest(id string) string {
 // so the resource set -- and therefore the generated project -- is
 // byte-deterministic (D18).
 func (r *Resolver) Resolve() error {
+	// Before anything is built. A `resources:` block somewhere nothing reads it
+	// is a setting that looks applied and is not, and finding that out from a
+	// deployed stack is much worse than finding it out here.
+	if err := CheckResourcesAreSupported(r.Config); err != nil {
+		return err
+	}
+
 	for _, in := range r.Program.Intents() {
 		var err error
 		switch typed := in.(type) {

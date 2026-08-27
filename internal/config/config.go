@@ -88,8 +88,29 @@ type ResourceConfig struct {
 	StaticFiles   string `yaml:"static_files,omitempty" json:"static_files,omitempty"`
 	SharedFiles   string `yaml:"shared_files,omitempty" json:"shared_files,omitempty"`
 	IndexDocument string `yaml:"index_document,omitempty" json:"index_document,omitempty"`
+	// Resources holds provider arguments for the resource this declaration
+	// becomes -- how big it is, how long it may run, what it is allowed to use.
+	//
+	// Spelled the way OpenTofu and Terraform spell them, which is also how
+	// Pulumi's Python and YAML SDKs spell them, because Pulumi's AWS provider
+	// is generated from Terraform's and the two describe the same arguments.
+	// Emitting Pulumi TypeScript is a case transform; emitting OpenTofu later
+	// is the identity. Choosing one backend's dialect here would put the choice
+	// of backend into every user's configuration file.
+	//
+	// Held untyped because which arguments are legal depends on what the
+	// declaration resolves to, which is the provider's business (D7). The
+	// provider validates it and reports an unknown or out-of-range argument as
+	// a compile error naming what is supported.
+	Resources map[string]any `yaml:"resources,omitempty" json:"resources,omitempty"`
 	// PulumiParams is the escape hatch: deep-merged into the generated Pulumi
-	// resource args for this resource.
+	// resource args for this resource, in Pulumi's own spelling and with no
+	// checking at all.
+	//
+	// Distinct from Resources on purpose. This one reaches arguments cloudcc
+	// has no opinion about, at the cost of naming them the way one backend
+	// happens to name them -- so a project that uses it is a project that has
+	// to revisit its configuration if the backend changes. Prefer Resources.
 	PulumiParams map[string]any `yaml:"pulumi_params,omitempty" json:"pulumi_params,omitempty"`
 }
 
@@ -119,8 +140,30 @@ func (rc ResourceConfig) Merge(other ResourceConfig) ResourceConfig {
 		out.RetentionDays = other.RetentionDays
 	}
 	out.EnvironmentVariables = mergeStringMap(rc.EnvironmentVariables, other.EnvironmentVariables)
+	out.Resources = DeepMerge(rc.Resources, other.Resources)
 	out.PulumiParams = DeepMerge(rc.PulumiParams, other.PulumiParams)
 	return out
+}
+
+// Architecture is the instruction set a compute declaration asked for, or ""
+// when it did not.
+//
+// Read here rather than in the provider because two very different things need
+// it: the provider, to emit the argument, and the language frontend, to resolve
+// the unit's wheels for the same target. Those cannot disagree -- an
+// architecture is part of a compiled extension's filename, so a bundle built
+// for the wrong one installs cleanly and fails on the first invocation with
+// "No module named X" -- and a single reader is how they stay in step.
+//
+// The spelling is `architectures`, plural and a list, because that is what the
+// underlying resource calls it. AWS Lambda takes exactly one.
+func (rc ResourceConfig) Architecture() string {
+	list, ok := rc.Resources["architectures"].([]any)
+	if !ok || len(list) == 0 {
+		return ""
+	}
+	name, _ := list[0].(string)
+	return name
 }
 
 // KindDefault holds the provider defaults for one capability kind: the

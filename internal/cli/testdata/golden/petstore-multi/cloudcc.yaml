@@ -31,8 +31,17 @@ execution_units:
     type: lambda
     environment_variables:
       LOG_LEVEL: info
+    resources:
+      architectures:
+        - arm64
+      memory_size: 1024
   worker:
     type: lambda
+    resources:
+      architectures:
+        - arm64
+      memory_size: 512
+      timeout: 120
 exposed:
   pet-api:
     type: apigateway

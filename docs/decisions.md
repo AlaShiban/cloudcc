@@ -142,6 +142,60 @@ with `the reply was not JSON: rex (dog)`. Wrapping it costs nine bytes, makes
 every reply parseable the same way, and keeps "returned null" and "answered
 nothing at all" different answers.
 
+**Resource sizing is spelled the way OpenTofu spells it, not the way Pulumi
+does.** A unit's size and behaviour are configured with a `resources:` block:
+
+```yaml
+execution_units:
+  api:
+    type: lambda
+    resources:
+      memory_size: 1024
+      timeout: 60
+      architectures: [arm64]
+      ephemeral_storage:
+        size: 2048
+```
+
+Pulumi's AWS provider is code-generated from the Terraform AWS provider's
+schema, so `aws_lambda_function` and `aws.lambda.Function` describe the same
+arguments and differ only in case -- Terraform and OpenTofu write `memory_size`,
+Pulumi's TypeScript SDK writes `memorySize`, and Pulumi's Python and YAML SDKs
+write `memory_size` again. Nested Terraform blocks are nested objects in Pulumi.
+
+Taking the Terraform spelling as canonical means the emitter does a mechanical
+case transform today and nothing at all when an OpenTofu backend arrives. The
+alternative -- accepting Pulumi's TypeScript names -- would put today's choice
+of backend into every user's configuration file, which is the opposite of what
+having a configuration file rather than a Pulumi program is for. `memorySize:`
+is therefore an error, and one that names the portable spelling rather than
+merely rejecting the key.
+
+Two further consequences, neither of them obvious:
+
+*Values are checked here, not at AWS.* `memory_size: 64` is a compile error
+naming the range. The alternative is packaging, provisioning and then reading a
+rejection from the Lambda API eight minutes later, phrased in terms of the API
+rather than the file the value was written in.
+
+*Arguments the compiler derives are refused, with the reason.* `runtime`,
+`handler`, `role`, `code`, `function_name` and `environment` come from the unit
+source and its declarations. Accepting an override would produce a function
+whose code and whose declared entrypoint disagree, and the failure arrives at
+the first invocation as an import error naming neither. `pulumi_params:` remains
+as the unchecked escape hatch for arguments cloudcc does not model -- in
+Pulumi's own spelling, and therefore not portable, which is now said out loud.
+
+**`architectures` decides how the bundle is built, not just what the function
+declares.** An architecture is part of a compiled extension's filename, so a
+bundle whose wheels disagree with the function's architecture installs cleanly,
+zips cleanly, deploys cleanly, and fails on its first invocation with `No module
+named X`. Declaring `arm64` therefore also sets the unit's `uv --python-platform`
+to `aarch64-manylinux2014`. Both come from one reader, `ResourceConfig.Architecture`,
+because two places that must agree and can be edited separately eventually will
+not. This is not hypothetical: the same class of mismatch -- manylinux wheels
+for a musl runtime -- cost a CI round in this repository.
+
 ## Deviations from the brief
 
 **`EnvOutputs` returns bindings, not property names.** The brief types it as

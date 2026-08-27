@@ -27,9 +27,11 @@ if [ -s "api/requirements.txt" ]; then
   # and failed on its first invocation with "No module named
   # pydantic_core._pydantic_core" -- which says nothing about the actual cause.
   #
-  # x86_64 is Lambda's default architecture and 3.12 is the
-  # runtime this unit declares, so those are the defaults and a real deploy
-  # needs neither override.
+  # The defaults are this unit's own target: 3.12 is the runtime
+  # it declares, and aarch64-manylinux2014 follows the architecture it declares -- so a
+  # unit that says `architectures: [arm64]` is packaged for arm64 without
+  # anyone having to remember a second place to say so. Getting that wrong is
+  # not a warning: the function deploys and dies on its first invocation.
   #
   # The two variables exist for a runtime that does not honour what the function
   # declares. A local emulator generally runs containers of whatever the host
@@ -41,7 +43,7 @@ if [ -s "api/requirements.txt" ]; then
     --quiet \
     --target "$unit_build" \
     --python-version "${CLOUDCC_PYTHON_VERSION:-3.12}" \
-    --python-platform "${CLOUDCC_PYTHON_PLATFORM:-x86_64-manylinux2014}" \
+    --python-platform "${CLOUDCC_PYTHON_PLATFORM:-aarch64-manylinux2014}" \
     --only-binary=:all: \
     -r "api/requirements.txt"
 fi
@@ -68,9 +70,11 @@ if [ -s "worker/requirements.txt" ]; then
   # and failed on its first invocation with "No module named
   # pydantic_core._pydantic_core" -- which says nothing about the actual cause.
   #
-  # x86_64 is Lambda's default architecture and 3.12 is the
-  # runtime this unit declares, so those are the defaults and a real deploy
-  # needs neither override.
+  # The defaults are this unit's own target: 3.12 is the runtime
+  # it declares, and aarch64-manylinux2014 follows the architecture it declares -- so a
+  # unit that says `architectures: [arm64]` is packaged for arm64 without
+  # anyone having to remember a second place to say so. Getting that wrong is
+  # not a warning: the function deploys and dies on its first invocation.
   #
   # The two variables exist for a runtime that does not honour what the function
   # declares. A local emulator generally runs containers of whatever the host
@@ -82,7 +86,7 @@ if [ -s "worker/requirements.txt" ]; then
     --quiet \
     --target "$unit_build" \
     --python-version "${CLOUDCC_PYTHON_VERSION:-3.12}" \
-    --python-platform "${CLOUDCC_PYTHON_PLATFORM:-x86_64-manylinux2014}" \
+    --python-platform "${CLOUDCC_PYTHON_PLATFORM:-aarch64-manylinux2014}" \
     --only-binary=:all: \
     -r "worker/requirements.txt"
 fi
