@@ -40,6 +40,13 @@ type GenericResource struct {
 	Tmpl string                `json:"template"`
 	P    map[string]any        `json:"props"`
 	E    map[string]EnvBinding `json:"env_outputs,omitempty"`
+	// O is the resource's Pulumi options -- the third argument, not the
+	// second. Distinct from props because it configures how the resource is
+	// managed rather than what it is: `provider` is the one that matters here,
+	// because a Kubernetes resource is created by a different provider from
+	// every AWS resource beside it, and putting that in props would emit it as
+	// a field of the Deployment.
+	O map[string]any `json:"opts,omitempty"`
 }
 
 // NewResource builds a resource node.
@@ -54,5 +61,13 @@ func (r *GenericResource) Key() Key                          { return r.K }
 func (r *GenericResource) Template() string                  { return r.Tmpl }
 func (r *GenericResource) Props() map[string]any             { return r.P }
 func (r *GenericResource) EnvOutputs() map[string]EnvBinding { return r.E }
+func (r *GenericResource) Opts() map[string]any              { return r.O }
+
+// WithOpts sets the resource's Pulumi options and returns it, so a resolver can
+// chain the call onto NewResource without a second statement.
+func (r *GenericResource) WithOpts(opts map[string]any) *GenericResource {
+	r.O = opts
+	return r
+}
 
 var _ Resource = (*GenericResource)(nil)

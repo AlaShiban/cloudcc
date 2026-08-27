@@ -33,6 +33,7 @@ func (p *ValidatePlugin) Transform(ctx *compiler.Context) error {
 	// look at it, and an unrecognised destination would be silently dropped --
 	// leaving an application that looks configured and is not.
 	p.validateLogging(ctx)
+	p.warnKubernetesHasNoIdentity(ctx)
 
 	for _, in := range ctx.Graph.Intents() {
 		kind := in.Capability()
@@ -102,4 +103,45 @@ func DescribeSupport() string {
 		fmt.Fprintf(&b, "%-16s %s\n", kind, strings.Join(types, ", "))
 	}
 	return b.String()
+}
+
+// warnKubernetesHasNoIdentity reports a Kubernetes unit that reaches an AWS
+// resource it will have no permission to use.
+//
+// Every other execution unit's permissions are derived from what its code
+// bundles: a Lambda gets a role, a Fargate task gets a task role, and least
+// privilege is a consequence of the import graph rather than a list somebody
+// maintains. A pod's equivalent is IRSA -- an OIDC provider on the cluster, a
+// role that trusts it, and a ServiceAccount annotated with that role -- and
+// none of it is emitted yet.
+//
+// So the bindings reach the container and the permission to use them does not.
+// Against an emulator that makes no difference, because it authenticates
+// nothing; against AWS the first call fails with AccessDenied. Saying so at
+// compile time is the difference between a known gap and a deployment that
+// looks finished.
+func (p *ValidatePlugin) warnKubernetesHasNoIdentity(ctx *compiler.Context) {
+	for _, in := range ctx.Graph.IntentsOfKind(config.KindExecutionUnit) {
+		u, ok := in.(*ir.ExecUnit)
+		if !ok || u.Config().Platform != config.PlatformKubernetes {
+			continue
+		}
+		var reaches []string
+		for _, e := range ctx.Graph.EdgesFrom(u.Key(), ir.EdgeUses) {
+			if strings.HasPrefix(e.To.Kind, "persist_") {
+				reaches = append(reaches, e.To.ID)
+			}
+		}
+		if len(reaches) == 0 {
+			continue
+		}
+		sort.Strings(reaches)
+		ctx.Diags.Warnf(diag.Position{}, config.KindExecutionUnit,
+			"unit %q runs on Kubernetes and reaches %s, but a pod gets no AWS identity yet: "+
+				"IRSA -- an OIDC provider, a role trusting it, and an annotated ServiceAccount "+
+				"-- is not emitted. The bindings reach the container; permission to use them "+
+				"does not, so the first call fails against real AWS and succeeds against an "+
+				"emulator that authenticates nothing",
+			u.ID, strings.Join(reaches, ", "))
+	}
 }

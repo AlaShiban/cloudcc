@@ -74,6 +74,10 @@ type Resource interface {
 	Template() string
 	// Props are the resource arguments, before pulumi_params are merged.
 	Props() map[string]any
+	// Opts are the resource's Pulumi options -- the third argument. Empty for
+	// almost everything; a Kubernetes resource uses it to name the provider
+	// that creates it, which is not the one every AWS resource beside it uses.
+	Opts() map[string]any
 	// EnvOutputs maps environment variable names to the value an execution
 	// unit should receive, e.g. CLOUDCC_KV_PETSBYOWNER_TABLE -> this table's name.
 	//

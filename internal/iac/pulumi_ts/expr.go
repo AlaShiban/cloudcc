@@ -57,6 +57,13 @@ func (v *varNamer) value(x any) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("reference to %s, which no resource defines", typed.Key)
 		}
+		// An empty property is the resource itself, not a property called "".
+		// Naming a whole resource is what a Pulumi option does -- `provider:`
+		// takes the provider, not one of its fields -- and without this it
+		// emits `kubernetesK8s.`, which is a syntax error a long way from here.
+		if typed.Prop == "" {
+			return name, nil
+		}
 		return name + "." + typed.Prop, nil
 	case ir.Interp:
 		return v.interp(typed)

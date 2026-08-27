@@ -156,9 +156,23 @@ func ecsAssumeRolePolicy() ir.JSONDoc {
 func (r *Resolver) alb(e *ir.Expose) error {
 	r.network()
 
+	// A Kubernetes unit already has a load balancer: its Service is created
+	// with `type: LoadBalancer`, and the cloud provisions one to match. Adding
+	// an aws.lb.LoadBalancer beside it would be a second balancer in front of
+	// pods it has no way to find -- an ALB targets IPs or instances, and which
+	// ones a Deployment is using is the Service's business, not this file's.
+	//
+	// So the expose resolves to the Service, and the address comes from the
+	// Service's own ingress. Kubernetes is where that indirection belongs.
+	if svc, ok := r.Program.Resource(ir.Key{Kind: KindK8sService, ID: e.Unit}); ok {
+		r.Program.Resolve(e.Key(), svc)
+		r.Program.Connect(e.Key(), ir.Key{Kind: KindK8sService, ID: e.Unit}, ir.EdgeExposes)
+		return nil
+	}
+
 	serviceKey := ir.Key{Kind: KindECSService, ID: e.Unit}
 	if _, ok := r.Program.Resource(serviceKey); !ok {
-		return errUnsupported("expose %q uses an ALB, which can only front an ECS execution unit; %q is not one", e.ID, e.Unit)
+		return errUnsupported("expose %q uses an ALB, which can only front a container execution unit; %q is not one", e.ID, e.Unit)
 	}
 	albKey := ir.Key{Kind: KindALB, ID: e.ID}
 	tgKey := ir.Key{Kind: KindALBTargetGroup, ID: e.ID}

@@ -61,6 +61,47 @@ const (
 	TypeContainer = "container"
 )
 
+// Platforms a container unit can run on.
+//
+// A second axis, and portable for the same reason `type:` is. "Run my container
+// on Kubernetes" means something on all three clouds -- EKS, GKE, AKS -- and so
+// does "run it on the cloud's own container service", which is Fargate here and
+// Cloud Run or Container Apps elsewhere. What is not portable is the product
+// name, so neither value is one.
+//
+// Keeping this off the `type:` axis is what lets `memory:` go on meaning one
+// thing. A unit is a container either way; where it runs is a separate
+// question, and answering it does not change what the unit is.
+const (
+	PlatformServerless = "serverless"
+	PlatformKubernetes = "kubernetes"
+)
+
+// Platforms is the canonical list, for diagnostics.
+var Platforms = []string{PlatformKubernetes, PlatformServerless}
+
+// CheckPlatform reports a platform that is not one of the two, or one written
+// on a compute type that has no such choice.
+func CheckPlatform(id, computeType, platform string) error {
+	if platform == "" {
+		return nil
+	}
+	if computeType != TypeContainer {
+		return fmt.Errorf("execution unit %q is type %q, and `platform:` only applies to type "+
+			"%q. A function is run by the provider's function service and there is no second "+
+			"way to run it; a container has to say whether it wants Kubernetes or the cloud's "+
+			"own container service", id, computeType, TypeContainer)
+	}
+	for _, known := range Platforms {
+		if platform == known {
+			return nil
+		}
+	}
+	return fmt.Errorf("execution unit %q: no platform %q. It is %q -- EKS, GKE or AKS -- or "+
+		"%q, which is the provider's own container service and the default",
+		id, platform, PlatformKubernetes, PlatformServerless)
+}
+
 // renamedTypes maps a compute type that used to be spelled after one cloud's
 // product onto what it is called now.
 //
@@ -163,8 +204,11 @@ type ResourceConfig struct {
 	// from a shared account pool on AWS and a plain instance ceiling on GCP --
 	// the same word with a different blast radius. Those live in the provider
 	// layer below until a second provider proves they generalise.
-	Memory  int `yaml:"memory,omitempty" json:"memory,omitempty"`
-	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Memory int `yaml:"memory,omitempty" json:"memory,omitempty"`
+	// Platform is where a container runs: `kubernetes` or `serverless`. Empty
+	// means the default, which is the provider's own container service.
+	Platform string `yaml:"platform,omitempty" json:"platform,omitempty"`
+	Timeout  int    `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	// ProviderArgs holds arguments for a specific provider resource, keyed by
 	// that resource's type -- `aws.lambda.Function`. This is the second layer:
 	// everything the portable one deliberately does not model.
@@ -216,6 +260,9 @@ func (rc ResourceConfig) Merge(other ResourceConfig) ResourceConfig {
 	out.EnvironmentVariables = mergeStringMap(rc.EnvironmentVariables, other.EnvironmentVariables)
 	if other.Memory != 0 {
 		out.Memory = other.Memory
+	}
+	if other.Platform != "" {
+		out.Platform = other.Platform
 	}
 	if other.Timeout != 0 {
 		out.Timeout = other.Timeout

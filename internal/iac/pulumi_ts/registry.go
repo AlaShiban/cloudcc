@@ -70,6 +70,17 @@ var templates = []Template{
 	{ID: "aws.elasticache.SubnetGroup", Class: "aws.elasticache.SubnetGroup", Import: "aws", VarSuffix: "SubnetGroup"},
 	{ID: "aws.memorydb.SubnetGroup", Class: "aws.memorydb.SubnetGroup", Import: "aws", VarSuffix: "SubnetGroup"},
 	{ID: "aws.getAvailabilityZones", Func: "aws.getAvailabilityZonesOutput", Import: "aws", VarSuffix: "Zones"},
+
+	// Kubernetes. The cluster and its node group are AWS resources; what runs
+	// on them is not, and comes from a second provider built out of the
+	// cluster's own endpoint and certificate authority. That is the reason
+	// resources carry Pulumi options at all: every row below is created by
+	// `k8sProvider`, and every row above by the ambient AWS one.
+	{ID: "aws.eks.Cluster", Class: "aws.eks.Cluster", Import: "aws", VarSuffix: "Eks", URLProp: "endpoint"},
+	{ID: "aws.eks.NodeGroup", Class: "aws.eks.NodeGroup", Import: "aws", VarSuffix: "Nodes"},
+	{ID: "k8s.Provider", Class: "k8s.Provider", Import: "k8s", VarSuffix: "K8s"},
+	{ID: "k8s.apps.v1.Deployment", Class: "k8s.apps.v1.Deployment", Import: "k8s", VarSuffix: "Deployment"},
+	{ID: "k8s.core.v1.Service", Class: "k8s.core.v1.Service", Import: "k8s", VarSuffix: "Svc"},
 }
 
 var byID = func() map[string]Template {

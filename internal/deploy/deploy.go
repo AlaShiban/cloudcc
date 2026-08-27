@@ -265,7 +265,7 @@ func configureEmulator(ctx context.Context, stack auto.Stack, opts Options) erro
 // EmulatedServices are the AWS services pointed at the emulator endpoint.
 var EmulatedServices = []string{
 	"apigateway", "apigatewayv2", "cloudwatch", "cloudwatchlogs", "dynamodb",
-	"ec2", "ecr", "ecs", "elasticache", "elbv2", "iam", "lambda", "logs",
+	"ec2", "ecr", "ecs", "eks", "elasticache", "elbv2", "iam", "lambda", "logs",
 	"memorydb", "rds", "s3", "secretsmanager", "sns", "sts",
 }
 

@@ -87,4 +87,18 @@ const (
 	KindECSExecRole    = "aws.ecs.execrole"
 	KindECSTaskRole    = "aws.ecs.taskrole"
 	KindECSTaskPolicy  = "aws.ecs.taskpolicy"
+	KindEKSCluster     = "aws.eks.cluster"
+	KindEKSClusterRole = "aws.eks.clusterrole"
+	KindEKSNodeRole    = "aws.eks.noderole"
+	KindEKSNodeGroup   = "aws.eks.nodegroup"
+	KindK8sProvider    = "k8s.provider"
+	KindK8sDeployment  = "k8s.deployment"
+	KindK8sService     = "k8s.service"
 )
+
+// EnvClusterEndpoint is the binding carrying a Kubernetes cluster's API
+// endpoint, published so a harness can find the cluster without asking the
+// provider how names are generated.
+func EnvClusterEndpoint(id string) string {
+	return "CLOUDCC_CLUSTER_" + sanitize.EnvVar(id) + "_ENDPOINT"
+}

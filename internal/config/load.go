@@ -80,6 +80,9 @@ func Load(path string) (*App, error) {
 		if err := CheckComputeType(id, unit.Type); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
+		if err := CheckPlatform(id, unit.Type, unit.Platform); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 	}
 	if kd, ok := file.Defaults[KindExecutionUnit]; ok {
 		if err := CheckComputeType("defaults", kd.Type); err != nil {

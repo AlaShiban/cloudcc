@@ -1,11 +1,13 @@
 package aws
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/cloudcompiler/cloudcc/internal/config"
+	"github.com/cloudcompiler/cloudcc/internal/ir"
 )
 
 func container(memory int, block map[string]any) config.ResourceConfig {
@@ -169,4 +171,104 @@ func TestTheFargateSizeTableIsConsistent(t *testing.T) {
 				size.cpu, size.memories[len(size.memories)-1], got)
 		}
 	}
+}
+
+// A container unit says where it runs, and the two answers produce different
+// resources from the same declaration.
+//
+// The point of `platform:` being its own axis is that everything else stays
+// put: the unit is a container either way, `memory:` means the same thing, and
+// the image is the same image. Only what runs it changes.
+func TestThePlatformDecidesWhatRunsTheContainer(t *testing.T) {
+	for _, tc := range []struct {
+		platform string
+		wants    []string
+		absent   []string
+	}{
+		{config.PlatformServerless,
+			[]string{"aws.ecs.TaskDefinition", "aws.ecs.Service"},
+			[]string{"k8s.apps.v1.Deployment", "aws.eks.Cluster"}},
+		{config.PlatformKubernetes,
+			[]string{"aws.eks.Cluster", "aws.eks.NodeGroup", "k8s.Provider",
+				"k8s.apps.v1.Deployment", "k8s.core.v1.Service"},
+			[]string{"aws.ecs.TaskDefinition", "aws.ecs.Service"}},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			templates := resolveContainerUnit(t, tc.platform)
+			for _, want := range tc.wants {
+				if !templates[want] {
+					t.Errorf("%s produced no %s; got %v", tc.platform, want, sortedSet(templates))
+				}
+			}
+			for _, absent := range tc.absent {
+				if templates[absent] {
+					t.Errorf("%s produced %s, which belongs to the other platform", tc.platform, absent)
+				}
+			}
+		})
+	}
+}
+
+// The same portable memory reaches both platforms, in each one's units.
+//
+// Fargate writes plain numbers and Kubernetes writes a suffix and millicores,
+// so this is a translation rather than a second setting -- and getting it wrong
+// would silently give a pod a fraction of what its Fargate twin has.
+func TestMemoryReachesBothPlatformsInTheRightUnits(t *testing.T) {
+	cpu, memory, _, err := TaskDefinitionArgs("reporter", container(2048, nil), 256, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cpu != "256" || memory != "2048" {
+		t.Fatalf("fargate: cpu %q memory %q", cpu, memory)
+	}
+	// 1024 Fargate CPU units is one vCPU is 1000 millicores, so 256 is 250m.
+	if got := millicores(cpu); got != "250m" {
+		t.Errorf("millicores(%q) = %q, want 250m", cpu, got)
+	}
+	if got := millicores("1024"); got != "1000m" {
+		t.Errorf("millicores(1024) = %q, want 1000m -- one vCPU", got)
+	}
+	// A value that is not a number must not silently become zero CPU.
+	if got := millicores("many"); got != "250m" {
+		t.Errorf("millicores of nonsense = %q, want the floor", got)
+	}
+}
+
+func sortedSet(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// resolveContainerUnit expands one container unit and returns the set of
+// resource templates it produced.
+func resolveContainerUnit(t *testing.T, platform string) map[string]bool {
+	t.Helper()
+
+	program := ir.NewProgram()
+	unit := &ir.ExecUnit{Entrypoints: []string{"reporter.py"}}
+	unit.ID = "reporter"
+	if err := unit.Configure(config.ResourceConfig{
+		Type:     config.TypeContainer,
+		Platform: platform,
+		Memory:   2048,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	program.AddIntent(unit)
+
+	r := &Resolver{App: "shop", Program: program, Config: config.New()}
+	if err := r.Resolve(); err != nil {
+		t.Fatalf("resolving a %s container unit: %v", platform, err)
+	}
+
+	out := map[string]bool{}
+	for _, res := range program.Resources() {
+		out[res.Template()] = true
+	}
+	return out
 }

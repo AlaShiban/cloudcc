@@ -16,6 +16,12 @@ func (r *Resolver) execUnit(u *ir.ExecUnit) error {
 	case config.TypeFunction:
 		return r.lambda(u)
 	case config.TypeContainer:
+		// The second axis. `platform:` says what runs the container, and both
+		// answers are real: Fargate is the provider's own container service,
+		// Kubernetes is EKS here and GKE or AKS elsewhere.
+		if u.Config().Platform == config.PlatformKubernetes {
+			return r.eksUnit(u)
+		}
 		return r.ecsServiceUnit(u)
 	}
 	return fmt.Errorf("no AWS mapping for execution unit type %q", u.Config().Type)
@@ -283,6 +289,18 @@ func (r *Resolver) unitRoleAndCarriers(u *ir.ExecUnit) (role, policy ir.Key, car
 			ir.Key{Kind: KindLambdaPolicy, ID: u.ID},
 			[]ir.Key{{Kind: KindLambda, ID: u.ID}}
 	case config.TypeContainer:
+		if u.Config().Platform == config.PlatformKubernetes {
+			// No role, and the empty keys say so. A pod's AWS identity comes
+			// from IRSA -- an OIDC provider on the cluster, a role trusting it,
+			// and a ServiceAccount annotated with that role -- and none of that
+			// is emitted yet. The environment still has to reach the container,
+			// so the Deployment carries it; what it does not carry is
+			// permission to use any of it.
+			//
+			// Reported rather than left to be discovered: see
+			// warnKubernetesHasNoIdentity.
+			return ir.Key{}, ir.Key{}, []ir.Key{{Kind: KindK8sDeployment, ID: u.ID}}
+		}
 		// The task role, not the execution role: the policy carries what the
 		// application code may reach, and the execution role is ECS's own.
 		return ir.Key{Kind: KindECSTaskRole, ID: u.ID + "-task"},

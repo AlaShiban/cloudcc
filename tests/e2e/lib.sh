@@ -31,7 +31,7 @@ export REPO_ROOT
 # validate the provided access credentials" -- which looks like a credentials
 # problem and is a missing endpoint.
 CLOUDCC_E2E_SERVICES=(apigateway apigatewayv2 cloudwatch cloudwatchlogs dynamodb \
-  ec2 ecr ecs elasticache elbv2 iam lambda logs \
+  ec2 ecr ecs eks elasticache elbv2 iam lambda logs \
   memorydb rds s3 secretsmanager sns sts)
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }

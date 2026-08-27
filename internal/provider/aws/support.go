@@ -36,7 +36,6 @@ var typeSupport = map[string]map[string]Level{
 	config.KindExecutionUnit: {
 		config.TypeFunction:  Supported,
 		config.TypeContainer: Supported,
-		"eks":                NotYetSupported,
 	},
 	config.KindExpose: {
 		"apigateway": Supported,

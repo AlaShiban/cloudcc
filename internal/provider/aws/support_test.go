@@ -16,7 +16,7 @@ func TestSupportLevels(t *testing.T) {
 		{config.KindExecutionUnit, config.TypeContainer, Supported},
 		// Accepted by the schema, rejected at compile time rather than
 		// silently becoming something else.
-		{config.KindExecutionUnit, "eks", NotYetSupported},
+		{config.KindPersistORM, "cockroachdb_serverless", NotYetSupported},
 		{config.KindExecutionUnit, "nomad", Unknown},
 		{config.KindPersistORM, "rds_postgres", Supported},
 		{config.KindPersistORM, "cockroachdb_serverless", NotYetSupported},
@@ -43,12 +43,27 @@ func TestEveryCapabilityKindHasSupportEntries(t *testing.T) {
 }
 
 func TestSupportedTypesExcludeTheUnimplemented(t *testing.T) {
-	got := SupportedTypes(config.KindExecutionUnit)
-	if !reflect.DeepEqual(got, []string{config.TypeContainer, config.TypeFunction}) {
+	// Both compute types are built. Kubernetes is not a third type -- it is a
+	// `platform:` on the container one, which is a different axis and does not
+	// belong in this table.
+	if got := SupportedTypes(config.KindExecutionUnit); !reflect.DeepEqual(got,
+		[]string{config.TypeContainer, config.TypeFunction}) {
 		t.Errorf("SupportedTypes = %v", got)
 	}
-	all := AllTypes(config.KindExecutionUnit)
-	if !reflect.DeepEqual(all, []string{config.TypeContainer, "eks", config.TypeFunction}) {
+
+	// A kind that does have something planned but not built, so the
+	// distinction the table draws is still exercised.
+	if got := SupportedTypes(config.KindPubSub); reflect.DeepEqual(got, AllTypes(config.KindPubSub)) {
+		t.Errorf("pubsub lists the same types as supported and as all: %v", got)
+	}
+	all := AllTypes(config.KindPubSub)
+	found := false
+	for _, t := range all {
+		if t == "sqs" {
+			found = true
+		}
+	}
+	if !found {
 		t.Errorf("AllTypes should include what is planned but not built: %v", all)
 	}
 }
