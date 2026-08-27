@@ -77,6 +77,21 @@ log "type-checking the generated project"
 pass "tsc --noEmit"
 
 log "packaging execution units"
+# Built for the runtime the emulator actually uses, which is not the one a real
+# deployment wants and not this machine's either: the emulator runs Lambda
+# containers of whatever image it has, with whatever libc and architecture that
+# brings. A bundle built for the default x86_64-manylinux2014 installs wheels
+# whose compiled extensions cannot be imported there, and the failure names the
+# wrong thing entirely -- "No module named 'psycopg2._psycopg'", which reads as
+# a missing dependency rather than a wrong platform.
+#
+# load.sh and nomnom.sh have done this for a while; this harness had not, and
+# nothing caught it because no unit it deploys carried a compiled extension
+# until petstore-multi's worker gained a database.
+if TARGET="$(emulator_python_target)"; then
+  export CLOUDCC_PYTHON_PLATFORM="${TARGET%% *}" CLOUDCC_PYTHON_VERSION="${TARGET##* }"
+  log "emulator runtime: $CLOUDCC_PYTHON_PLATFORM, python $CLOUDCC_PYTHON_VERSION"
+fi
 ( cd "$OUT" && ./bin/package.sh )
 ls "$OUT"/build/*.zip >/dev/null 2>&1 || fail "package.sh produced no deployment artefact"
 pass "packaged"

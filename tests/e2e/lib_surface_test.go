@@ -94,3 +94,45 @@ func TestEveryDefinedHelperIsUsed(t *testing.T) {
 		}
 	}
 }
+
+// A harness that packages a unit must build for the runtime the emulator uses.
+//
+// The emulator runs Lambda containers of whatever image it has, with whatever
+// libc, architecture and Python that brings -- aarch64 musl and Python 3.13 on
+// one machine, something else on CI -- regardless of the runtime the function
+// declares. bin/package.sh defaults to x86_64-manylinux2014, which is right for
+// a real deployment and wrong here, so a harness has to ask
+// emulator_python_target() and override it.
+//
+// ministack.sh did not, and nothing noticed for a long time because no unit it
+// deployed carried a compiled extension. The first one that did failed with
+// "No module named 'psycopg2._psycopg'" -- which reads as a missing dependency
+// rather than a wheel built for the wrong platform, and cost a CI round to
+// diagnose.
+func TestEveryPackagingHarnessBuildsForTheEmulatorsRuntime(t *testing.T) {
+	scripts, err := filepath.Glob("*.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := regexp.MustCompile(`(?m)^[^#\n]*\./bin/package\.sh`)
+
+	for _, path := range scripts {
+		if filepath.Base(path) == "lib.sh" {
+			continue
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading %s: %v", path, err)
+		}
+		text := string(body)
+		if !packages.MatchString(text) {
+			continue
+		}
+		if !strings.Contains(text, "emulator_python_target") {
+			t.Errorf("%s runs bin/package.sh but never calls emulator_python_target, "+
+				"so it builds wheels for x86_64-manylinux2014 while the emulator's "+
+				"Lambda runtime is something else. A unit with a compiled extension "+
+				"will fail at import with a message that names the wrong cause.", path)
+		}
+	}
+}
