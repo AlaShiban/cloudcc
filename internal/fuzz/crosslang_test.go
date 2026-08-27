@@ -133,7 +133,7 @@ func TestTheTwoFrontendsProduceTheSameIntents(t *testing.T) {
 		Files: map[string]string{"app.py": pythonSource},
 		// The compute type is stated so neither language falls back to a
 		// different default and makes this pass for the wrong reason.
-		Config: "app: crosslang\nprovider: aws\ndefaults:\n  execution_unit:\n    type: lambda\n",
+		Config: "app: crosslang\nprovider: aws\ndefaults:\n  execution_unit:\n    type: function\n",
 	}
 	node := &fuzz.Program{
 		Seed: 0,
@@ -143,7 +143,7 @@ func TestTheTwoFrontendsProduceTheSameIntents(t *testing.T) {
 			"package.json": `{"name":"crosslang","private":true,"type":"module",` +
 				`"dependencies":{"express":"^4.21.2"}}` + "\n",
 		},
-		Config: "app: crosslang\nprovider: aws\ndefaults:\n  execution_unit:\n    type: lambda\n",
+		Config: "app: crosslang\nprovider: aws\ndefaults:\n  execution_unit:\n    type: function\n",
 	}
 
 	pyBuilt := build(t, py)

@@ -10,7 +10,10 @@ import (
 
 func args(t *testing.T, resources map[string]any) (map[string]any, error) {
 	t.Helper()
-	return LambdaResourceArgs("api", config.ResourceConfig{Type: "lambda", Resources: resources})
+	return LambdaFunctionArgs("api", config.ResourceConfig{
+		Type:         config.TypeFunction,
+		ProviderArgs: map[string]map[string]any{FunctionResourceKey: resources},
+	})
 }
 
 // The portable spelling goes in, and Pulumi's spelling comes out.
@@ -20,14 +23,17 @@ func args(t *testing.T, resources map[string]any) (map[string]any, error) {
 // written -- so the file does not have to be revisited when the backend
 // changes. Only the emitter knows about camelCase.
 func TestArgumentsAreTranslatedToTheBackendsSpelling(t *testing.T) {
-	got, err := args(t, map[string]any{
-		"memory_size":                    1024,
-		"timeout":                        60,
-		"architectures":                  []any{"arm64"},
-		"reserved_concurrent_executions": 5,
-		"ephemeral_storage":              map[string]any{"size": 2048},
-		"snap_start":                     map[string]any{"apply_on": "PublishedVersions"},
-		"tracing_config":                 map[string]any{"mode": "Active"},
+	got, err := LambdaFunctionArgs("api", config.ResourceConfig{
+		Type:    config.TypeFunction,
+		Memory:  1024,
+		Timeout: 60,
+		ProviderArgs: map[string]map[string]any{FunctionResourceKey: {
+			"architectures":                  []any{"arm64"},
+			"reserved_concurrent_executions": 5,
+			"ephemeral_storage":              map[string]any{"size": 2048},
+			"snap_start":                     map[string]any{"apply_on": "PublishedVersions"},
+			"tracing_config":                 map[string]any{"mode": "Active"},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -107,16 +113,12 @@ func TestValuesOutsideWhatAWSAcceptsAreRejected(t *testing.T) {
 		resources map[string]any
 		wants     string
 	}{
-		{"memory below the floor", map[string]any{"memory_size": 64}, "between 128 and 10240"},
-		{"memory above the ceiling", map[string]any{"memory_size": 20000}, "between 128 and 10240"},
-		{"timeout above the ceiling", map[string]any{"timeout": 901}, "between 1 and 900"},
-		{"timeout of zero", map[string]any{"timeout": 0}, "between 1 and 900"},
 		{"tmp below the floor", map[string]any{"ephemeral_storage": map[string]any{"size": 128}}, "between 512 and 10240"},
 		{"two architectures", map[string]any{"architectures": []any{"arm64", "x86_64"}}, "exactly one architecture"},
 		{"an architecture that does not exist", map[string]any{"architectures": []any{"riscv"}}, `"arm64" or "x86_64"`},
 		{"a tracing mode that does not exist", map[string]any{"tracing_config": map[string]any{"mode": "Sometimes"}}, `"Active" or "PassThrough"`},
 		{"negative concurrency", map[string]any{"reserved_concurrent_executions": -5}, "must be -1"},
-		{"memory as text", map[string]any{"memory_size": "1024"}, "must be a whole number"},
+		{"a portable setting written in the provider block", map[string]any{"memory_size": 1024}, `is the portable setting "memory"`},
 		{"a block given a scalar", map[string]any{"ephemeral_storage": 2048}, "takes a block of settings"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,15 +137,25 @@ func TestValuesOutsideWhatAWSAcceptsAreRejected(t *testing.T) {
 // diagnostic has to be better than "unknown key" for that to be a small
 // mistake rather than a confusing one.
 func TestACamelCaseSpellingIsNamedAsTheMistakeItIs(t *testing.T) {
-	_, err := args(t, map[string]any{"memorySize": 1024})
+	// A provider argument copied out of a Pulumi program.
+	_, err := args(t, map[string]any{"ephemeralStorage": map[string]any{"size": 2048}})
 	if err == nil {
-		t.Fatal("memorySize was accepted; only the portable spelling should be")
+		t.Fatal("ephemeralStorage was accepted; only the portable spelling should be")
 	}
-	msg := err.Error()
-	for _, want := range []string{`"memorySize"`, `Did you mean "memory_size"?`, "OpenTofu"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the diagnostic is missing %q:\n%s", want, msg)
+	for _, want := range []string{`"ephemeralStorage"`, `Did you mean "ephemeral_storage"?`, "OpenTofu"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the diagnostic is missing %q:\n%s", want, err)
 		}
+	}
+
+	// Pulumi's name for a setting that is now portable: two mistakes at once,
+	// and the answer is the one that resolves both.
+	_, err = args(t, map[string]any{"memorySize": 1024})
+	if err == nil {
+		t.Fatal("memorySize was accepted")
+	}
+	if !strings.Contains(err.Error(), `is the portable setting "memory"`) {
+		t.Errorf("the diagnostic does not point at the portable layer:\n%s", err)
 	}
 }
 
@@ -154,7 +166,7 @@ func TestAnUnknownArgumentListsWhatIsSupported(t *testing.T) {
 	if err == nil {
 		t.Fatal("cpu was accepted on a Lambda")
 	}
-	for _, want := range []string{"memory_size", "timeout", "ephemeral_storage"} {
+	for _, want := range []string{"ephemeral_storage", "architectures", "`memory:`", "`timeout:`"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the diagnostic does not list %q:\n%s", want, err)
 		}
@@ -189,7 +201,7 @@ func TestArgumentsTheCompilerOwnsAreRefusedWithAReason(t *testing.T) {
 // Nothing configured means nothing added, so the defaults in compute.go stand
 // and a project that sets none of this emits exactly what it emitted before.
 func TestNoBlockMeansNoArguments(t *testing.T) {
-	got, err := LambdaResourceArgs("api", config.ResourceConfig{Type: "lambda"})
+	got, err := LambdaFunctionArgs("api", config.ResourceConfig{Type: config.TypeFunction})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,14 +212,14 @@ func TestNoBlockMeansNoArguments(t *testing.T) {
 
 // A block where nothing reads it is an error, not a no-op.
 func TestResourcesSomewhereNothingReadsItIsRefused(t *testing.T) {
-	sized := map[string]any{"memory_size": 1024}
+	sized := map[string]map[string]any{FunctionResourceKey: {"architectures": []any{"arm64"}}}
 
 	t.Run("on a store", func(t *testing.T) {
 		app := &config.App{
 			App:       "shop",
-			Persisted: map[string]config.ResourceConfig{"petsByOwner": {Type: "dynamodb", Resources: sized}},
+			Persisted: map[string]config.ResourceConfig{"petsByOwner": {Type: "dynamodb", ProviderArgs: sized}},
 		}
-		err := CheckResourcesAreSupported(app)
+		err := CheckConfigurationIsSupported(app)
 		if err == nil {
 			t.Fatal("a resources block on a DynamoDB table was accepted")
 		}
@@ -219,9 +231,9 @@ func TestResourcesSomewhereNothingReadsItIsRefused(t *testing.T) {
 	t.Run("on a container unit", func(t *testing.T) {
 		app := &config.App{
 			App:            "shop",
-			ExecutionUnits: map[string]config.ResourceConfig{"reporter": {Type: "ecs", Resources: sized}},
+			ExecutionUnits: map[string]config.ResourceConfig{"reporter": {Type: config.TypeContainer, ProviderArgs: sized}},
 		}
-		err := CheckResourcesAreSupported(app)
+		err := CheckConfigurationIsSupported(app)
 		if err == nil {
 			t.Fatal("a resources block on an ECS unit was accepted")
 		}
@@ -233,9 +245,9 @@ func TestResourcesSomewhereNothingReadsItIsRefused(t *testing.T) {
 	t.Run("on a lambda unit", func(t *testing.T) {
 		app := &config.App{
 			App:            "shop",
-			ExecutionUnits: map[string]config.ResourceConfig{"api": {Type: "lambda", Resources: sized}},
+			ExecutionUnits: map[string]config.ResourceConfig{"api": {Type: config.TypeFunction, ProviderArgs: sized}},
 		}
-		if err := CheckResourcesAreSupported(app); err != nil {
+		if err := CheckConfigurationIsSupported(app); err != nil {
 			t.Errorf("a resources block on a Lambda was refused: %v", err)
 		}
 	})
@@ -261,9 +273,11 @@ func TestTheDeclaredArchitectureIsTheOneWheelsAreBuiltFor(t *testing.T) {
 			name = "unset"
 		}
 		t.Run(name, func(t *testing.T) {
-			cfg := config.ResourceConfig{Type: "lambda"}
+			cfg := config.ResourceConfig{Type: config.TypeFunction}
 			if tc.declared != "" {
-				cfg.Resources = map[string]any{"architectures": []any{tc.declared}}
+				cfg.ProviderArgs = map[string]map[string]any{
+					FunctionResourceKey: {"architectures": []any{tc.declared}},
+				}
 			}
 
 			if got := cfg.Architecture(); got != tc.declared {
@@ -279,7 +293,7 @@ func TestTheDeclaredArchitectureIsTheOneWheelsAreBuiltFor(t *testing.T) {
 			if tc.declared == "" {
 				return
 			}
-			emitted, err := LambdaResourceArgs("api", cfg)
+			emitted, err := LambdaFunctionArgs("api", cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

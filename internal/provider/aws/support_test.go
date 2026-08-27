@@ -12,8 +12,8 @@ func TestSupportLevels(t *testing.T) {
 		kind, typ string
 		want      Level
 	}{
-		{config.KindExecutionUnit, "lambda", Supported},
-		{config.KindExecutionUnit, "ecs", Supported},
+		{config.KindExecutionUnit, config.TypeFunction, Supported},
+		{config.KindExecutionUnit, config.TypeContainer, Supported},
 		// Accepted by the schema, rejected at compile time rather than
 		// silently becoming something else.
 		{config.KindExecutionUnit, "eks", NotYetSupported},
@@ -44,11 +44,11 @@ func TestEveryCapabilityKindHasSupportEntries(t *testing.T) {
 
 func TestSupportedTypesExcludeTheUnimplemented(t *testing.T) {
 	got := SupportedTypes(config.KindExecutionUnit)
-	if !reflect.DeepEqual(got, []string{"ecs", "lambda"}) {
+	if !reflect.DeepEqual(got, []string{config.TypeContainer, config.TypeFunction}) {
 		t.Errorf("SupportedTypes = %v", got)
 	}
 	all := AllTypes(config.KindExecutionUnit)
-	if !reflect.DeepEqual(all, []string{"ecs", "eks", "lambda"}) {
+	if !reflect.DeepEqual(all, []string{config.TypeContainer, "eks", config.TypeFunction}) {
 		t.Errorf("AllTypes should include what is planned but not built: %v", all)
 	}
 }
@@ -61,12 +61,12 @@ func TestNeedsVPC(t *testing.T) {
 		types []string
 		want  bool
 	}{
-		{[]string{"lambda", "apigateway", "dynamodb", "s3", "sns"}, false},
-		{[]string{"lambda", "ecs"}, true},
-		{[]string{"lambda", "rds_postgres"}, true},
-		{[]string{"lambda", "elasticache"}, true},
-		{[]string{"lambda", "memorydb"}, true},
-		{[]string{"lambda", "alb"}, true},
+		{[]string{config.TypeFunction, "apigateway", "dynamodb", "s3", "sns"}, false},
+		{[]string{config.TypeFunction, config.TypeContainer}, true},
+		{[]string{config.TypeFunction, "rds_postgres"}, true},
+		{[]string{config.TypeFunction, "elasticache"}, true},
+		{[]string{config.TypeFunction, "memorydb"}, true},
+		{[]string{config.TypeFunction, "alb"}, true},
 		{nil, false},
 	}
 	for _, c := range cases {

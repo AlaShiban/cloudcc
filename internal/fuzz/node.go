@@ -2,6 +2,7 @@ package fuzz
 
 import (
 	"fmt"
+	"github.com/cloudcompiler/cloudcc/internal/config"
 	"math/rand"
 	"sort"
 	"strings"
@@ -478,7 +479,7 @@ func (g *nodeGenerator) build(seed int64) *Program {
 			primaryStore, topicID, cfgVars)
 	}
 	for _, u := range units {
-		p.Expect.ComputeTypes[u] = "lambda"
+		p.Expect.ComputeTypes[u] = config.TypeFunction
 	}
 
 	p.Config = g.renderConfig(p)

@@ -22,7 +22,7 @@ func archProgram(t *testing.T) *ir.Program {
 
 	unit := &ir.ExecUnit{Entrypoints: []string{"app.py"}}
 	unit.ID = "main"
-	if err := unit.Configure(config.ResourceConfig{Type: "lambda"}); err != nil {
+	if err := unit.Configure(config.ResourceConfig{Type: config.TypeFunction}); err != nil {
 		t.Fatal(err)
 	}
 	p.AddIntent(unit)

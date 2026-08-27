@@ -64,7 +64,7 @@ func (r *Resolver) Resolve() error {
 	// Before anything is built. A `resources:` block somewhere nothing reads it
 	// is a setting that looks applied and is not, and finding that out from a
 	// deployed stack is much worse than finding it out here.
-	if err := CheckResourcesAreSupported(r.Config); err != nil {
+	if err := CheckConfigurationIsSupported(r.Config); err != nil {
 		return err
 	}
 

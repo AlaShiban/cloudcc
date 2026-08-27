@@ -120,7 +120,7 @@ func (p *ShimsPlugin) injectRuntime(ctx *compiler.Context) error {
 		unit.Runtime = pkg.LambdaRuntime
 		unit.Artifact = pkg.Artifact
 
-		container := unit.Config().Type == "ecs"
+		container := unit.Config().Type == config.TypeContainer
 		if container {
 			unit.DockerfileProvided = userDockerfile(ctx, unitID)
 		} else {
@@ -201,7 +201,7 @@ func (p *ShimsPlugin) writePackagingScript(ctx *compiler.Context) error {
 		if !ok {
 			continue
 		}
-		isContainer := unit.Config().Type == "ecs"
+		isContainer := unit.Config().Type == config.TypeContainer
 		containers = containers || isContainer
 		units = append(units, runtimepy.PackageUnit{
 			ID:        id,

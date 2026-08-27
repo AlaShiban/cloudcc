@@ -3,21 +3,32 @@
 app: mega-app
 provider: aws
 
+# `type:` names the shape of compute, not the product: `function` is Lambda here
+# and would be Azure Functions or Cloud Functions elsewhere. Portable settings
+# sit beside it; anything one cloud offers beyond them goes in a block named
+# after the resource.
 execution_units:
   api:
-    type: lambda
+    type: function
+    memory: 512
+    timeout: 30
+    aws.lambda.Function:
+      # PROPOSED: not yet supported. Layers are how a Django or a numpy build
+      # gets out of the bundle, and the argument exists on the resource -- what
+      # is missing is anything that produces one.
+      layers: []
   checkout:
-    type: lambda
+    type: function
   admin:
     # Django expects a long-lived process with connection pooling, so it gets a
-    # container. A compiler that saw Django on `type: lambda` should say what
+    # container. A compiler that saw Django on `type: function` should say what
     # that costs rather than quietly agree.
-    type: ecs
+    type: container
   worker:
     # Pinned by the Kafka consumer loop in worker.py: a consumer group cannot
     # be expressed as a Lambda event source without giving up the offset
     # semantics that were the reason to choose Kafka.
-    type: ecs
+    type: container
   ops:
     # PROPOSED: run-to-completion. Not yet a supported type -- see ops.py.
     # `cloudcc run ops -- backfill --since 2026-01-01`

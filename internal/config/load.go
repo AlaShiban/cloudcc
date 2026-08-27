@@ -30,7 +30,7 @@ func BuiltinDefaults() map[string]KindDefault {
 		return KindDefault{ResourceConfig: ResourceConfig{Type: typ}}
 	}
 	return map[string]KindDefault{
-		KindExecutionUnit: kd("lambda"),
+		KindExecutionUnit: kd(TypeFunction),
 		KindExpose:        kd("apigateway"),
 		KindPersistKV:     kd("dynamodb"),
 		KindPersistFS:     kd("s3"),
@@ -73,6 +73,25 @@ func Load(path string) (*App, error) {
 	if err := dec.Decode(&file); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	// A renamed compute type is caught here rather than as "no AWS mapping for
+	// execution unit type" several passes later, where the message would name
+	// the provider instead of the line that has to change.
+	for id, unit := range file.ExecutionUnits {
+		if err := CheckComputeType(id, unit.Type); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	if kd, ok := file.Defaults[KindExecutionUnit]; ok {
+		if err := CheckComputeType("defaults", kd.Type); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		for typ := range kd.ByType {
+			if err := CheckComputeType("defaults.by_type", typ); err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+		}
+	}
+
 	app.mergeFile(&file)
 	return app, nil
 }

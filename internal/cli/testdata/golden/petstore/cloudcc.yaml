@@ -7,7 +7,7 @@ out_dir: .
 defaults:
   config: {}
   execution_unit:
-    type: lambda
+    type: function
   expose:
     type: apigateway
   logging:
@@ -28,7 +28,7 @@ defaults:
     type: s3
 execution_units:
   main:
-    type: lambda
+    type: function
 exposed:
   pet-api:
     type: apigateway

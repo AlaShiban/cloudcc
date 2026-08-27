@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/diag"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
 	"github.com/cloudcompiler/cloudcc/internal/lang"
@@ -160,7 +161,7 @@ func (Frontend) Packaging(u *ir.ExecUnit) lang.Packaging {
 }
 
 func (Frontend) PackagingScript(u *ir.ExecUnit) string {
-	return packagingScript(u, u.Config().Type == "ecs")
+	return packagingScript(u, u.Config().Type == config.TypeContainer)
 }
 
 func (Frontend) Tools() []lang.Tool {

@@ -73,7 +73,12 @@ type lambdaArg struct {
 	Why string
 }
 
-// lambdaArgs is the supported surface, sorted by name.
+// lambdaArgs is the AWS-specific surface, sorted by name.
+//
+// `memory_size` and `timeout` are deliberately absent: they are the portable
+// layer, written on the unit as `memory:` and `timeout:`, and portableArgs
+// above turns an attempt to write them here into an error explaining where they
+// belong rather than a second way to say the same thing.
 //
 // Short on purpose. Every entry is an argument somebody has a reason to set on
 // a function whose code cloudcc built, and each one is checked -- an argument
@@ -113,11 +118,6 @@ var lambdaArgs = []lambdaArg{
 		Why: "ARNs of Lambda layers to attach",
 	},
 	{
-		Name: "memory_size", Pulumi: "memorySize", Kind: argInt,
-		Why:   "megabytes of memory, 128 to 10240; CPU is allocated in proportion",
-		Check: intBetween(128, 10240, "MB"),
-	},
-	{
 		Name: "publish", Pulumi: "publish", Kind: argBool,
 		Why: "publish a new numbered version on each deployment",
 	},
@@ -143,11 +143,6 @@ var lambdaArgs = []lambdaArg{
 			Why:   `"PublishedVersions" or "None"`,
 			Check: oneOf("PublishedVersions", "None"),
 		}},
-	},
-	{
-		Name: "timeout", Pulumi: "timeout", Kind: argInt,
-		Why:   "seconds before an invocation is killed, 1 to 900",
-		Check: intBetween(1, 900, "seconds"),
 	},
 	{
 		Name: "tracing_config", Pulumi: "tracingConfig", Kind: argBlock,
@@ -221,20 +216,94 @@ func asInt(v any) (int, bool) {
 	return 0, false
 }
 
-// LambdaResourceArgs validates a unit's `resources:` block and returns it in
-// the spelling the Pulumi backend emits.
+// FunctionResourceKey is the provider resource an execution unit of type
+// `function` becomes on AWS, and the key its arguments are written under.
+const FunctionResourceKey = "aws.lambda.Function"
+
+// resourceTypes maps a provider resource key to the same resource in other
+// infrastructure tools. Pulumi's name is the key because that is the name a
+// reader most likely has in front of them; the OpenTofu name is recorded here
+// so the eventual backend has one place to look rather than a rule to
+// re-derive.
+var resourceTypes = map[string]struct{ opentofu string }{
+	FunctionResourceKey: {opentofu: "aws_lambda_function"},
+}
+
+// portableArgs maps a provider argument onto the portable setting that owns it.
+// Those may not also be written in a provider block: two ways to say one thing,
+// with no rule for which wins, is a configuration file that does not mean
+// anything definite.
+var portableArgs = map[string]string{
+	"memory_size": "memory",
+	"timeout":     "timeout",
+}
+
+// LambdaFunctionArgs validates both layers of a unit's configuration and
+// returns them in the spelling the Pulumi backend emits.
 //
 // The returned map is empty when nothing was configured, which is the ordinary
 // case: the defaults in compute.go stand.
-func LambdaResourceArgs(unitID string, cfg config.ResourceConfig) (map[string]any, error) {
-	if len(cfg.Resources) == 0 {
-		return nil, nil
+func LambdaFunctionArgs(unitID string, cfg config.ResourceConfig) (map[string]any, error) {
+	out := map[string]any{}
+
+	// The portable layer first, so a provider block restating one of these is
+	// caught below rather than silently winning.
+	if cfg.Memory != 0 {
+		if why := intBetween(128, 10240, "MB")(cfg.Memory); why != "" {
+			return nil, fmt.Errorf("execution unit %q: memory %s", unitID, why)
+		}
+		out["memorySize"] = cfg.Memory
 	}
-	out, err := translate(unitID, "", cfg.Resources, lambdaArgs)
+	if cfg.Timeout != 0 {
+		if why := intBetween(1, 900, "seconds")(cfg.Timeout); why != "" {
+			return nil, fmt.Errorf("execution unit %q: timeout %s", unitID, why)
+		}
+		out["timeout"] = cfg.Timeout
+	}
+
+	for key := range cfg.ProviderArgs {
+		if key != FunctionResourceKey {
+			return nil, unknownResource(unitID, key)
+		}
+	}
+	block := cfg.ProviderArgs[FunctionResourceKey]
+	if len(block) == 0 {
+		return out, nil
+	}
+	for name := range block {
+		if portable, owned := portableArgs[name]; owned {
+			return nil, fmt.Errorf("execution unit %q: %s.%s is the portable setting %q, "+
+				"which belongs on the unit itself:\n"+
+				"    %s:\n      type: %s\n      %s: ...\n"+
+				"  Every provider has an answer for it, so saying it here would tie the unit "+
+				"to AWS for no reason -- and allowing both spellings would leave no rule for "+
+				"which one means it",
+				unitID, FunctionResourceKey, name, portable,
+				unitID, config.TypeFunction, portable)
+		}
+	}
+
+	translated, err := translate(unitID, "", block, lambdaArgs)
 	if err != nil {
 		return nil, err
 	}
+	for k, v := range translated {
+		out[k] = v
+	}
 	return out, nil
+}
+
+// unknownResource is the diagnostic for a provider block naming a resource this
+// unit does not become.
+func unknownResource(unitID, key string) error {
+	known := make([]string, 0, len(resourceTypes))
+	for name := range resourceTypes {
+		known = append(known, name)
+	}
+	sort.Strings(known)
+	return fmt.Errorf("execution unit %q: %q is not a resource this unit becomes. "+
+		"A unit of type %s on AWS is %s; configurable resources are %s",
+		unitID, key, config.TypeFunction, FunctionResourceKey, quotedList(known))
 }
 
 // translate walks one level of a resources block against its schema.
@@ -334,13 +403,26 @@ func scalar(unitID, full string, arg lambdaArg, value any) (any, error) {
 
 // unknownArg builds the diagnostic for a name that is not in the schema.
 func unknownArg(unitID, path, name string, schema []lambdaArg) error {
-	where := "resources"
+	where := FunctionResourceKey
 	if path != "" {
-		where = "resources." + path
+		where = FunctionResourceKey + "." + path
 	}
 	if why, owned := ownedByCompiler[name]; owned && path == "" {
 		return fmt.Errorf("execution unit %q: %s.%s cannot be set here: %s",
 			unitID, where, name, why)
+	}
+	// A camelCase spelling of a setting that moved to the portable layer, which
+	// is two mistakes at once and deserves to be answered as one: `memorySize`
+	// is Pulumi's name for an argument that is no longer written here at all.
+	if path == "" {
+		flat := flatten(name)
+		for arg, portable := range portableArgs {
+			if flatten(arg) == flat {
+				return fmt.Errorf("execution unit %q: %s.%s is the portable setting %q, "+
+					"which belongs on the unit itself rather than in a provider block",
+					unitID, where, name, portable)
+			}
+		}
 	}
 
 	var lines []string
@@ -351,20 +433,26 @@ func unknownArg(unitID, path, name string, schema []lambdaArg) error {
 	if suggestion := closestArg(name, schema); suggestion != "" {
 		hint = fmt.Sprintf(" Did you mean %q?", suggestion)
 	}
-	return fmt.Errorf("execution unit %q: %s has no argument %q.%s\n  Arguments are spelled the way OpenTofu and Terraform spell them, which is\n  also how Pulumi's Python and YAML SDKs spell them. These are supported:\n%s",
+	return fmt.Errorf("execution unit %q: %s has no argument %q.%s\n  Arguments are spelled the way OpenTofu and Terraform spell them, which is\n  also how Pulumi's Python and YAML SDKs spell them. These are supported:\n%s\n  A unit's size and how long it may run are portable, and are written on the\n  unit itself as `memory:` and `timeout:` rather than here.",
 		unitID, where, name, hint, strings.Join(lines, "\n"))
 }
 
 // closestArg suggests a schema name for a near miss, which is nearly always a
 // camelCase spelling copied out of a Pulumi program.
 func closestArg(name string, schema []lambdaArg) string {
-	flat := strings.ToLower(strings.ReplaceAll(name, "_", ""))
+	flat := flatten(name)
 	for _, a := range schema {
-		if strings.ToLower(strings.ReplaceAll(a.Name, "_", "")) == flat {
+		if flatten(a.Name) == flat {
 			return a.Name
 		}
 	}
 	return ""
+}
+
+// flatten reduces a name to what it has in common across spellings, so that
+// memorySize and memory_size compare equal.
+func flatten(name string) string {
+	return strings.ToLower(strings.ReplaceAll(name, "_", ""))
 }
 
 func asStringMap(v any) (map[string]any, bool) {
@@ -412,16 +500,14 @@ func quotedList(names []string) string {
 	return strings.Join(quoted[:len(quoted)-1], ", ") + " or " + quoted[len(quoted)-1]
 }
 
-// CheckResourcesAreSupported rejects a `resources:` block on a declaration that
-// has nowhere to put it.
+// CheckConfigurationIsSupported rejects settings on a declaration that has
+// nowhere to put them.
 //
-// Only Lambda execution units read one today. A block written on an ECS unit,
-// a table or a topic would otherwise be accepted by the loader, resolved into
-// nothing, and never mentioned again -- so the configuration file would say
-// something the deployment does not do, which is the failure this project
-// refuses everywhere else. Saying so costs one sentence and saves reading a
-// stack to find out a setting was ignored.
-func CheckResourcesAreSupported(app *config.App) error {
+// Both layers, and for the same reason: a setting nothing reads is a
+// configuration file that says something the deployment does not do, which is
+// the failure this project refuses everywhere else. Only execution units of
+// type function read either today.
+func CheckConfigurationIsSupported(app *config.App) error {
 	type section struct {
 		label   string
 		entries map[string]config.ResourceConfig
@@ -441,11 +527,10 @@ func CheckResourcesAreSupported(app *config.App) error {
 		}
 		sort.Strings(ids)
 		for _, id := range ids {
-			if len(s.entries[id].Resources) > 0 {
-				return fmt.Errorf("%s %q: `resources:` is only supported on execution units of "+
-					"type lambda. Nothing would read it here, so it would be a setting that "+
-					"looks applied and is not; use `pulumi_params:` if you need to reach an "+
-					"argument cloudcc does not model", s.label, id)
+			if what := configured(s.entries[id]); what != "" {
+				return fmt.Errorf("%s %q: %s is only supported on execution units of type "+
+					"%q. Nothing would read it here, so it would be a setting that looks "+
+					"applied and is not", s.label, id, what, config.TypeFunction)
 			}
 		}
 	}
@@ -456,18 +541,37 @@ func CheckResourcesAreSupported(app *config.App) error {
 	}
 	sort.Strings(units)
 	for _, id := range units {
-		unit := app.ExecutionUnits[id]
-		if len(unit.Resources) == 0 {
+		what := configured(app.ExecutionUnits[id])
+		if what == "" {
 			continue
 		}
 		// Resolved rather than as-written: the type may come from a defaults
 		// layer rather than from the unit's own entry.
-		if resolved := app.Lookup(config.KindExecutionUnit, id).Type; resolved != "lambda" {
-			return fmt.Errorf("execution unit %q is type %q, and `resources:` is only supported "+
-				"on type lambda. The arguments differ by resource -- a Fargate service is sized "+
-				"in cpu and memory units, not in megabytes of function memory -- so accepting "+
-				"these here would mean accepting settings that cannot be applied", id, resolved)
+		if resolved := app.Lookup(config.KindExecutionUnit, id).Type; resolved != config.TypeFunction {
+			return fmt.Errorf("execution unit %q is type %q, and %s is only supported on type "+
+				"%q. A container service is sized in cpu and memory units against a task "+
+				"definition, not in megabytes of function memory, so accepting these here "+
+				"would mean accepting settings that cannot be applied",
+				id, resolved, what, config.TypeFunction)
 		}
 	}
 	return nil
+}
+
+// configured names what a declaration set, for a diagnostic, or "" for nothing.
+func configured(rc config.ResourceConfig) string {
+	switch {
+	case len(rc.ProviderArgs) > 0:
+		keys := make([]string, 0, len(rc.ProviderArgs))
+		for k := range rc.ProviderArgs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return "`" + keys[0] + ":`"
+	case rc.Memory != 0:
+		return "`memory:`"
+	case rc.Timeout != 0:
+		return "`timeout:`"
+	}
+	return ""
 }

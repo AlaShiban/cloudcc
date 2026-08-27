@@ -34,9 +34,9 @@ const (
 // typeSupport lists every type each capability accepts, and whether it works.
 var typeSupport = map[string]map[string]Level{
 	config.KindExecutionUnit: {
-		"lambda": Supported,
-		"ecs":    Supported,
-		"eks":    NotYetSupported,
+		config.TypeFunction:  Supported,
+		config.TypeContainer: Supported,
+		"eks":                NotYetSupported,
 	},
 	config.KindExpose: {
 		"apigateway": Supported,
@@ -143,7 +143,7 @@ func errUnsupported(format string, args ...any) error {
 func NeedsVPC(types []string) bool {
 	for _, t := range types {
 		switch t {
-		case "ecs", "rds_postgres", "elasticache", "memorydb", "alb":
+		case config.TypeContainer, "rds_postgres", "elasticache", "memorydb", "alb":
 			return true
 		}
 	}

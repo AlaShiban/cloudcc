@@ -174,7 +174,7 @@ func TestACallBetweenUnitsIsDrawnDistinctly(t *testing.T) {
 
 	callee := &ir.ExecUnit{Entrypoints: []string{"pricing.py"}}
 	callee.ID = "pricing"
-	if err := callee.Configure(config.ResourceConfig{Type: "lambda"}); err != nil {
+	if err := callee.Configure(config.ResourceConfig{Type: config.TypeFunction}); err != nil {
 		t.Fatal(err)
 	}
 	p.AddIntent(callee)
@@ -207,7 +207,7 @@ func TestTheOtherRenderersLabelACall(t *testing.T) {
 	for _, id := range []string{"storefront", "pricing"} {
 		u := &ir.ExecUnit{Entrypoints: []string{id + ".py"}}
 		u.ID = id
-		if err := u.Configure(config.ResourceConfig{Type: "lambda"}); err != nil {
+		if err := u.Configure(config.ResourceConfig{Type: config.TypeFunction}); err != nil {
 			t.Fatal(err)
 		}
 		p.AddIntent(u)

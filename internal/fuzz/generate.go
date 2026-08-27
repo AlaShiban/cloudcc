@@ -14,6 +14,7 @@ package fuzz
 
 import (
 	"fmt"
+	"github.com/cloudcompiler/cloudcc/internal/config"
 	"math/rand"
 	"sort"
 	"strings"
@@ -359,9 +360,9 @@ func (g *generator) writeUnit(p *Program, unitID string, exposed, declare bool,
 		m.blank()
 	}
 
-	computeType := "lambda"
+	computeType := config.TypeFunction
 	if g.opts.AllowContainer && exposed && g.rng.Intn(3) == 0 {
-		computeType = "ecs"
+		computeType = config.TypeContainer
 	}
 	p.Expect.ComputeTypes[unitID] = computeType
 
@@ -607,7 +608,7 @@ func (g *generator) renderConfig(p *Program) string {
 
 	nonDefault := false
 	for _, unit := range p.Expect.Units {
-		if p.Expect.ComputeTypes[unit] != "lambda" {
+		if p.Expect.ComputeTypes[unit] != config.TypeFunction {
 			nonDefault = true
 		}
 	}
@@ -619,7 +620,7 @@ func (g *generator) renderConfig(p *Program) string {
 		b.WriteString("\nexposed:\n")
 		for id, gw := range p.Expect.Gateways {
 			typ := "apigateway"
-			if p.Expect.ComputeTypes[gw.Unit] == "ecs" {
+			if p.Expect.ComputeTypes[gw.Unit] == config.TypeContainer {
 				typ = "alb"
 			}
 			b.WriteString("  " + id + ":\n    type: " + typ + "\n")

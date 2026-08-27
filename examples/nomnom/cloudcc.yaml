@@ -5,17 +5,17 @@ provider: aws
 # which: that is in the code, and the compiler reads it.
 execution_units:
   storefront:
-    type: lambda
+    type: function
   pricing:
-    type: lambda
+    type: function
   inventory:
-    type: lambda
+    type: function
   dispatch:
-    type: lambda
+    type: function
   tracking:
-    type: lambda
+    type: function
   notify:
-    type: lambda
+    type: function
 
 logging:
   type: cloudwatch

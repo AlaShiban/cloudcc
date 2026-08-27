@@ -3,33 +3,46 @@ provider: aws
 
 execution_units:
   api:
-    type: lambda
+    # What shape of compute this needs, not which product runs it. `function` is
+    # AWS Lambda, Azure Functions or GCP Cloud Functions; `provider:` above
+    # decides which.
+    type: function
+
     environment_variables:
       LOG_LEVEL: info
-    # How big the function is, and how long it may run.
+
+    # The portable layer. Every provider has an answer for these two, so setting
+    # them says nothing about which cloud this runs on.
     #
-    # Spelled the way OpenTofu and Terraform spell these arguments, which is
-    # also how Pulumi's Python and YAML SDKs spell them -- Pulumi's AWS provider
-    # is generated from Terraform's, so the two describe the same arguments and
-    # differ only in case. The compiler translates; the file does not have to be
-    # rewritten if the backend changes.
-    resources:
-      # This unit imports SQLAlchemy, asyncpg and redis on top of FastAPI, and
-      # the default 512 MB spends most of a cold start importing them. Lambda
-      # allocates CPU in proportion to memory, so this buys startup as much as
-      # it buys headroom.
-      memory_size: 1024
-      # arm64 is cheaper per millisecond and the bundle is built for whatever
-      # is named here, so this is not free to change -- which is the point of
-      # it being one line rather than a build flag.
+    # This unit imports SQLAlchemy, asyncpg and redis on top of FastAPI, and the
+    # default 512 MB spends most of a cold start importing them. On Lambda, CPU
+    # is allocated in proportion to memory, so this buys startup as much as it
+    # buys headroom -- which is a reason that happens to be AWS-shaped for a
+    # setting that is not.
+    memory: 1024
+
+    # The provider layer: what one cloud offers beyond the portable set, named
+    # after the resource it configures. Arguments are spelled the way OpenTofu
+    # and Terraform spell them -- Pulumi's AWS provider is generated from
+    # Terraform's, so the two describe the same arguments and differ only in
+    # case, and Pulumi's own Python and YAML SDKs use these names too.
+    #
+    # Anything written here is a line that would have to change to move cloud,
+    # which is exactly why it is in a block of its own rather than mixed in
+    # above.
+    aws.lambda.Function:
+      # arm64 is cheaper per millisecond. Not portable: it decides how this
+      # unit's wheels are built as well as what the function declares, and the
+      # two cannot disagree -- an architecture is part of a compiled extension's
+      # filename.
       architectures: [arm64]
+
   worker:
-    type: lambda
-    resources:
-      # The worker signs a record, writes it to S3 and writes a row to its
-      # database, all after the API has already replied. Nothing is waiting on
-      # it, and a timeout here is a lost audit record rather than a slow
-      # response, so it gets room.
-      timeout: 120
-      memory_size: 512
+    type: function
+    # The worker signs a record, writes it to S3 and writes a row to its
+    # database, all after the API has already replied. Nothing is waiting on it,
+    # and a timeout here is a lost audit record rather than a slow response.
+    timeout: 120
+    memory: 512
+    aws.lambda.Function:
       architectures: [arm64]

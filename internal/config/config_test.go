@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuiltinDefaultsCoverEveryKind(t *testing.T) {
@@ -139,7 +141,7 @@ func TestLoadMissingFileYieldsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Defaults[KindExecutionUnit].Type != "lambda" {
+	if a.Defaults[KindExecutionUnit].Type != TypeFunction {
 		t.Errorf("missing file should still give builtin defaults, got %+v", a.Defaults)
 	}
 }
@@ -151,7 +153,7 @@ func TestLoadLayersOverBuiltins(t *testing.T) {
 app: petstore
 defaults:
   execution_unit:
-    type: ecs
+    type: container
 persisted:
   petsByOwner:
     type: dynamodb
@@ -164,7 +166,7 @@ persisted:
 	if a.App != "petstore" {
 		t.Errorf("app = %q", a.App)
 	}
-	if a.Defaults[KindExecutionUnit].Type != "ecs" {
+	if a.Defaults[KindExecutionUnit].Type != TypeContainer {
 		t.Errorf("execution_unit default not overridden: %+v", a.Defaults[KindExecutionUnit])
 	}
 	// Untouched kinds keep their builtin values.
@@ -225,7 +227,7 @@ func TestRoundTrip(t *testing.T) {
 		PulumiParams: map[string]any{"billingMode": "PAY_PER_REQUEST"},
 	})
 	a.Record(KindExecutionUnit, "api", ResourceConfig{
-		Type:                 "lambda",
+		Type:                 TypeFunction,
 		EnvironmentVariables: map[string]string{"LOG_LEVEL": "info"},
 	})
 
@@ -262,5 +264,87 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A misspelled setting is an error, and writing UnmarshalYAML must not switch
+// that off.
+//
+// KnownFields is a property of the *decoder*, and a custom UnmarshalYAML
+// decodes through node.Decode, which builds a fresh decoder without it. So
+// adding the method to collect `aws.lambda.Function:` blocks silently disabled
+// strict field checking for every declaration in the file, and `memroy: 1024`
+// compiled cleanly and did nothing. The check lives inside the method now.
+func TestAMisspelledSettingIsStillAnError(t *testing.T) {
+	var rc ResourceConfig
+	err := yaml.Unmarshal([]byte("type: function\nmemroy: 1024\n"), &rc)
+	if err == nil {
+		t.Fatalf("memroy was accepted: %+v", rc)
+	}
+	for _, want := range []string{`"memroy"`, "`memory`", "aws.lambda.Function"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the diagnostic is missing %q:\n%s", want, err)
+		}
+	}
+}
+
+// The two layers survive a round trip, because the resolved configuration is
+// written back out and has to load again.
+func TestBothLayersRoundTripThroughYAML(t *testing.T) {
+	const src = `type: function
+memory: 1024
+timeout: 60
+aws.lambda.Function:
+    architectures:
+        - arm64
+    ephemeral_storage:
+        size: 2048
+`
+	var rc ResourceConfig
+	if err := yaml.Unmarshal([]byte(src), &rc); err != nil {
+		t.Fatal(err)
+	}
+	if rc.Type != TypeFunction || rc.Memory != 1024 || rc.Timeout != 60 {
+		t.Errorf("portable layer = %+v", rc)
+	}
+	block, ok := rc.ProviderArgs["aws.lambda.Function"]
+	if !ok {
+		t.Fatalf("provider block missing: %+v", rc.ProviderArgs)
+	}
+	if _, ok := block["ephemeral_storage"]; !ok {
+		t.Errorf("provider block = %+v", block)
+	}
+
+	out, err := yaml.Marshal(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again ResourceConfig
+	if err := yaml.Unmarshal(out, &again); err != nil {
+		t.Fatalf("the emitted configuration does not load again: %v\n%s", err, out)
+	}
+	if again.Memory != rc.Memory || again.Timeout != rc.Timeout {
+		t.Errorf("portable layer changed on the way round: %+v -> %+v", rc, again)
+	}
+	if len(again.ProviderArgs) != len(rc.ProviderArgs) {
+		t.Errorf("provider blocks changed on the way round: %+v -> %+v\n%s",
+			rc.ProviderArgs, again.ProviderArgs, out)
+	}
+}
+
+// A compute type named after one cloud's product is an error naming the
+// portable one, rather than a silent alias.
+func TestAProductNameForAComputeTypeIsRenamed(t *testing.T) {
+	for old, now := range map[string]string{"lambda": TypeFunction, "ecs": TypeContainer} {
+		err := CheckComputeType("api", old)
+		if err == nil {
+			t.Fatalf("`type: %s` was accepted", old)
+		}
+		if !strings.Contains(err.Error(), now) {
+			t.Errorf("the error does not name the replacement %q: %v", now, err)
+		}
+	}
+	if err := CheckComputeType("api", TypeFunction); err != nil {
+		t.Errorf("`type: function` was rejected: %v", err)
 	}
 }

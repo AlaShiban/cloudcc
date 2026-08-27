@@ -3,9 +3,9 @@ provider: aws
 
 execution_units:
   api:
-    type: lambda
+    type: function
   reporter:
-    type: ecs
+    type: container
 
 exposed:
   shop-api:

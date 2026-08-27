@@ -7,7 +7,7 @@ out_dir: .
 defaults:
   config: {}
   execution_unit:
-    type: lambda
+    type: function
   expose:
     type: apigateway
   logging:
@@ -28,20 +28,20 @@ defaults:
     type: s3
 execution_units:
   api:
-    type: lambda
+    type: function
     environment_variables:
       LOG_LEVEL: info
-    resources:
+    memory: 1024
+    aws.lambda.Function:
       architectures:
         - arm64
-      memory_size: 1024
   worker:
-    type: lambda
-    resources:
+    type: function
+    memory: 512
+    timeout: 120
+    aws.lambda.Function:
       architectures:
         - arm64
-      memory_size: 512
-      timeout: 120
 exposed:
   pet-api:
     type: apigateway

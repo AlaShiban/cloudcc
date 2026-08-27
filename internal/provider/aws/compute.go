@@ -13,9 +13,9 @@ import (
 // group it needs.
 func (r *Resolver) execUnit(u *ir.ExecUnit) error {
 	switch u.Config().Type {
-	case "lambda":
+	case config.TypeFunction:
 		return r.lambda(u)
-	case "ecs":
+	case config.TypeContainer:
 		return r.ecsServiceUnit(u)
 	}
 	return fmt.Errorf("no AWS mapping for execution unit type %q", u.Config().Type)
@@ -56,7 +56,7 @@ func (r *Resolver) lambda(u *ir.ExecUnit) error {
 	// of packaging and provisioning away from being discovered otherwise, and
 	// the message it comes back with names the API rather than the file the
 	// value was written in.
-	sized, err := LambdaResourceArgs(u.ID, u.Config())
+	sized, err := LambdaFunctionArgs(u.ID, u.Config())
 	if err != nil {
 		return err
 	}
@@ -278,11 +278,11 @@ func (r *Resolver) unitWiring() error {
 // that policy takes, and the resources that carry its environment.
 func (r *Resolver) unitRoleAndCarriers(u *ir.ExecUnit) (role, policy ir.Key, carriers []ir.Key) {
 	switch u.Config().Type {
-	case "lambda":
+	case config.TypeFunction:
 		return ir.Key{Kind: KindLambdaRole, ID: u.ID},
 			ir.Key{Kind: KindLambdaPolicy, ID: u.ID},
 			[]ir.Key{{Kind: KindLambda, ID: u.ID}}
-	case "ecs":
+	case config.TypeContainer:
 		// The task role, not the execution role: the policy carries what the
 		// application code may reach, and the execution role is ECS's own.
 		return ir.Key{Kind: KindECSTaskRole, ID: u.ID + "-task"},

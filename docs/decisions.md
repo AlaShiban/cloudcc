@@ -142,59 +142,84 @@ with `the reply was not JSON: rex (dog)`. Wrapping it costs nine bytes, makes
 every reply parseable the same way, and keeps "returned null" and "answered
 nothing at all" different answers.
 
-**Resource sizing is spelled the way OpenTofu spells it, not the way Pulumi
-does.** A unit's size and behaviour are configured with a `resources:` block:
+**Configuration has two layers, and the seam between them is visible in the
+file.** A unit says what shape of compute it needs and how big, portably; a
+block named after a provider resource says everything one cloud offers beyond
+that.
 
 ```yaml
 execution_units:
   api:
-    type: lambda
-    resources:
-      memory_size: 1024
-      timeout: 60
+    type: function          # not `lambda`
+    memory: 1024            # portable
+    timeout: 60             # portable
+    aws.lambda.Function:    # provider-specific, and named so
       architectures: [arm64]
       ephemeral_storage:
         size: 2048
 ```
 
+`type: function` is what AWS Lambda, Azure Functions and GCP Cloud Functions
+have in common, and `type: container` is ECS Fargate, Azure Container Apps and
+Cloud Run. Naming the shape rather than the product means the type survives
+changing cloud; `provider:` picks. `type: lambda` is an error naming the
+replacement rather than a silent alias, because two spellings for one thing is
+exactly what this removes.
+
+*The portable layer is deliberately two settings.* An abstraction designed
+against one implementation comes out shaped like that implementation, and the
+tempting third candidates do not survive the comparison: `architectures` is
+effectively AWS-only today; `cpu` cannot be honoured on Lambda at all, which
+allocates CPU in proportion to memory; and "concurrency" names a reservation
+from a shared account pool on AWS and a plain instance ceiling on GCP -- one
+word, two blast radii. Those wait in the provider layer until a second provider
+proves they generalise. Promoting a setting later is a small change; unpicking a
+portable-looking setting that was never portable is not.
+
+*Arguments are spelled the way OpenTofu spells them; the block key is not.*
 Pulumi's AWS provider is code-generated from the Terraform AWS provider's
 schema, so `aws_lambda_function` and `aws.lambda.Function` describe the same
-arguments and differ only in case -- Terraform and OpenTofu write `memory_size`,
-Pulumi's TypeScript SDK writes `memorySize`, and Pulumi's Python and YAML SDKs
-write `memory_size` again. Nested Terraform blocks are nested objects in Pulumi.
+arguments and differ only in case -- Pulumi's own Python and YAML SDKs use the
+Terraform spelling. Taking that as canonical means the emitter does a mechanical
+case transform today and nothing at all when an OpenTofu backend arrives, so
+`memorySize:` is an error naming the portable setting it should have been. The
+block *key* is the knowing exception: `aws.lambda.Function` is Pulumi's type
+name and OpenTofu calls it `aws_lambda_function`. One mapping, in
+`resourceTypes`, buys a key that names the resource precisely and extends to a
+unit that configures more than one.
 
-Taking the Terraform spelling as canonical means the emitter does a mechanical
-case transform today and nothing at all when an OpenTofu backend arrives. The
-alternative -- accepting Pulumi's TypeScript names -- would put today's choice
-of backend into every user's configuration file, which is the opposite of what
-having a configuration file rather than a Pulumi program is for. `memorySize:`
-is therefore an error, and one that names the portable spelling rather than
-merely rejecting the key.
+*Neither layer may restate the other.* `memory_size` inside
+`aws.lambda.Function` is an error pointing at `memory:` on the unit. Allowing
+both would need a precedence rule, and a configuration file that needs one to be
+understood does not mean anything definite.
 
-Two further consequences, neither of them obvious:
-
-*Values are checked here, not at AWS.* `memory_size: 64` is a compile error
-naming the range. The alternative is packaging, provisioning and then reading a
-rejection from the Lambda API eight minutes later, phrased in terms of the API
-rather than the file the value was written in.
-
-*Arguments the compiler derives are refused, with the reason.* `runtime`,
-`handler`, `role`, `code`, `function_name` and `environment` come from the unit
-source and its declarations. Accepting an override would produce a function
-whose code and whose declared entrypoint disagree, and the failure arrives at
-the first invocation as an import error naming neither. `pulumi_params:` remains
-as the unchecked escape hatch for arguments cloudcc does not model -- in
-Pulumi's own spelling, and therefore not portable, which is now said out loud.
+*Values are checked here, not at AWS.* `memory: 64` is a compile error naming
+the range, rather than packaging, provisioning and then reading a rejection from
+the Lambda API phrased in terms of the API. Arguments the compiler derives --
+`runtime`, `handler`, `role`, `code`, `function_name`, `environment` -- are
+refused with the reason: an override would produce a function whose code and
+whose declared entrypoint disagree, failing at the first invocation with a
+message about neither. `pulumi_params:` remains the unchecked escape hatch, in
+Pulumi's spelling and therefore not portable, which is now said out loud.
 
 **`architectures` decides how the bundle is built, not just what the function
 declares.** An architecture is part of a compiled extension's filename, so a
 bundle whose wheels disagree with the function's architecture installs cleanly,
 zips cleanly, deploys cleanly, and fails on its first invocation with `No module
-named X`. Declaring `arm64` therefore also sets the unit's `uv --python-platform`
-to `aarch64-manylinux2014`. Both come from one reader, `ResourceConfig.Architecture`,
-because two places that must agree and can be edited separately eventually will
-not. This is not hypothetical: the same class of mismatch -- manylinux wheels
-for a musl runtime -- cost a CI round in this repository.
+named X`. Declaring `arm64` therefore also sets the unit's
+`uv --python-platform` to `aarch64-manylinux2014`. Both come from one reader,
+`ResourceConfig.Architecture`, because two places that must agree and can be
+edited separately eventually will not. Not hypothetical: the same class of
+mismatch -- manylinux wheels for a musl runtime -- cost a CI round here.
+
+**Writing `UnmarshalYAML` silently switched off strict field checking.**
+`KnownFields(true)` is a property of the *decoder*, and a custom unmarshaller
+decodes through `node.Decode`, which builds a fresh one without it. Collecting
+`aws.lambda.Function:` blocks therefore made `memroy: 1024` compile cleanly and
+do nothing -- the exact silent acceptance the setting exists to prevent. The
+check is now inside the method, driven off the struct's own tags. Worth
+recording because the failure was introduced by the feature that needed the
+method, and neither is visible from the other.
 
 ## Deviations from the brief
 

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cloudcompiler/cloudcc/internal/config"
 	"github.com/cloudcompiler/cloudcc/internal/diag"
 	"github.com/cloudcompiler/cloudcc/internal/ir"
 	"github.com/cloudcompiler/cloudcc/internal/lang"
@@ -176,7 +177,7 @@ func (Frontend) PackagingScript(u *ir.ExecUnit) string {
 	// the two cannot disagree: an architecture is part of a compiled
 	// extension's filename, so a bundle built for the wrong one deploys and
 	// then fails on its first invocation with a message about a missing module.
-	return runtimepy.PackagingScript(u.ID, u.Config().Type == "ecs",
+	return runtimepy.PackagingScript(u.ID, u.Config().Type == config.TypeContainer,
 		runtimepy.PlatformFor(u.Config().Architecture()))
 }
 

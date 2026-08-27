@@ -12,11 +12,15 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Capability kinds. These are the canonical names used as graph node kinds,
@@ -38,6 +42,49 @@ const (
 	// either way.
 	KindLogging = "logging"
 )
+
+// Compute types for an execution unit.
+//
+// Named for what they are rather than for what one cloud calls them. `function`
+// is AWS Lambda, Azure Functions or GCP Cloud Functions; `container` is ECS
+// Fargate, Azure Container Apps or Cloud Run. The provider chooses; the program
+// says which shape of compute it needs, which is a decision that survives
+// changing cloud.
+//
+// This is the top of a two-layer scheme. `type:` and the portable settings
+// beside it say what a unit is and how big; a block named after a provider
+// resource -- `aws.lambda.Function` -- says everything a specific cloud offers
+// beyond that. The line at which portability stops is therefore visible in the
+// file rather than something a reader has to know argument by argument.
+const (
+	TypeFunction  = "function"
+	TypeContainer = "container"
+)
+
+// renamedTypes maps a compute type that used to be spelled after one cloud's
+// product onto what it is called now.
+//
+// An error rather than a silent alias. Two spellings for one thing is exactly
+// what this scheme exists to remove, and a configuration file that still says
+// `lambda` is one whose author has not yet been told that the name now means
+// something portable.
+var renamedTypes = map[string]struct{ now, commonality string }{
+	"lambda": {TypeFunction, "AWS Lambda, Azure Functions and GCP Cloud Functions"},
+	"ecs":    {TypeContainer, "ECS Fargate, Azure Container Apps and Cloud Run"},
+}
+
+// CheckComputeType reports a compute type that has been renamed.
+func CheckComputeType(id, typ string) error {
+	if renamed, ok := renamedTypes[typ]; ok {
+		return fmt.Errorf("execution unit %q: `type: %s` is now `type: %s`. The type says "+
+			"what shape of compute a unit needs, not which product runs it -- %q is what "+
+			"%s have in common, and `provider:` picks between them. Anything specific to "+
+			"one of them goes in a block named after the resource, such as "+
+			"`aws.lambda.Function:`",
+			id, typ, renamed.now, renamed.now, renamed.commonality)
+	}
+	return nil
+}
 
 // Kinds is the canonical, sorted list of capability kinds.
 var Kinds = []string{
@@ -102,7 +149,34 @@ type ResourceConfig struct {
 	// declaration resolves to, which is the provider's business (D7). The
 	// provider validates it and reports an unknown or out-of-range argument as
 	// a compile error naming what is supported.
-	Resources map[string]any `yaml:"resources,omitempty" json:"resources,omitempty"`
+	// Memory is how many megabytes the compute gets, and Timeout how many
+	// seconds it may run for. These two are the portable layer: AWS Lambda,
+	// Azure Functions and GCP Cloud Functions each have an answer for both, so
+	// a program that sets them is not saying anything about which cloud it
+	// runs on.
+	//
+	// Deliberately only two. An abstraction designed against one implementation
+	// comes out shaped like that implementation, and the tempting third
+	// candidates do not survive the comparison: `architectures` is effectively
+	// AWS-only today, `cpu` cannot be honoured on Lambda at all because CPU is
+	// allocated in proportion to memory, and "concurrency" names a reservation
+	// from a shared account pool on AWS and a plain instance ceiling on GCP --
+	// the same word with a different blast radius. Those live in the provider
+	// layer below until a second provider proves they generalise.
+	Memory  int `yaml:"memory,omitempty" json:"memory,omitempty"`
+	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	// ProviderArgs holds arguments for a specific provider resource, keyed by
+	// that resource's type -- `aws.lambda.Function`. This is the second layer:
+	// everything the portable one deliberately does not model.
+	//
+	// Untyped because which arguments are legal depends on the resource, which
+	// is the provider's business (D7). The provider validates it and reports an
+	// unknown or out-of-range argument as a compile error naming what is
+	// supported.
+	//
+	// Populated by UnmarshalYAML from any key containing a dot, which is what
+	// distinguishes a resource type from one of the fields above.
+	ProviderArgs map[string]map[string]any `yaml:"-" json:"provider_args,omitempty"`
 	// PulumiParams is the escape hatch: deep-merged into the generated Pulumi
 	// resource args for this resource, in Pulumi's own spelling and with no
 	// checking at all.
@@ -140,7 +214,13 @@ func (rc ResourceConfig) Merge(other ResourceConfig) ResourceConfig {
 		out.RetentionDays = other.RetentionDays
 	}
 	out.EnvironmentVariables = mergeStringMap(rc.EnvironmentVariables, other.EnvironmentVariables)
-	out.Resources = DeepMerge(rc.Resources, other.Resources)
+	if other.Memory != 0 {
+		out.Memory = other.Memory
+	}
+	if other.Timeout != 0 {
+		out.Timeout = other.Timeout
+	}
+	out.ProviderArgs = mergeProviderArgs(rc.ProviderArgs, other.ProviderArgs)
 	out.PulumiParams = DeepMerge(rc.PulumiParams, other.PulumiParams)
 	return out
 }
@@ -158,12 +238,36 @@ func (rc ResourceConfig) Merge(other ResourceConfig) ResourceConfig {
 // The spelling is `architectures`, plural and a list, because that is what the
 // underlying resource calls it. AWS Lambda takes exactly one.
 func (rc ResourceConfig) Architecture() string {
-	list, ok := rc.Resources["architectures"].([]any)
-	if !ok || len(list) == 0 {
-		return ""
+	// Looked for across every provider block rather than in one named
+	// resource, because `architectures` is the argument's name wherever it
+	// appears -- the spelling comes from the resource schema, not from cloudcc
+	// -- and a unit has at most one compute resource to declare it on.
+	for _, block := range rc.ProviderArgs {
+		list, ok := block["architectures"].([]any)
+		if !ok || len(list) == 0 {
+			continue
+		}
+		if name, ok := list[0].(string); ok {
+			return name
+		}
 	}
-	name, _ := list[0].(string)
-	return name
+	return ""
+}
+
+// mergeProviderArgs deep-merges per-resource blocks, so a weaker layer can set
+// one argument of a resource and a stronger layer another.
+func mergeProviderArgs(base, over map[string]map[string]any) map[string]map[string]any {
+	if len(base) == 0 && len(over) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]any, len(base)+len(over))
+	for resource, args := range base {
+		out[resource] = DeepMerge(nil, args)
+	}
+	for resource, args := range over {
+		out[resource] = DeepMerge(out[resource], args)
+	}
+	return out
 }
 
 // KindDefault holds the provider defaults for one capability kind: the
@@ -385,4 +489,157 @@ func DeepMerge(base, over map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// UnmarshalYAML splits a declaration into its two layers.
+//
+// The loader decodes with KnownFields(true), so an unrecognised key is an error
+// -- which is what keeps a typo from being silently ignored, and what a
+// provider-args block would otherwise trip over: `aws.lambda.Function` is not a
+// field of this struct and never will be, because the set of provider resources
+// is not the config package's business.
+//
+// A key containing a dot is a provider resource type. That is not a heuristic
+// dressed up as a rule: every field below is a single lower-case word, and
+// every provider resource type is dotted -- `aws.lambda.Function`,
+// `azure.appservice.FunctionApp`, `gcp.cloudfunctionsv2.Function`. A key with
+// no dot is checked against the fields, so `memroy:` still fails and says so.
+func (rc *ResourceConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("expected a block of settings, got %s", nodeKind(node))
+	}
+
+	// A shadow type with the same fields and no method, so decoding it does not
+	// call this function again.
+	type plain ResourceConfig
+	var known plain
+	var provider map[string]map[string]any
+
+	// Two passes over the same node: one for the declared fields with strict
+	// checking, one for the dotted keys. Splitting the node first would mean
+	// rebuilding it, and a rebuilt node loses the line numbers a decode error
+	// would otherwise carry.
+	stripped := &yaml.Node{Kind: yaml.MappingNode, Tag: node.Tag, Style: node.Style}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		if !strings.Contains(key.Value, ".") {
+			// Checked here rather than left to the decoder. KnownFields is a
+			// property of the *decoder*, and node.Decode below builds a fresh
+			// one without it -- so writing this method at all switched off the
+			// strict field checking the loader asks for, and `memroy: 1024`
+			// was quietly accepted. That is precisely the silent acceptance
+			// the setting exists to prevent, so the check moves in here.
+			if !declaredFields[key.Value] {
+				return fmt.Errorf("line %d: no setting called %q. Settings are %s, and a "+
+					"key with a dot in it configures a provider resource, as in "+
+					"`aws.lambda.Function:`",
+					key.Line, key.Value, quotedFields())
+			}
+			stripped.Content = append(stripped.Content, key, value)
+			continue
+		}
+		if value.Kind != yaml.MappingNode {
+			return fmt.Errorf("%s takes a block of arguments for that resource, got %s",
+				key.Value, nodeKind(value))
+		}
+		var args map[string]any
+		if err := value.Decode(&args); err != nil {
+			return fmt.Errorf("%s: %w", key.Value, err)
+		}
+		if provider == nil {
+			provider = map[string]map[string]any{}
+		}
+		provider[key.Value] = args
+	}
+
+	if err := stripped.Decode(&known); err != nil {
+		return err
+	}
+	*rc = ResourceConfig(known)
+	rc.ProviderArgs = provider
+	return nil
+}
+
+// MarshalYAML writes the two layers back out as one block, so the resolved
+// configuration cloudcc emits round-trips through the loader above.
+func (rc ResourceConfig) MarshalYAML() (any, error) {
+	type plain ResourceConfig
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	if err := enc.Encode(plain(rc)); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+
+	var out yaml.Node
+	if err := yaml.Unmarshal(buf.Bytes(), &out); err != nil {
+		return nil, err
+	}
+	// An empty declaration encodes as the null document, which has no content
+	// to append to.
+	if len(out.Content) == 0 || out.Content[0].Kind != yaml.MappingNode {
+		if len(rc.ProviderArgs) == 0 {
+			return plain(rc), nil
+		}
+		out = yaml.Node{Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
+	}
+	mapping := out.Content[0]
+
+	// Sorted, because the generated file is compared byte for byte (D18) and
+	// Go map iteration is not.
+	resources := make([]string, 0, len(rc.ProviderArgs))
+	for name := range rc.ProviderArgs {
+		resources = append(resources, name)
+	}
+	sort.Strings(resources)
+	for _, name := range resources {
+		var value yaml.Node
+		if err := value.Encode(rc.ProviderArgs[name]); err != nil {
+			return nil, err
+		}
+		mapping.Content = append(mapping.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: name}, &value)
+	}
+	return mapping, nil
+}
+
+func nodeKind(n *yaml.Node) string {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return "a single value"
+	case yaml.SequenceNode:
+		return "a list"
+	case yaml.MappingNode:
+		return "a block"
+	}
+	return "something else"
+}
+
+// declaredFields is the set of yaml keys ResourceConfig declares, derived from
+// the struct so it cannot drift from it.
+var declaredFields = func() map[string]bool {
+	out := map[string]bool{}
+	t := reflect.TypeOf(ResourceConfig{})
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("yaml")
+		if name, _, _ := strings.Cut(tag, ","); name != "" && name != "-" {
+			out[name] = true
+		}
+	}
+	return out
+}()
+
+// quotedFields lists the declared settings for a diagnostic.
+func quotedFields() string {
+	names := make([]string, 0, len(declaredFields))
+	for name := range declaredFields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for i, n := range names {
+		names[i] = "`" + n + "`"
+	}
+	return strings.Join(names, ", ")
 }
