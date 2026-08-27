@@ -269,12 +269,25 @@ pass "L5 the write reached DynamoDB"
 # invoked by any test at all, which is how four calls to a method its client
 # does not have survived in the examples.
 #
-# Derived from the stack rather than named per example: an application that
-# exported a file-store bucket has a unit writing to one, and this waits for it.
+# Whether there *is* a subscriber comes from the IR, not from the stack.
+#
+# This used to read "an application that exported a file-store bucket has a unit
+# writing to one", which is not the same claim and is not true: examples/mixed
+# has a bucket its own API writes to on demand, and no topic at all. Adding that
+# bucket made this step wait fifty seconds for an event nobody published and
+# then blame the handler -- a failure message pointing at a unit that does not
+# subscribe to anything.
+#
+# The compiler already knows. A `subscribes` edge is the precondition for the
+# sentence below to mean anything.
+SUBSCRIBERS="$("$WORK/cloudcc" --dump-ir "$REPO_ROOT/examples/$EXAMPLE" 2>/dev/null \
+               | jq -r '[.edges[]? | select(.kind=="subscribes")] | length' 2>/dev/null || echo 0)"
 FS_BUCKET="$(pulumi stack output --json --stack "$STACK" \
              | jq -r 'to_entries[] | select(.key | test("^CLOUDCC_FS_.*_BUCKET$")) | .value' \
              | head -1)"
-if [ -n "$FS_BUCKET" ] && skip_unless_service s3; then
+if [ "${SUBSCRIBERS:-0}" -eq 0 ]; then
+  log "no unit subscribes to a topic in this application; nothing to wait for"
+elif [ -n "$FS_BUCKET" ] && skip_unless_service s3; then
   log "waiting for the subscriber to write to $FS_BUCKET"
   OBJECTS=0
   for _ in $(seq 1 20); do
