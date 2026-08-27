@@ -48,7 +48,7 @@ cleanup() {
   # The k3s container outlives the stack it belonged to: deleting the EKS
   # cluster is what removes it, and a destroy that failed would otherwise leave
   # a Kubernetes cluster running until somebody noticed.
-  docker ps --format '{{.Names}}' | grep '^ministack-eks-' | while read -r c; do
+  for c in $(docker ps -aq --filter "ancestor=rancher/k3s" 2>/dev/null); do
     docker rm -f "$c" >/dev/null 2>&1 || true
   done
   [ "$KEEP" = "0" ] && rm -rf "$WORK" || log "workdir kept at $WORK"
@@ -99,7 +99,7 @@ purge_previous() {
       ;;
     esac
   done
-  docker ps -aq --filter "name=ministack-eks-" | while read -r c; do
+  for c in $(docker ps -aq --filter "ancestor=rancher/k3s" 2>/dev/null); do
     docker rm -f "$c" >/dev/null 2>&1 || true
   done
 }
@@ -174,16 +174,24 @@ ECR_URL="$(pulumi stack output --json --stack ministack \
   | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_ECR_")) | .value' | head -1)"
 [ -n "$ECR_URL" ] || fail "the stack exported no ECR repository URL"
 
-K3S="ministack-eks-${AWS_REGION}-${CLUSTER}"
-docker inspect "$K3S" >/dev/null 2>&1 \
-  || fail "no k3s container for $CLUSTER. The emulator needs the Docker socket:
-  docker run ... -v /var/run/docker.sock:/var/run/docker.sock ministackorg/ministack
-  Without it the cluster is a stub: ACTIVE, with an endpoint nothing listens on."
-pass "L4 eks: backed by a real Kubernetes at $K3S"
+# The Kubernetes container, found by the port the cluster says it is on rather
+# than by name.
+#
+# Both emulators back a cluster with k3s in a container and neither names it the
+# same way -- ministack uses ministack-eks-<region>-<cluster>, LocalStack uses
+# something else again. The endpoint is the one thing both report and both mean:
+# whatever is publishing that port is the cluster.
+ENDPOINT="$(aws_local eks describe-cluster --name "$CLUSTER" --query 'cluster.endpoint' --output text)"
+PORT="${ENDPOINT##*:}"
+[ -n "$PORT" ] && [ "$PORT" != "$ENDPOINT" ] || fail "the cluster endpoint names no port: $ENDPOINT"
 
-# k3s's own kubeconfig, with the address it is published at rather than the one
-# it thinks it has.
-PORT="$(docker port "$K3S" 6443/tcp | head -1 | sed 's/.*://')"
+K3S="$(docker ps --filter "publish=$PORT" --format '{{.Names}}' | head -1)"
+[ -n "$K3S" ] \
+  || fail "the cluster says it is at $ENDPOINT, and no container publishes port $PORT.
+  The emulator needs the Docker socket to back a cluster with a real Kubernetes:
+      docker run ... -v /var/run/docker.sock:/var/run/docker.sock <emulator>
+  Without it the cluster is a stub -- ACTIVE, with an endpoint nothing listens on."
+pass "L4 eks: backed by a real Kubernetes at $K3S (port $PORT)"
 KUBECONFIG_FILE="$WORK/kubeconfig"
 docker exec "$K3S" cat /etc/rancher/k3s/k3s.yaml 2>/dev/null \
   | sed "s#https://127.0.0.1:6443#https://127.0.0.1:$PORT#" > "$KUBECONFIG_FILE"

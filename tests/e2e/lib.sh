@@ -478,7 +478,12 @@ pulumi_configure_emulator() {
   pulumi config set --plaintext aws:secretKey "$AWS_SECRET_ACCESS_KEY" --stack "$stack" >/dev/null
   pulumi config set aws:skipCredentialsValidation true --stack "$stack" >/dev/null
   pulumi config set aws:skipMetadataApiCheck true --stack "$stack" >/dev/null
-  pulumi config set aws:skipRequestingAccountId true --stack "$stack" >/dev/null
+  # Not skipRequestingAccountId. Skipping it leaves the provider with an empty
+  # account id, which ministack ignored and LocalStack does not: SNS answers
+  # GetTopicAttributes with "'' is not a valid AWS account ID" and the stack
+  # fails on its first topic. Both emulators answer STS, so there is nothing to
+  # skip -- asking is both faithful and cheap.
+  pulumi config set aws:skipRequestingAccountId false --stack "$stack" >/dev/null
   pulumi config set aws:s3UsePathStyle true --stack "$stack" >/dev/null
   local service
   for service in "${CLOUDCC_E2E_SERVICES[@]}"; do
