@@ -228,17 +228,18 @@ func TestResourcesSomewhereNothingReadsItIsRefused(t *testing.T) {
 		}
 	})
 
-	t.Run("on a container unit", func(t *testing.T) {
+	// Execution units are deliberately not swept: both compute types read
+	// configuration, and each validates its own where it is resolved. A block
+	// written for the wrong type is caught there instead -- see
+	// TestAContainerRefusesTheFunctionsResourceBlock -- so that there is one
+	// place per type rather than a second opinion here to keep in step.
+	t.Run("an execution unit is left to its own type", func(t *testing.T) {
 		app := &config.App{
 			App:            "shop",
 			ExecutionUnits: map[string]config.ResourceConfig{"reporter": {Type: config.TypeContainer, ProviderArgs: sized}},
 		}
-		err := CheckConfigurationIsSupported(app)
-		if err == nil {
-			t.Fatal("a resources block on an ECS unit was accepted")
-		}
-		if !strings.Contains(err.Error(), "cpu and memory units") {
-			t.Errorf("the error does not say why the arguments differ: %v", err)
+		if err := CheckConfigurationIsSupported(app); err != nil {
+			t.Errorf("a unit's own configuration was refused by the placement check: %v", err)
 		}
 	})
 

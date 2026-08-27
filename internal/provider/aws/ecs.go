@@ -73,12 +73,20 @@ func (r *Resolver) ecsServiceUnit(u *ir.ExecUnit) error {
 	}, nil)
 	r.Program.Resolve(u.Key(), taskRole)
 
-	task := ir.NewResource(KindECSTask, u.ID, "aws.ecs.TaskDefinition", map[string]any{
+	// 0.25 vCPU and 512 MB is Fargate's smallest configuration, and the
+	// defaults a unit that says nothing gets. `memory:` on the unit raises it,
+	// and `aws.ecs.TaskDefinition: {cpu: N}` raises the other half.
+	cpu, memory, taskExtra, err := TaskDefinitionArgs(u.ID, u.Config(), 256, 512)
+	if err != nil {
+		return err
+	}
+
+	taskProps := map[string]any{
 		"family":                  sanitize.LambdaFunction(r.App, u.ID),
 		"requiresCompatibilities": []any{"FARGATE"},
 		"networkMode":             "awsvpc",
-		"cpu":                     "256",
-		"memory":                  "512",
+		"cpu":                     cpu,
+		"memory":                  memory,
 		"executionRoleArn":        ir.Ref{Key: execRoleKey, Prop: "arn"},
 		"taskRoleArn":             ir.Ref{Key: taskRoleKey, Prop: "arn"},
 		"containerDefinitions": ir.JSONDoc{Value: []any{map[string]any{
@@ -98,7 +106,14 @@ func (r *Resolver) ecsServiceUnit(u *ir.ExecUnit) error {
 				},
 			},
 		}}},
-	}, nil)
+	}
+	// Layered over, not merged into: what the unit asked for is the answer to
+	// the same question the default was only guessing at.
+	for k, v := range taskExtra {
+		taskProps[k] = v
+	}
+
+	task := ir.NewResource(KindECSTask, u.ID, "aws.ecs.TaskDefinition", taskProps, nil)
 	r.Program.Resolve(u.Key(), task)
 
 	service := ir.NewResource(KindECSService, u.ID, "aws.ecs.Service", map[string]any{

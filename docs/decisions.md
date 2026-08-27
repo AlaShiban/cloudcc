@@ -176,6 +176,35 @@ word, two blast radii. Those wait in the provider layer until a second provider
 proves they generalise. Promoting a setting later is a small change; unpicking a
 portable-looking setting that was never portable is not.
 
+*A portable setting still has to be legal on the host it lands on, and only the
+intersection is accepted.* `memory:` means the same thing on a function and on a
+container -- megabytes the application gets -- which is what makes it portable.
+Which *values* are legal is not portable at all. A Lambda takes anything from
+128 to 10240 MB in 1 MB steps. Fargate takes a short ladder, and each rung is
+only available with certain amounts of CPU: 512 MB exists only at 0.25 vCPU, and
+3072 MB does not exist there at all. So `memory: 1024` compiles as either type,
+`memory: 128` compiles only as a function, and `memory: 1500` compiles as
+neither -- each with a message naming what the target does take.
+
+The alternative is letting AWS answer, which it does at deploy time with `No
+Fargate configuration exists for given values`: a sentence that names neither
+number and suggests nothing. The table is in `fargateSizes`, and a test checks
+it is internally consistent, because every one of those diagnostics reads from
+it and a bad row would produce confident nonsense.
+
+Fargate also insists on a CPU alongside the memory and infers neither. A unit
+that sets only `memory:` gets the smallest CPU that can hold it -- the cheapest
+legal answer, written into the generated project where it can be read -- and
+`aws.ecs.TaskDefinition: {cpu: N}` says otherwise. A CPU that cannot hold the
+requested memory is an error naming what that CPU does take, and pointing out
+what leaving it out would have chosen.
+
+*`timeout:` is refused on a container, with the reason.* A timeout is how long
+one invocation may run before it is killed, and a service is not invoked -- it
+stays up. Accepting it would be accepting a setting with nowhere to go. The
+asymmetry is honest: two portable settings, one of which applies to one of the
+two compute types.
+
 *Arguments are spelled the way OpenTofu spells them; the block key is not.*
 Pulumi's AWS provider is code-generated from the Terraform AWS provider's
 schema, so `aws_lambda_function` and `aws.lambda.Function` describe the same

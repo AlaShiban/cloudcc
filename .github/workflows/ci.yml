@@ -107,6 +107,24 @@ jobs:
           cd /tmp/diagram-check/petstore && /tmp/diagrams-venv/bin/python architecture.py
           test -s petstore-architecture.png
 
+      # Every argument name in the two provider-args tables is checked against
+      # Pulumi's own type definitions, which is the only thing that actually
+      # proves them -- `memorySize` against `memory_size`, `ephemeralStorage`
+      # against `ephemeral_storage`, `sizeInGib` against `size_in_gib`. A wrong
+      # name compiles, emits, deploys and is silently ignored by the provider.
+      #
+      # kitchen-sink because it is the only example with both compute types, and
+      # the emulator implements neither ECS nor an ALB, so it is never deployed
+      # by the integration job below. Without this step its task definition
+      # arguments have no check at all beyond a golden file that would happily
+      # pin a misspelling.
+      - name: The generated project type-checks against Pulumi's types
+        run: |
+          go run ./cmd/cloudcc ./examples/kitchen-sink -o /tmp/typecheck
+          cd /tmp/typecheck/kitchen-sink
+          npm install --silent --no-audit --no-fund
+          ./node_modules/.bin/tsc --noEmit
+
   integration:
     name: provisioning + functional (emulator)
     runs-on: ubuntu-latest

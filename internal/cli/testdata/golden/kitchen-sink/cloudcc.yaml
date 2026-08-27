@@ -29,8 +29,13 @@ defaults:
 execution_units:
   api:
     type: function
+    memory: 1024
+    timeout: 30
   reporter:
     type: container
+    memory: 2048
+    aws.ecs.TaskDefinition:
+      cpu: 512
 exposed:
   reporter-web:
     type: alb

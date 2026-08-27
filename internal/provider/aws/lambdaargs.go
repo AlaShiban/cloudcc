@@ -528,33 +528,19 @@ func CheckConfigurationIsSupported(app *config.App) error {
 		sort.Strings(ids)
 		for _, id := range ids {
 			if what := configured(s.entries[id]); what != "" {
-				return fmt.Errorf("%s %q: %s is only supported on execution units of type "+
-					"%q. Nothing would read it here, so it would be a setting that looks "+
-					"applied and is not", s.label, id, what, config.TypeFunction)
+				return fmt.Errorf("%s %q: %s is only supported on execution units. Nothing "+
+					"would read it here, so it would be a setting that looks applied and is "+
+					"not", s.label, id, what)
 			}
 		}
 	}
 
-	units := make([]string, 0, len(app.ExecutionUnits))
-	for id := range app.ExecutionUnits {
-		units = append(units, id)
-	}
-	sort.Strings(units)
-	for _, id := range units {
-		what := configured(app.ExecutionUnits[id])
-		if what == "" {
-			continue
-		}
-		// Resolved rather than as-written: the type may come from a defaults
-		// layer rather than from the unit's own entry.
-		if resolved := app.Lookup(config.KindExecutionUnit, id).Type; resolved != config.TypeFunction {
-			return fmt.Errorf("execution unit %q is type %q, and %s is only supported on type "+
-				"%q. A container service is sized in cpu and memory units against a task "+
-				"definition, not in megabytes of function memory, so accepting these here "+
-				"would mean accepting settings that cannot be applied",
-				id, resolved, what, config.TypeFunction)
-		}
-	}
+	// Execution units are not swept here. Both compute types read configuration
+	// now, and what each accepts -- which resource blocks, which portable
+	// settings, which values -- is decided where that type is resolved, in
+	// LambdaFunctionArgs and TaskDefinitionArgs. A second opinion in this
+	// function would be one more place to keep in step, and the one most
+	// likely to be forgotten when a type gains a setting.
 	return nil
 }
 

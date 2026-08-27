@@ -1,11 +1,28 @@
 app: kitchen-sink
 provider: aws
 
+# `type:` names the shape of compute, not the product. `memory:` beside it is
+# portable and means the same thing on both -- megabytes the application gets --
+# but which *values* are legal is not portable at all, and each is checked
+# against the host it lands on.
 execution_units:
   api:
     type: function
+    # A function takes any size from 128 MB up, in 1 MB steps.
+    memory: 1024
+    timeout: 30
   reporter:
     type: container
+    # The same setting, and a value Fargate actually has. It takes 512, then
+    # multiples of 1024 -- so `memory: 1500` here is a compile error, where on
+    # the api unit above it would be fine. Fargate also insists on a CPU to go
+    # with it; leaving it out picks the smallest that fits, which for 2048 MB is
+    # 256 CPU units.
+    memory: 2048
+    aws.ecs.TaskDefinition:
+      # Say it explicitly when the default is too little CPU for the work,
+      # rather than inflating memory to buy CPU by accident.
+      cpu: 512
 
 exposed:
   shop-api:
