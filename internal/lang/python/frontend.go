@@ -152,8 +152,14 @@ func (Frontend) UnitFiles(u *ir.ExecUnit, opts lang.UnitOptions) (map[string][]b
 	}
 
 	add := append([]string{}, runtimepy.ShimRequirements["base"]...)
-	if u.ASGIApp != "" && !opts.Container {
-		add = append(add, runtimepy.ShimRequirements["asgi"]...)
+	if u.ASGIApp != "" {
+		// Which one depends on how the unit is run, not on what it is: a
+		// Lambda needs an adapter and a container needs a server.
+		key := "asgi"
+		if opts.Container {
+			key = "asgi-container"
+		}
+		add = append(add, runtimepy.ShimRequirements[key]...)
 	}
 	for _, library := range opts.Libraries {
 		add = append(add, runtimepy.ShimRequirements[library]...)

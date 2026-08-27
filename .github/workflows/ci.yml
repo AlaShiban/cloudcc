@@ -216,6 +216,17 @@ jobs:
       - name: Provisioning and functional tests (cross-unit calls and messages)
         run: ./tests/e2e/nomnom.sh
 
+      # A container unit on Kubernetes. The emulator backs an EKS cluster with a
+      # real k3s container, so this is not a mock: pulumi talks to an actual API
+      # server, and the pod it describes is scheduled and pulled and started.
+      #
+      # It needs the Docker socket, which the service container above already
+      # mounts -- without it the emulator answers create-cluster with an ACTIVE
+      # cluster whose endpoint nothing listens on, and the test says so rather
+      # than timing out on a stub.
+      - name: Provisioning and functional tests (Kubernetes)
+        run: ./tests/e2e/kubernetes.sh
+
       # Every example, run as written and again after compiling, with the same
       # requests replayed against both. The generated-program harness below
       # covers more shapes; this covers the code a newcomer actually reads, and

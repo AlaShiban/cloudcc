@@ -213,7 +213,14 @@ func render(name string, data any) ([]byte, error) {
 // compiled bundle holds the same client the source did.
 var ShimRequirements = map[string][]string{
 	"base": {"boto3>=1.34"},
-	"asgi": {"mangum>=0.17"},
+	// The two ways an ASGI application is served, and they are not the same
+	// dependency. On Lambda the handler adapts the app to an invocation, and
+	// there is no server; in a container there is no invocation and something
+	// has to listen on a port. The generated Dockerfile runs uvicorn, so the
+	// bundle has to contain one -- without this the image builds, pushes,
+	// deploys, and the container exits 127 with "uvicorn: not found".
+	"asgi":           {"mangum>=0.17"},
+	"asgi-container": {"uvicorn>=0.30"},
 	// Keyed by client library rather than by capability, because the capability
 	// does not say enough: an async SQLAlchemy engine needs an async driver,
 	// and a bundle without one fails on its first connection.

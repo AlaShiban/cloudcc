@@ -450,6 +450,7 @@ probe_service() {
     apigatewayv2)   aws_local apigatewayv2 get-apis           >/dev/null 2>&1 ;;
     secretsmanager) aws_local secretsmanager list-secrets     >/dev/null 2>&1 ;;
     logs)           aws_local logs describe-log-groups        >/dev/null 2>&1 ;;
+    eks)            aws_local eks list-clusters               >/dev/null 2>&1 ;;
     *)              return 1 ;;
   esac
 }

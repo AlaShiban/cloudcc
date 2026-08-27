@@ -40,6 +40,20 @@ type JSONDoc struct {
 // Lit builds an Interp from alternating literal and reference parts.
 func Lit(parts ...any) Interp { return Interp{Parts: parts} }
 
+// EnvOverride is a value the environment may replace: `process.env.VAR` when
+// that is set, and Fallback otherwise.
+//
+// The one seam a generated program has for an emulator it was not written for.
+// It exists for the same reason the harness redirects a database's host and
+// port: the emulator provisions the resource and does not serve the access path
+// the real one does, so something has to substitute -- and doing it here, in a
+// named variable the generated source shows, is better than a harness rewriting
+// the program it is meant to be testing.
+type EnvOverride struct {
+	Var      string
+	Fallback any
+}
+
 // ContainsRef reports whether v holds a Ref anywhere inside it. The IaC
 // backend uses this to decide whether a property needs to be resolved through
 // an apply.
@@ -47,6 +61,8 @@ func ContainsRef(v any) bool {
 	switch typed := v.(type) {
 	case Ref:
 		return true
+	case EnvOverride:
+		return ContainsRef(typed.Fallback)
 	case Interp:
 		for _, p := range typed.Parts {
 			if ContainsRef(p) {

@@ -284,3 +284,32 @@ func TestEveryPythonClientLibraryDeclaresItsDistribution(t *testing.T) {
 		}
 	}
 }
+
+// An ASGI application needs a server in a container and an adapter on Lambda,
+// and they are different packages.
+//
+// The generated Dockerfile runs uvicorn. Nothing installed one, so a container
+// unit's image built, pushed, deployed, and the container exited 127 with
+// "uvicorn: not found" -- which nobody saw, because until there was a
+// Kubernetes test no container unit had ever actually been started.
+func TestAnASGIUnitGetsWhateverItsPlatformNeedsToServeIt(t *testing.T) {
+	container := ShimRequirements["asgi-container"]
+	if len(container) == 0 {
+		t.Fatal("a containerised ASGI unit has no server; its image will exit 127")
+	}
+	if !strings.Contains(strings.Join(container, " "), "uvicorn") {
+		t.Errorf("the container requirements are %v, and the generated Dockerfile runs uvicorn",
+			container)
+	}
+
+	lambda := ShimRequirements["asgi"]
+	if !strings.Contains(strings.Join(lambda, " "), "mangum") {
+		t.Errorf("a Lambda ASGI unit needs an adapter, got %v", lambda)
+	}
+
+	// Not the same answer for both: a Lambda that shipped a web server would
+	// carry a dependency nothing runs, and the container's failure is worse.
+	if strings.Join(container, " ") == strings.Join(lambda, " ") {
+		t.Error("the two ways of serving an ASGI app resolved to the same dependency")
+	}
+}

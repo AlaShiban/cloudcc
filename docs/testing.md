@@ -205,7 +205,8 @@ starts skipping, that is a signal, not noise.
 | `static_unit` | S3 website | yes | object fetch |
 | `expose` | API Gateway v2 | probe-dependent | via local uvicorn/Mangum instead |
 | `execution_unit` (lambda) | Lambda | probe-dependent | direct handler invoke |
-| `execution_unit` (ecs) | ECS Fargate | preview only | Dockerfile shape only |
+| `execution_unit` (container, serverless) | ECS Fargate | preview only | Dockerfile shape only |
+| `execution_unit` (container, kubernetes) | EKS | yes, a real k3s | pod runs, Service routes |
 | `persist(create_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
 | `persist(create_async_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
 | `persist(Redis())` | ElastiCache | yes | yes, against a real Redis in Docker |
@@ -345,3 +346,44 @@ Two jobs, in `.github/workflows/ci.yml`:
 
 A nightly job can run the same scripts against real AWS by leaving
 `MINISTACK_ENDPOINT` unset; it is off by default because it costs money.
+
+
+## Kubernetes on the emulator
+
+`tests/e2e/kubernetes.sh` deploys a container unit with `platform: kubernetes`.
+This is the least mocked thing in the suite: the emulator backs an EKS cluster
+with a real `rancher/k3s` container, so `pulumi up` talks to an actual API
+server, and the pod it describes is scheduled, pulled and started.
+
+**It needs the Docker socket.** Without
+`-v /var/run/docker.sock:/var/run/docker.sock`, the emulator answers
+`create-cluster` with an ACTIVE cluster whose endpoint nothing listens on, and
+its log says `EKS: Docker unavailable -- cluster created without k3s backend`.
+The harness detects that and says so rather than timing out against a stub.
+
+Two things the emulator provisions but cannot serve, both compensated in the
+harness rather than pretended away:
+
+*Credentials.* k3s authenticates its own client certificates. The token
+`aws eks get-token` returns -- which is what the generated kubeconfig asks for,
+and what is correct against AWS -- is rejected. So the harness passes k3s's own
+kubeconfig through `CLOUDCC_KUBECONFIG`, the one seam the generated program has
+for this. The same bargain as an RDS instance with no engine behind it: the
+shape of the binding is tested and the address in it is not.
+
+*The registry.* ECR hands out `000000000000.dkr.ecr.<region>.amazonaws.com`
+URLs, which resolve nowhere. The emulator does serve a real registry API on its
+own endpoint, though, so the harness writes a k3s `registries.yaml` mirroring
+that hostname to it and pushes the image there. The pod then pulls the image the
+way it would from a real ECR, which is the part worth testing -- rather than
+side-loading it into the node and proving nothing about the pull.
+
+What remains unverified, and is reported as such rather than failed: a
+`LoadBalancer` Service is never given an external address, because there is no
+cloud load balancer. The Service exists and routes; the test reaches it by
+port-forward, which is what the address would have been for.
+
+What is not covered at all: a pod's AWS identity. IRSA is not emitted, so a
+Kubernetes unit that reaches an AWS store is warned about at compile time. On
+the emulator it would work anyway -- nothing there authenticates -- which is
+exactly why the warning is at compile time and not left to a test to discover.

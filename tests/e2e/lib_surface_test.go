@@ -116,8 +116,23 @@ func TestEveryPackagingHarnessBuildsForTheEmulatorsRuntime(t *testing.T) {
 	}
 	packages := regexp.MustCompile(`(?m)^[^#\n]*\./bin/package\.sh`)
 
+	// Harnesses that package no Lambda bundle. The probe is about uv resolving
+	// wheels for a zip that a Lambda runtime will unpack; a container unit's
+	// dependencies are installed by pip *inside* the image, for the image's own
+	// platform, so there is nothing here for it to get wrong.
+	//
+	// Listed rather than inferred, because "does this script deploy a Lambda"
+	// is not something a grep can answer, and a heuristic that guessed wrong
+	// would either nag forever or stop checking the harnesses that need it.
+	containerOnly := map[string]string{
+		"kubernetes.sh": "deploys one container unit; its wheels are installed by pip in the image",
+	}
+
 	for _, path := range scripts {
 		if filepath.Base(path) == "lib.sh" {
+			continue
+		}
+		if _, exempt := containerOnly[filepath.Base(path)]; exempt {
 			continue
 		}
 		body, err := os.ReadFile(path)

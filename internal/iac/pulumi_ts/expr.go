@@ -65,6 +65,12 @@ func (v *varNamer) value(x any) (string, error) {
 			return name, nil
 		}
 		return name + "." + typed.Prop, nil
+	case ir.EnvOverride:
+		fallback, err := v.value(typed.Fallback)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("process.env.%s ?? %s", typed.Var, fallback), nil
 	case ir.Interp:
 		return v.interp(typed)
 	case ir.JSONDoc:

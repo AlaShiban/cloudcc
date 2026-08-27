@@ -1,0 +1,22 @@
+# A container unit on Kubernetes.
+#
+# `type:` says what shape of compute this needs and `platform:` says what runs
+# it. Both are portable: a container is a container on every cloud, and
+# `kubernetes` is EKS here, GKE on Google and AKS on Azure. Dropping the
+# platform line moves this to the provider's own container service -- Fargate
+# here -- and nothing else in the file changes.
+app: k8s-web
+provider: aws
+
+execution_units:
+  web:
+    type: container
+    platform: kubernetes
+    # The same portable setting that sizes a function or a Fargate task. On
+    # Kubernetes it becomes the pod's memory request and limit, in the units
+    # Kubernetes writes them.
+    memory: 512
+
+exposed:
+  web-front:
+    type: alb
