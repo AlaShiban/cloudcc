@@ -227,9 +227,77 @@ problem.
 4. ~~N5~~ — done
 5. ~~N6~~ — done
 
-The managed-secret branch §4 leaves open is still open: `petstore-node` has no
+~~The managed-secret branch §4 leaves open is still open: `petstore-node` has no
 database, so N4 did not exercise it. An example with a `persist`ed pg client
-would close it.
+would close it.~~ — closed. `examples/mixed` now declares a `pg` Pool, and the
+compiled run fetches the managed credential through `orm_url.js`'s async
+provider against a real Postgres.
+
+---
+
+## Round: client-library breadth in the examples
+
+The examples used seven of the fifteen client libraries the compiler can
+detect. Every relational and cache path in them was synchronous, no example
+declared a Node database or cache at all, and the Node ORM shims were verified
+only by `tests/e2e/node-clients.sh` — which proves a shim can connect, not that
+a program using one survives a compile and a deploy.
+
+**What changed.** `examples/mixed` grew from one store to four: a `pg` Pool, an
+`ioredis` client, an `S3Client` and the DynamoDB client it already had, with
+`worker.py` declaring three of the same four ids through a SQLAlchemy engine, a
+`pathlib.Path` and a boto3 Table. One Postgres instance, reached through a
+connection pool from Node and an ORM from Python. `examples/petstore-multi`
+became the asynchronous half of the pair: its api unit declares
+`create_async_engine` and `redis.asyncio.Redis`, and its worker declares
+`create_engine` against a second database — one application whose two Lambdas
+hold different client libraries for the same capability. `docs/testing.md` has
+the library-to-example table.
+
+**Four defects found, each on the real environment.**
+
+1. **`redis.asyncio.Redis` compiled to the synchronous client.** Detection
+   reduced a constructor to its final attribute, so both Redis libraries were
+   "Redis"; `LibRedisPyAsync` was declared and never produced, and
+   `redis_.py`'s `connect` had no `library` argument. A program awaiting a
+   compiled cache call would have got `TypeError: object bool can't be used in
+   'await' expression`. Fixed by resolving the constructor's full dotted path
+   through the file's imports (`qualifiedConstructor` + `clientOrigins`) and
+   refining the client in `sdkdetect.RefineClient`. `redis-py-async` also had
+   no `ShimRequirements` entry, so its bundle would have shipped without redis
+   at all; a test now requires an entry for every library the compiler can name.
+
+2. **The load generator measured itself.** Go's default HTTP client keeps two
+   idle connections per host, so above two sessions in flight nearly every
+   request opened a fresh socket — and against localhost that exhausts the
+   ephemeral port range in seconds. `examples/mixed` produced 2.2 million
+   "connection refused" results and a table of reassuring 1.00x ratios, because
+   both halves hit the same wall. Fixed in `newClient`, with a test that counts
+   connections per request and fails at 0.35.
+
+3. **A run that delivered nothing reported every edge as carried.** The
+   connectedness checklist reads state out of the emulator, and state outlives
+   the run that wrote it — so a run whose requests never arrived found a
+   previous run's rows and passed. `Report.Undelivered()` now voids a run below
+   a 50% delivered rate, and both `-attach` and `-compare` refuse it.
+
+4. **Two identical failures passed the differential suite.** An async ORM
+   session that expires attributes on commit raised `MissingGreenlet` on every
+   write in *both* halves, so the diff matched and `examples.sh` reported the
+   example green. It now fails any run containing a 5xx, whether or not the two
+   halves agree on it. Proven by reintroducing the bug.
+
+Two smaller ones, both in the harness: buckets were created but never emptied,
+unlike tables, so the uncompiled half read objects a previous run had left
+(`ensure_local_bucket`); and Postgres databases came from one `POSTGRES_DB` on
+first container start, so an application declaring two could not be tested
+(`scenario_databases`, driven by the scenario).
+
+**What the examples now show that they did not.** `create_async_engine` needs
+`+asyncpg` spelled in the source URL: uncompiled there is no shim to swap the
+driver, and SQLAlchemy refuses a bare `postgresql://`. And Express 4 does not
+catch a rejected promise from an async handler — Node exits the process — so
+`examples/mixed` wraps its handlers, which is what killed its first load run.
 
 ---
 

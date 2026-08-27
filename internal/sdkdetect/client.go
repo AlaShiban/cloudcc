@@ -118,6 +118,38 @@ func LookupClient(language, constructor string) (Client, bool) {
 	return c, ok
 }
 
+// asyncModules are import paths whose objects are awaitable, keyed by the
+// synchronous library they would otherwise be mistaken for.
+//
+// Two libraries ship both halves under one constructor name. SQLAlchemy gives
+// them separate constructors -- create_engine against create_async_engine -- so
+// the table above already tells them apart; redis-py does not, and
+// `redis.asyncio.Redis` reduces to the same "Redis" as the synchronous one.
+var asyncModules = map[string]struct {
+	prefix  string
+	library string
+}{
+	LibRedisPy: {"redis.asyncio", LibRedisPyAsync},
+}
+
+// RefineClient upgrades a client to its asynchronous variant when the fully
+// qualified constructor says the program reached for one.
+//
+// qualified is the dotted path with its head expanded through the file's
+// imports, or "" when the caller could not resolve it -- in which case the
+// table's answer stands unchanged.
+func RefineClient(c Client, qualified string) Client {
+	rule, ok := asyncModules[c.Library]
+	if !ok || qualified == "" {
+		return c
+	}
+	if qualified == rule.prefix || strings.HasPrefix(qualified, rule.prefix+".") {
+		c.Library = rule.library
+		c.Why = "an async " + strings.TrimPrefix(c.Why, "a ")
+	}
+	return c
+}
+
 // KnownClients lists the constructors a language recognises, sorted, for the
 // diagnostic shown when one is not.
 func KnownClients(language string) []string {

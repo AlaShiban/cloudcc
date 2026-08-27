@@ -108,92 +108,8 @@ const auditKeySecret = new aws.secretsmanager.Secret("auditKey", {
     recoveryWindowInDays: 0,
 });
 
-const workerPolicy = new aws.iam.RolePolicy("worker", {
-    name: "petstore-multi-worker-policy",
-    policy: pulumi.jsonStringify({
-    Statement: [
-        {
-            Action: [
-                "s3:GetObject",
-                "s3:PutObject",
-                "s3:DeleteObject",
-                "s3:ListBucket",
-            ],
-            Effect: "Allow",
-            Resource: [
-                petAuditBucket.arn,
-                pulumi.interpolate`${petAuditBucket.arn}/*`,
-            ],
-        },
-        {
-            Action: [
-                "dynamodb:GetItem",
-                "dynamodb:PutItem",
-                "dynamodb:DeleteItem",
-                "dynamodb:Query",
-                "dynamodb:Scan",
-                "dynamodb:BatchGetItem",
-                "dynamodb:BatchWriteItem",
-            ],
-            Effect: "Allow",
-            Resource: [
-                petsByOwnerTable.arn,
-                pulumi.interpolate`${petsByOwnerTable.arn}/index/*`,
-            ],
-        },
-        {
-            Action: [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:PutSecretValue",
-            ],
-            Effect: "Allow",
-            Resource: [
-                auditKeySecret.arn,
-            ],
-        },
-    ],
-    Version: "2012-10-17",
-}),
-    role: workerRole.id,
-});
-
 const petEventsTopic = new aws.sns.Topic("petEvents", {
     name: "petstore-multi-petEvents",
-});
-
-const workerEnv: { [key: string]: pulumi.Input<string> } = {
-    CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
-    CLOUDCC_FS_PETAUDIT_BUCKET: pulumi.interpolate`${petAuditBucket.bucket}`,
-    CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
-    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
-    CLOUDCC_SECRET_AUDITKEY_ARN: pulumi.interpolate`${auditKeySecret.arn}`,
-    CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
-    CLOUDCC_UNIT: `worker`,
-};
-
-const workerFn = new aws.lambda.Function("worker", {
-    code: new pulumi.asset.FileArchive("build/worker.zip"),
-    environment: { variables: workerEnv },
-    handler: "cloudcc_lambda_entry.handler",
-    memorySize: 512,
-    name: "petstore-multi-worker",
-    role: workerRole.arn,
-    runtime: "python3.12",
-    timeout: 30,
-});
-
-const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents-sns", {
-    action: "lambda:InvokeFunction",
-    function: workerFn.name,
-    principal: "sns.amazonaws.com",
-    sourceArn: petEventsTopic.arn,
-    statementId: "petstore-multi-worker-petEvents-sns",
-});
-
-const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEvents", {
-    endpoint: workerFn.arn,
-    protocol: "lambda",
-    topic: petEventsTopic.arn,
 });
 
 const networkVpc = new aws.ec2.Vpc("network", {
@@ -296,6 +212,111 @@ const rdsSubnetGroup = new aws.rds.SubnetGroup("rds", {
         network0Subnet.id,
         network1Subnet.id,
     ],
+});
+
+const auditdbDb = new aws.rds.Instance("auditdb", {
+    allocatedStorage: 20,
+    dbName: "auditdb",
+    dbSubnetGroupName: rdsSubnetGroup.name,
+    engine: "postgres",
+    identifier: "petstore-multi-auditdb",
+    instanceClass: "db.t4g.micro",
+    manageMasterUserPassword: true,
+    publiclyAccessible: false,
+    skipFinalSnapshot: true,
+    username: "ccadmin",
+    vpcSecurityGroupIds: [
+        networkSecurityGroup.id,
+    ],
+});
+
+const workerPolicy = new aws.iam.RolePolicy("worker", {
+    name: "petstore-multi-worker-policy",
+    policy: pulumi.jsonStringify({
+    Statement: [
+        {
+            Action: [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:ListBucket",
+            ],
+            Effect: "Allow",
+            Resource: [
+                petAuditBucket.arn,
+                pulumi.interpolate`${petAuditBucket.arn}/*`,
+            ],
+        },
+        {
+            Action: [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:BatchGetItem",
+                "dynamodb:BatchWriteItem",
+            ],
+            Effect: "Allow",
+            Resource: [
+                petsByOwnerTable.arn,
+                pulumi.interpolate`${petsByOwnerTable.arn}/index/*`,
+            ],
+        },
+        {
+            Action: [
+                "secretsmanager:GetSecretValue",
+            ],
+            Effect: "Allow",
+            Resource: [
+                auditdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? ""),
+            ],
+        },
+        {
+            Action: [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:PutSecretValue",
+            ],
+            Effect: "Allow",
+            Resource: [
+                auditKeySecret.arn,
+            ],
+        },
+    ],
+    Version: "2012-10-17",
+}),
+    role: workerRole.id,
+});
+
+const workerEnv: { [key: string]: pulumi.Input<string> } = {
+    CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
+    CLOUDCC_FS_PETAUDIT_BUCKET: pulumi.interpolate`${petAuditBucket.bucket}`,
+    CLOUDCC_KV_PETSBYOWNER_TABLE: pulumi.interpolate`${petsByOwnerTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_ORM_AUDITDB_SECRET_ARN: pulumi.interpolate`${auditdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`,
+    CLOUDCC_ORM_AUDITDB_URL: pulumi.interpolate`postgresql://ccadmin@${auditdbDb.address}:${auditdbDb.port}/auditdb`,
+    CLOUDCC_SECRET_AUDITKEY_ARN: pulumi.interpolate`${auditKeySecret.arn}`,
+    CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
+    CLOUDCC_UNIT: `worker`,
+};
+
+const workerFn = new aws.lambda.Function("worker", {
+    code: new pulumi.asset.FileArchive("build/worker.zip"),
+    environment: { variables: workerEnv },
+    handler: "cloudcc_lambda_entry.handler",
+    memorySize: 512,
+    name: "petstore-multi-worker",
+    role: workerRole.arn,
+    runtime: "python3.12",
+    timeout: 30,
+});
+
+const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents-sns", {
+    action: "lambda:InvokeFunction",
+    function: workerFn.name,
+    principal: "sns.amazonaws.com",
+    sourceArn: petEventsTopic.arn,
+    statementId: "petstore-multi-worker-petEvents-sns",
 });
 
 const petsdbDb = new aws.rds.Instance("petsdb", {
@@ -412,6 +433,12 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
     statementId: "petstore-multi-pet-api-invoke",
 });
 
+const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEvents", {
+    endpoint: workerFn.arn,
+    protocol: "lambda",
+    topic: petEventsTopic.arn,
+});
+
 const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {
     routeTableId: networkRoutes.id,
     subnetId: network1Subnet.id,
@@ -423,6 +450,8 @@ const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {
 export const CLOUDCC_FS_PETAUDIT_BUCKET = pulumi.interpolate`${petAuditBucket.bucket}`;
 export const CLOUDCC_GATEWAY_PET_API_URL = pulumi.interpolate`${petApiApi.apiEndpoint}`;
 export const CLOUDCC_KV_PETSBYOWNER_TABLE = pulumi.interpolate`${petsByOwnerTable.name}`;
+export const CLOUDCC_ORM_AUDITDB_SECRET_ARN = pulumi.interpolate`${auditdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`;
+export const CLOUDCC_ORM_AUDITDB_URL = pulumi.interpolate`postgresql://ccadmin@${auditdbDb.address}:${auditdbDb.port}/auditdb`;
 export const CLOUDCC_ORM_PETSDB_SECRET_ARN = pulumi.interpolate`${petsdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`;
 export const CLOUDCC_ORM_PETSDB_URL = pulumi.interpolate`postgresql://ccadmin@${petsdbDb.address}:${petsdbDb.port}/petsdb`;
 export const CLOUDCC_REDIS_PETCACHE_ENDPOINT = pulumi.interpolate`${petCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`;

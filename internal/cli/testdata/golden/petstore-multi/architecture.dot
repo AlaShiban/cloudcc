@@ -19,6 +19,7 @@ digraph "petstore-multi" {
     aws_lambda_permission_worker_petEvents_sns [label="worker-petEvents-sns\\nlambda.permission", shape=box];
     aws_lambda_api [label="api\\nlambda", shape=box];
     aws_lambda_worker [label="worker\\nlambda", shape=box];
+    aws_rds_auditdb [label="auditdb\\nrds", shape=cylinder];
     aws_rds_petsdb [label="petsdb\\nrds", shape=cylinder];
     aws_s3_object_petstore_site_index_html [label="petstore-site/index.html\\ns3.object", shape=parallelogram];
     aws_s3_object_petstore_site_style_css [label="petstore-site/style.css\\ns3.object", shape=parallelogram];
@@ -52,6 +53,7 @@ digraph "petstore-multi" {
     aws_iam_policy_api -> aws_sns_petEvents [label="depends_on"];
     aws_iam_policy_worker -> aws_dynamodb_petsByOwner [label="depends_on"];
     aws_iam_policy_worker -> aws_iam_role_worker [label="depends_on"];
+    aws_iam_policy_worker -> aws_rds_auditdb [label="depends_on"];
     aws_iam_policy_worker -> aws_s3_petAudit [label="depends_on"];
     aws_iam_policy_worker -> aws_secretsmanager_auditKey [label="depends_on"];
     aws_lambda_permission_pet_api -> aws_apigatewayv2_pet_api [label="depends_on"];
@@ -62,6 +64,8 @@ digraph "petstore-multi" {
     aws_lambda_api -> aws_iam_role_api [label="depends_on"];
     aws_lambda_worker -> aws_cloudwatch_loggroup_worker [label="depends_on"];
     aws_lambda_worker -> aws_iam_role_worker [label="depends_on"];
+    aws_rds_auditdb -> aws_subnetgroup_rds [label="depends_on"];
+    aws_rds_auditdb -> aws_vpc_securitygroup_network [label="depends_on"];
     aws_rds_petsdb -> aws_subnetgroup_rds [label="depends_on"];
     aws_rds_petsdb -> aws_vpc_securitygroup_network [label="depends_on"];
     aws_s3_object_petstore_site_index_html -> aws_s3_petstore_site [label="depends_on"];
@@ -88,6 +92,7 @@ digraph "petstore-multi" {
     aws_lambda_api -> aws_rds_petsdb [label="uses"];
     aws_lambda_api -> aws_sns_petEvents [label="uses"];
     aws_lambda_worker -> aws_dynamodb_petsByOwner [label="uses"];
+    aws_lambda_worker -> aws_rds_auditdb [label="uses"];
     aws_lambda_worker -> aws_s3_petAudit [label="uses"];
     aws_lambda_worker -> aws_secretsmanager_auditKey [label="uses"];
     aws_lambda_worker -> aws_sns_petEvents [label="uses"];

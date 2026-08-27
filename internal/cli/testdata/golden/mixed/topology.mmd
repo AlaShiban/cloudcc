@@ -3,7 +3,15 @@ flowchart LR
     execution_unit_api["api\nexecution_unit"]
     execution_unit_worker["worker\nexecution_unit"]
     expose_pet_api(["pet-api\nexpose"])
+    persist_fs_petPhotos[("petPhotos\npersist_fs")]
     persist_kv_petsByOwner[("petsByOwner\npersist_kv")]
+    persist_orm_shopdb[("shopdb\npersist_orm")]
+    persist_redis_petCache[("petCache\npersist_redis")]
     expose_pet_api -->|exposes| execution_unit_api
+    execution_unit_api -->|uses| persist_fs_petPhotos
     execution_unit_api -->|uses| persist_kv_petsByOwner
+    execution_unit_api -->|uses| persist_orm_shopdb
+    execution_unit_api -->|uses| persist_redis_petCache
+    execution_unit_worker -->|uses| persist_fs_petPhotos
     execution_unit_worker -->|uses| persist_kv_petsByOwner
+    execution_unit_worker -->|uses| persist_orm_shopdb

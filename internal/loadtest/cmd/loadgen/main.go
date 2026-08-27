@@ -152,6 +152,12 @@ func attachChecklist(reportPath, observedPath, out string) error {
 	if report.Plan == nil {
 		return fmt.Errorf("%s carries no plan, so there is nothing to check against", reportPath)
 	}
+	// The checklist below reads state out of the emulator, and state outlives
+	// the run that wrote it. Attaching one to a run that never reached the
+	// application would credit it with a previous run's rows.
+	if why := report.Undelivered(); why != "" {
+		return fmt.Errorf("%s is void: %s", reportPath, why)
+	}
 
 	counts := map[string]int{}
 	if observedPath != "" {
@@ -321,6 +327,16 @@ func compareReports(args []string) error {
 		return err
 	}
 	fmt.Print(loadtest.RenderComparison(before, after))
+
+	// Before anything is concluded from the edges. A run whose traffic never
+	// arrived still finds whatever a previous run left in the emulator, and
+	// would otherwise report every edge as carried -- which is how
+	// examples/mixed once passed this suite at 0% ok.
+	for _, r := range []*loadtest.Report{before, after} {
+		if why := r.Undelivered(); why != "" {
+			return fmt.Errorf("the %s run is void: %s", r.Mode, why)
+		}
+	}
 
 	// Printed whether or not anything failed: an edge nobody could settle is
 	// a gap in the evidence, and a gap that is only mentioned on failure is

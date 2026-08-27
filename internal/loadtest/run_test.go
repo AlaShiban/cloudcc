@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -269,5 +270,68 @@ func TestSessionsUseKeysOfTheirOwn(t *testing.T) {
 	}
 	if keys["seed"] {
 		t.Error("the seed body's own id reached the server; it should be replaced per session")
+	}
+}
+
+// The generator must reuse connections, or it measures itself.
+//
+// Go's default client keeps two idle connections per host. Above two sessions
+// in flight, nearly every request opens a fresh TCP connection, and against
+// localhost that exhausts the ephemeral port range in seconds -- after which
+// the operating system answers "connection refused" and the run reports an
+// application that is fine as one that is unreachable. Both halves of a
+// comparison hit it identically, so the ratio looks perfect while both numbers
+// are meaningless.
+//
+// The assertion is about connections per request rather than an absolute
+// count, because the request count depends on how fast the machine is.
+func TestTheGeneratorReusesConnections(t *testing.T) {
+	var mu sync.Mutex
+	opened := 0
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			mu.Lock()
+			opened++
+			mu.Unlock()
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	plan := &Plan{
+		App:    "t",
+		Unit:   "api",
+		Steps:  []Step{{Verb: "GET", Path: "/health", Phase: PhaseRead, PhaseName: "read"}},
+		Routes: []Route{{Verb: "GET", Path: "/health"}},
+	}
+
+	const workers = 12
+	runner := &Runner{BaseURL: server.URL, Plan: plan}
+	metrics, err := runner.Run(context.Background(), Steady{Workers: workers, For: 300 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := metrics.Summarise(Steady{Workers: workers, For: 300 * time.Millisecond}, plan)
+
+	mu.Lock()
+	conns := opened
+	mu.Unlock()
+
+	if summary.Requests < 100 {
+		t.Skipf("only %d requests in 300ms; too few to say anything about reuse", summary.Requests)
+	}
+	if summary.OKRate < 1 {
+		t.Errorf("ok rate = %.2f, want 1: %v", summary.OKRate, summary.Failures)
+	}
+	// Generous: the point is that connections are reused at all, not that a
+	// particular number is reached. Without reuse this is 1.0.
+	if ratio := float64(conns) / float64(summary.Requests); ratio > 0.25 {
+		t.Errorf("opened %d connections for %d requests (%.2f per request); "+
+			"the client is not reusing them, so the run measures socket setup "+
+			"rather than the application", conns, summary.Requests, ratio)
 	}
 }

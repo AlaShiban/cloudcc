@@ -1,7 +1,7 @@
 {
   "version": 1,
   "app": "mixed",
-  "fingerprint": "ffda58bb53aaed573df6320ad781d634bcf45257b476e23055c0e69283cc8676",
+  "fingerprint": "698c7a56afbcb8bce06e01ea947d5d8101dc1036892d3d8ec7c2c4997f1be331",
   "units": [
     "api",
     "worker"

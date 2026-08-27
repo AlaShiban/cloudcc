@@ -404,3 +404,39 @@ pets = cloudcc.persist(
 		t.Errorf("id = %q", hints[0].ID())
 	}
 }
+
+// An asynchronous Redis client is a different library from a synchronous one,
+// and the shim dispatches on the library to decide what to hand back. Reducing
+// the constructor to its final attribute makes `redis.asyncio.Redis` and
+// `redis.Redis` indistinguishable, which compiles cleanly and then raises
+// `TypeError: object bool can't be used in 'await' expression` on the first
+// call -- the exact failure the library field exists to prevent.
+//
+// Every spelling of the same import is covered, because the disambiguation has
+// to survive the name arriving through a module attribute, through a from-import
+// and through a partially qualified path.
+func TestAsyncRedisIsNotTheSynchronousLibrary(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, want string
+	}{
+		{"attribute", "import redis.asyncio\nc = cloudcc.persist(redis.asyncio.Redis(host=\"h\"), id=\"c\")\n", sdkdetect.LibRedisPyAsync},
+		{"from import", "from redis.asyncio import Redis\nc = cloudcc.persist(Redis(host=\"h\"), id=\"c\")\n", sdkdetect.LibRedisPyAsync},
+		{"submodule", "from redis import asyncio\nc = cloudcc.persist(asyncio.Redis(host=\"h\"), id=\"c\")\n", sdkdetect.LibRedisPyAsync},
+		{"aliased", "import redis.asyncio as aioredis\nc = cloudcc.persist(aioredis.Redis(host=\"h\"), id=\"c\")\n", sdkdetect.LibRedisPyAsync},
+		{"synchronous stays synchronous", "from redis import Redis\nc = cloudcc.persist(Redis(host=\"h\"), id=\"c\")\n", sdkdetect.LibRedisPy},
+		{"synchronous attribute", "import redis\nc = cloudcc.persist(redis.Redis(host=\"h\"), id=\"c\")\n", sdkdetect.LibRedisPy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hints, d := detect(t, "import cloudcompiler as cloudcc\n"+tc.src)
+			if d.HasErrors() {
+				t.Fatalf("unexpected diagnostics: %v", d.Items())
+			}
+			if len(hints) != 1 {
+				t.Fatalf("got %d hints, want 1", len(hints))
+			}
+			if got := hints[0].ClientLibrary; got != tc.want {
+				t.Errorf("ClientLibrary = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

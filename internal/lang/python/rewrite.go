@@ -69,12 +69,14 @@ func shimFor(h sdkdetect.Hint) (shimTarget, bool) {
 	}
 	target.Call = "connect"
 	target.Args = []string{"id"}
-	// The relational shim is the one that varies on the library: a program
-	// that called create_async_engine must get an AsyncEngine back, and
-	// handing it the synchronous one would fail on the first `async with`.
-	// The other stores have one implementation each, so naming it would be
-	// noise in the generated source.
-	if h.Capability == config.KindPersistORM {
+	// Two shims vary on the library, because two libraries ship a synchronous
+	// and an asynchronous client for the same store. A program that called
+	// create_async_engine must get an AsyncEngine back, and one that
+	// constructed a redis.asyncio.Redis must get an awaitable client: handing
+	// either the synchronous object would compile and then fail on the first
+	// call. The remaining stores have one implementation each, so naming it
+	// would be noise in the generated source.
+	if h.Capability == config.KindPersistORM || h.Capability == config.KindPersistRedis {
 		target.Args = append(target.Args, "library")
 	}
 	return target, true

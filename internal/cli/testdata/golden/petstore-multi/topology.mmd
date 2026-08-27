@@ -6,6 +6,7 @@ flowchart LR
     expose_pet_api(["pet-api\nexpose"])
     persist_fs_petAudit[("petAudit\npersist_fs")]
     persist_kv_petsByOwner[("petsByOwner\npersist_kv")]
+    persist_orm_auditdb[("auditdb\npersist_orm")]
     persist_orm_petsdb[("petsdb\npersist_orm")]
     persist_redis_petCache[("petCache\npersist_redis")]
     persist_secret_auditKey[("auditKey\npersist_secret")]
@@ -21,5 +22,6 @@ flowchart LR
     execution_unit_api -->|uses| pubsub_petEvents
     execution_unit_worker -->|uses| persist_fs_petAudit
     execution_unit_worker -->|uses| persist_kv_petsByOwner
+    execution_unit_worker -->|uses| persist_orm_auditdb
     execution_unit_worker -->|uses| persist_secret_auditKey
     execution_unit_worker -->|uses| pubsub_petEvents

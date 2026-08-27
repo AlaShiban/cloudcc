@@ -35,6 +35,7 @@ with Diagram(
     n_expose_pet_api = APIGateway("pet-api\nAPI Gateway")
     n_persist_fs_petAudit = S3("petAudit\nS3")
     n_persist_kv_petsByOwner = Dynamodb("petsByOwner\nDynamoDB")
+    n_persist_orm_auditdb = RDS("auditdb\nRDS")
     n_persist_orm_petsdb = RDS("petsdb\nRDS")
     n_persist_redis_petCache = ElastiCache("petCache\nElastiCache")
     n_persist_secret_auditKey = SecretsManager("auditKey\nSecrets Manager")
@@ -49,4 +50,5 @@ with Diagram(
     n_execution_unit_api >> n_persist_redis_petCache
     n_execution_unit_worker >> n_persist_fs_petAudit
     n_execution_unit_worker >> n_persist_kv_petsByOwner
+    n_execution_unit_worker >> n_persist_orm_auditdb
     n_execution_unit_worker >> n_persist_secret_auditKey

@@ -6,8 +6,16 @@ digraph "mixed" {
     execution_unit_api [label="api\\nexecution_unit", shape=box];
     execution_unit_worker [label="worker\\nexecution_unit", shape=box];
     expose_pet_api [label="pet-api\\nexpose", shape=ellipse];
+    persist_fs_petPhotos [label="petPhotos\\npersist_fs", shape=cylinder];
     persist_kv_petsByOwner [label="petsByOwner\\npersist_kv", shape=cylinder];
+    persist_orm_shopdb [label="shopdb\\npersist_orm", shape=cylinder];
+    persist_redis_petCache [label="petCache\\npersist_redis", shape=cylinder];
     expose_pet_api -> execution_unit_api [label="exposes"];
+    execution_unit_api -> persist_fs_petPhotos [label="uses"];
     execution_unit_api -> persist_kv_petsByOwner [label="uses"];
+    execution_unit_api -> persist_orm_shopdb [label="uses"];
+    execution_unit_api -> persist_redis_petCache [label="uses"];
+    execution_unit_worker -> persist_fs_petPhotos [label="uses"];
     execution_unit_worker -> persist_kv_petsByOwner [label="uses"];
+    execution_unit_worker -> persist_orm_shopdb [label="uses"];
 }

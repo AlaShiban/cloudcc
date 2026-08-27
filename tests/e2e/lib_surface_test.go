@@ -31,7 +31,7 @@ var harnessHelpers = []string{
 	"ensure_local_bucket", "reset_local_table", "local_aws_env",
 	"emulator_python_target", "engine_bindings_local", "export_engine_bindings_local",
 	"probe_service", "pulumi_configure_emulator", "py_run_deps",
-	"require_endpoint", "seed_secrets", "skip_unless_service",
+	"require_endpoint", "scenario_databases", "seed_secrets", "skip_unless_service",
 	"unit_field", "unit_language", "unit_target", "wait_for_http",
 }
 
