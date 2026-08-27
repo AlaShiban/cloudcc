@@ -3,12 +3,69 @@
 Where the work stands and what is left, written so a future session can pick it
 up without re-deriving any of it.
 
-**Every milestone in `docs/plan-node.md` (N0–N6) is now met, and CI is green.**
+**Every milestone in `docs/plan-node.md` (N0–N6) is met, and CI is green.**
+Since then: units can call each other, there is a load test that checks the
+wiring carries traffic, and one example exercises the breadth of capabilities
+against real engines. See "Rounds since N6" below.
 
 What is left is in "Smaller things noticed but not done" at the bottom, plus
 whatever the next round of sweeping turns up. The generators are the tool for
 that: `CLOUDCC_FUZZ_SEEDS=500 go test ./internal/fuzz -run TestSweep` and the
 same for `TestNodeSweep`.
+
+---
+
+## Rounds since N6
+
+**`cloudcc.remote`: units call each other.** `remote(module, id=…)` returns the
+module, so uncompiled the whole application still runs in one process; compiled,
+the import is removed and the await is a Lambda invocation. The compiler
+enforces `async def`, that the function exists, and that the calls form no
+cycle. Both runtimes implement it and share one JSON envelope, pinned by a
+parity test. A call is same-language by design — one process cannot import both
+a Python module and a JavaScript one — and topics cover the other case.
+`examples/nomnom` is six units using both mechanisms.
+
+**A load test that asks whether the wiring carries traffic.**
+`tests/e2e/load.sh` runs a derived plan against the example as written and
+against the deployed compilation, reports the ratio, and then checks every
+runtime edge in the IR for evidence that something crossed it. The plan comes
+from `--dump-ir`; only request bodies are supplied, from the scenario files.
+Edges land in three states — carried, dead, or unverified *with the reason* —
+and only `dead` fails a run. `internal/loadtest` is a separate binary and is
+kept off the compile path by the test that keeps `internal/deploy` off it.
+
+**Breadth in a deployed example.** `examples/petstore-multi` now declares ten
+capability kinds: two Lambdas, API Gateway, DynamoDB, RDS Postgres, ElastiCache
+Redis, Secrets Manager, an S3 bucket, an S3 website, SNS and a config value.
+Least privilege falls out of the import graph — the api imports the catalogue
+and gets the database and cache, the worker imports the signing module and gets
+the secret, neither has the other's.
+
+RDS and ElastiCache are no longer "preview only": the emulator provisions both
+and simply runs no engine behind them, so the engines are real containers that
+a scenario declares (`"engines": ["postgres", "redis"]`). Fixing three
+list-valued outputs that threw on an empty list was what made RDS deployable to
+an emulator at all.
+
+### Things about the emulator worth knowing before debugging it
+
+- It runs Lambda on **Alpine/musl**, aarch64 on an Apple Silicon host, with
+  **Python 3.13 regardless of the runtime the function declares**. Bundles are
+  packaged for the *target*, and the harness asks the emulator what that is
+  rather than assuming.
+- It reports resource addresses **on its own container network** — localhost on
+  a desktop Docker that publishes ports, a container IP on CI. Both engine
+  bindings are redirected for that reason; only the host and port are replaced.
+- It starts a Lambda container per SNS delivery and **never reaps them**, so it
+  is OOM-killed at a few hundred deliveries. This is not a memory problem: 2
+  GiB, 6 GiB and 10 GiB all died at the same point. A scenario caps the scale
+  its own fan-out survives. The untried alternative is reconfiguring the
+  emulator for container reuse.
+- `Exited (137)` on the emulator container is that kill. A run that loses the
+  emulator is reported as *void* rather than failed, because an edge called
+  dead when the emulator has died sends someone looking for a bug in their
+  program.
 
 ---
 
@@ -281,6 +338,22 @@ position and the obvious next piece of work: SQS is the cheapest of the four to
 add, and it needs a queue resource, an event-source mapping, and a runtime
 dispatch branch for the SQS envelope.
 
+### Still open
+
+- **Only SNS is provisioned** of the five topic backings the selector can
+  reach. SQS is the cheapest to add: a queue, an event-source mapping, and an
+  SQS-envelope branch in the runtime dispatch.
+- **A secret's edge is permanently unverified** in the load test. Reading one
+  leaves no observable trace; where its value is used for something observable,
+  that write is the evidence under its own edge.
+- **The load test cannot tell a read-only store from a dead write path.** The
+  emulator serves no read counters. Using the uncompiled run as a control would
+  settle it and is the obvious next improvement.
+- **`create_engine("postgresql+pg8000://…")` silently becomes psycopg2 once
+  compiled.** The provider builds the URL scheme itself and drops the driver
+  the program asked for. Nothing has needed it yet, but it is a silent
+  substitution, which this project does not otherwise allow.
+
 ### Smaller things this round turned up
 
 - `ministack.sh` hardcoded `uvicorn app:app`, so it could only run an example
@@ -291,3 +364,17 @@ dispatch branch for the SQS envelope.
   The golden trees caught it. `RuntimeFiles` refuses to ship bytecode now.
 - Both "the SDK never imports an AWS client" tests grepped source text, so they
   failed the moment the documentation had to name boto3. They read imports now.
+
+- Four calls to methods that did not exist survived in the examples --
+  `audit.write(...)`, `docs.write(...)` twice and `docs.list()` -- all left over
+  from when the SDK supplied a `FileStore` class. Three were in an example that
+  cannot deploy and the fourth in a handler nothing invoked. A test now asks
+  Python whether each method exists on the type `persist` returned, and the
+  emulator harness waits for the subscriber to write to its own store.
+- The harness pointed eleven AWS services at the emulator and `cloudcc deploy`
+  pointed at nineteen, so the availability-zone lookup went to real AWS and
+  failed with `AuthFailure`. One list now, pinned by a test.
+- A missing shell function is a runtime lookup that `bash -n` cannot see, so a
+  block edit that removed three helpers from `lib.sh` cost three separate
+  eight-minute deploys to find. `tests/e2e/lib_surface_test.go` checks the
+  harness surface in `make check`.
