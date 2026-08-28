@@ -56,4 +56,9 @@ def put_item(item_id: str, item: dict):
 
 @app.get("/receipt/{item_id}")
 def receipt(item_id: str):
-    return {"signed_with": signing_key.get()[:4], "database": db.url().split("@")[-1]}
+    # The database's name rather than its address. `Engine.url` is a property
+    # holding a URL object, and str() of it hides the password -- but the host
+    # is still the one thing in there that legitimately differs between where
+    # this runs and where it is deployed, so reporting it would make this route
+    # say something different in each place for no reason worth having.
+    return {"signed_with": signing_key.get()[:4], "database": db.url.database}

@@ -55,6 +55,18 @@ class Secret:
         self._env = env
         self._value: str | None = None
 
+    # Private, and deliberately so. The compiled shim hands back a Secrets
+    # Manager-backed object with the same *public* API as this one -- a parity
+    # test pins that -- and these two are not part of it. They are a handshake
+    # between persist() and this class, which the compiler removes entirely.
+    def _env_name(self) -> str | None:
+        """Which environment variable this reads, or None if it has none yet."""
+        return self._env
+
+    def _bind_env(self, name: str) -> None:
+        """Name the environment variable to read, when none was given."""
+        self._env = name
+
     def get(self) -> str:
         """Return the secret's value."""
         if self._value is not None:

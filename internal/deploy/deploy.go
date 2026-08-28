@@ -319,8 +319,17 @@ func runScript(ctx context.Context, opts Options, rel, describe string) error {
 	cmd.Stdout = opts.Out
 	cmd.Stderr = opts.Err
 	cmd.Env = os.Environ()
-	if opts.EmulatorEndpoint != "" {
-		cmd.Env = append(cmd.Env, "CLOUDCC_AWS_ENDPOINT_URL="+opts.EmulatorEndpoint)
+	// The generated scripts talk to Pulumi themselves -- push-images.sh reads
+	// the stack's outputs to find each repository -- and a separate process has
+	// no idea which stack this is or where its state lives. The automation API
+	// carries that in the workspace; a child gets it only if it is handed over.
+	//
+	// Without this the push fails with "no stack selected", a message about the
+	// CLI's own workspace rather than about the deployment, and nothing noticed
+	// because no container unit had ever been deployed.
+	cmd.Env = append(cmd.Env, "CLOUDCC_STACK="+opts.Stack)
+	for key, value := range emulatorEnv(opts) {
+		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s failed: %w", rel, err)

@@ -410,6 +410,50 @@ export_engine_bindings_local() {
   done
 }
 
+# seed_stack_config gives every config value the program declares without one.
+#
+# A `config_value` with no default is required, and the generated program calls
+# require() for it -- so `pulumi up` refuses before creating anything, with
+# "Missing required configuration variable". That is correct: the value is an
+# operator's to supply, and a compiler that invented one would be putting a
+# secret in a repository, which is the thing D21 exists to prevent.
+#
+# So the harness does what an operator would, once, before deploying. Values are
+# obvious placeholders: nothing asserts on them, and a real-looking secret in a
+# test is a secret somebody eventually copies.
+seed_stack_config() {
+  local bin="$1" src="$2" app_out="$3" stack="$4" name required
+
+  # Asked of the compiler rather than parsed out of YAML. The harness already
+  # gets every other fact this way, and a shell parser for "a name under
+  # config: with no value: of its own" is a parser -- indentation is what
+  # distinguishes an entry from a key inside one, and getting that wrong means
+  # setting the wrong variable or none.
+  required="$("$bin" --dump-ir "$src" 2>/dev/null \
+    | jq -r '.intents[] | select(.key.kind=="config") | select(has("payload"))
+             | select((.payload.default // "") == "") | .payload.id' 2>/dev/null || true)"
+  [ -n "$required" ] || return 0
+
+  # In the same backend `cloudcc deploy` will use, which is a directory beside
+  # the generated project unless the environment names one. Setting config in a
+  # different backend creates a stack somewhere else and leaves the deploy
+  # reporting "no stack selected" -- a message about the workspace rather than
+  # about the config that is actually missing.
+  local backend="${PULUMI_BACKEND_URL:-file://$app_out/.pulumi-state}"
+  mkdir -p "$app_out/.pulumi-state"
+
+  (
+    cd "$app_out" || exit 0
+    export PULUMI_BACKEND_URL="$backend"
+    export PULUMI_CONFIG_PASSPHRASE="${PULUMI_CONFIG_PASSPHRASE:-cloudcc-test}"
+    pulumi stack init "$stack" >/dev/null 2>&1 || pulumi stack select "$stack" >/dev/null 2>&1 || true
+    for name in $required; do
+      pulumi config set --plaintext "cloudcc:$name" "cloudcc-e2e-$name" \
+        --stack "$stack" >/dev/null 2>&1 || true
+    done
+  )
+}
+
 # warm_emulator_rds makes the emulator install its database engine before a test
 # needs one.
 #
@@ -451,13 +495,36 @@ warm_emulator_rds() {
 #
 # Reading a secret that has no version raises, and that is the correct
 # behaviour; it is just not what this test is trying to find out.
+#: The value every secret gets in a test. Named once because the two halves
+#: have to agree on it: the compiled program reads it from Secrets Manager and
+#: the uncompiled one from the environment, and a test that compares them is
+#: comparing this constant with itself.
+CLOUDCC_E2E_SECRET="cloudcc-emulator-secret"
+
+# secret_env prints the environment a program-as-written needs to read the same
+# secrets its deployed counterpart will.
+#
+# A `cloudcc.Secret()` with no source of its own reads CLOUDCC_SECRET_<ID>
+# locally -- the same name the compiled binding is given -- so supplying it here
+# is what lets a differential test include a route that uses one. Without it the
+# local half reads an empty string and the two can never match.
+secret_env() {
+  local bin="$1" src="$2" id
+  for id in $("$bin" --dump-ir "$src" 2>/dev/null \
+      | jq -r '.intents[] | select(.key.kind=="persist_secret") | .key.id' 2>/dev/null); do
+    printf 'CLOUDCC_SECRET_%s=%s;' \
+      "$(printf '%s' "$id" | tr -c '[:alnum:]' '_' | tr '[:lower:]' '[:upper:]')" \
+      "$CLOUDCC_E2E_SECRET"
+  done
+}
+
 seed_secrets() {
   local outputs="$1" arn
   for arn in $(printf '%s' "$outputs" \
       | jq -r 'to_entries[] | select(.key | test("^CLOUDCC_SECRET_.*_ARN$")) | .value'); do
     [ -n "$arn" ] || continue
     aws_local secretsmanager put-secret-value \
-      --secret-id "$arn" --secret-string "cloudcc-emulator-secret" >/dev/null 2>&1 || true
+      --secret-id "$arn" --secret-string "$CLOUDCC_E2E_SECRET" >/dev/null 2>&1 || true
   done
 }
 

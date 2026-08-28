@@ -24,7 +24,7 @@ catalogue = cloudcc.persist(boto3.resource("dynamodb").Table("catalogue"), id="c
 docs = cloudcc.persist(Path("./itemDocs"), id="itemDocs")
 signing_key = cloudcc.persist(cloudcc.Secret(), id="signingKey")
 db = cloudcc.persist(
-    create_engine("postgresql://localhost/shop"),
+    create_engine("postgresql://ccadmin@localhost:5432/shopdb"),
     id="shopdb",
     models=["Item", "Order"],
 )

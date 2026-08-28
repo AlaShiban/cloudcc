@@ -1,4 +1,19 @@
 {
-  "description": "Every capability at once: Lambda and Fargate, RDS, ElastiCache, S3, DynamoDB, SNS, Secrets Manager.",
-  "skip": "needs RDS, ElastiCache, ECS and an ALB. The community emulator implements none of them, so `pulumi up` would fail on the first database rather than tell us anything about the compiler. It is covered by the golden trees instead, which compare the whole compiled output byte for byte."
+  "description": "Every capability in one program, and the only example with both compute types: a function behind an HTTP API and a container behind a load balancer. Skipped for a long time because the previous emulator implemented neither ECS nor an ALB.",
+  "unit": "api",
+  "tables": ["catalogue"],
+  "buckets": ["itemDocs"],
+  "engines": ["postgres", "redis"],
+  "databases": ["shopdb"],
+  "requests": [
+    {"method": "GET", "path": "/health"},
+    {"method": "GET", "path": "/items/1"},
+    {"method": "PUT", "path": "/items/1", "body": {"name": "anvil", "price": 20}},
+    {"method": "GET", "path": "/items/1"},
+    {"method": "GET", "path": "/items/1"},
+    {"method": "PUT", "path": "/items/2", "body": {"name": "rope", "price": 5}},
+    {"method": "GET", "path": "/items/2"},
+    {"method": "GET", "path": "/receipt/1"},
+    {"method": "GET", "path": "/items/missing"}
+  ]
 }

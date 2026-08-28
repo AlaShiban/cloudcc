@@ -107,7 +107,24 @@ def persist(client: T, *, id: str, models: list | None = None) -> T:
 
     Returns ``client``, unchanged.
     """
+    # A secret with no source of its own learns where to look. Uncompiled it
+    # reads CLOUDCC_SECRET_<ID> -- the same name the compiled binding uses --
+    # so a value supplied to a local run and a value put in Secrets Manager can
+    # be the same value, and a program that reads one behaves the same either
+    # way. Without this the local half always saw an empty string, and any test
+    # comparing the two halves had to avoid the secret entirely.
+    if isinstance(client, Secret) and client._env_name() is None:
+        client._bind_env("CLOUDCC_SECRET_" + _env_suffix(id))
     return client
+
+
+def _env_suffix(id: str) -> str:
+    """The id as it appears in an environment variable name.
+
+    Must agree with the compiler's own sanitiser: this is how a local run finds
+    the value a deployed one would be given.
+    """
+    return "".join(c if c.isalnum() else "_" for c in id).upper()
 
 
 def remote(target: T, *, id: str) -> T:

@@ -1,2 +1,6 @@
 fastapi==0.115.6
 boto3==1.35.76
+SQLAlchemy==2.0.36
+psycopg2-binary==2.9.10
+redis==5.2.0
+cloudpathlib[s3]==0.20.0

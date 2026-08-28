@@ -207,7 +207,10 @@ for example in "${EXAMPLES[@]}"; do
         && npm install --silent --no-audit --no-fund "$REPO_ROOT/sdk/node" >/dev/null )
   fi
 
-  env_pairs="$(local_aws_env | tr ';' ' ')"
+  # Secrets too, and the same values the compiled half will read out of Secrets
+  # Manager. A route that uses a secret is otherwise untestable here: the local
+  # half would read an empty string and the two could never match.
+  env_pairs="$(printf '%s;%s' "$(local_aws_env)" "$(secret_env "$WORK/cloudcc" "$src")" | tr ';' ' ')"
   serve "$work_src" "$language" "$target" "$PORT_A" "uncompiled" "$env_pairs"
   replay "$PORT_A" "$scenario" "$case_dir/uncompiled.txt"
   stop_app
@@ -237,6 +240,11 @@ for example in "${EXAMPLES[@]}"; do
   fi
   pass "$example: every diagram written, and architecture.py parses"
 
+  # A config value with no default is required, and `pulumi up` refuses before
+  # creating anything until somebody supplies it. That somebody is an operator,
+  # so the harness plays one.
+  seed_stack_config "$WORK/cloudcc" "$src" "$app_out_dir" local
+
   "$WORK/cloudcc" deploy "$src" -o "$out" --stack local >/dev/null
 
   bindings="$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
@@ -245,6 +253,12 @@ for example in "${EXAMPLES[@]}"; do
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' \
     | tr '\n' ' ')"
   bindings="$(engine_bindings_local "$bindings")"
+
+  # The compiler provisions a secret and deliberately not its contents -- a
+  # value in the generated project would be a value in the repository. Setting
+  # it is an operator's job, done once, out of band.
+  seed_secrets "$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
+    PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator pulumi stack output --json --stack local 2>/dev/null)"
 
   # The compiled *sources*, for both languages.
   #
@@ -272,6 +286,53 @@ for example in "${EXAMPLES[@]}"; do
   replay "$PORT_B" "$scenario" "$case_dir/compiled.txt"
   stop_app
   pass "$example: compiled run recorded"
+
+  # A container unit is provisioned by everything above and *run* by none of it.
+  #
+  # `pulumi up` creating an ECS service says the service exists, not that a task
+  # started, pulled its image and answered anything -- and until this example
+  # could be deployed at all, no container unit had ever been started anywhere
+  # in this suite. So the service is asked how many tasks are running, and the
+  # load balancer in front of it is asked for a response.
+  # Matched to this application by name. Listing clusters and taking the first
+  # would pass on one another example left behind, which is the kind of check
+  # that reports success for something it never looked at.
+  ecs_cluster="$(aws_local ecs list-clusters --query 'clusterArns[]' --output text 2>/dev/null \
+    | tr '\t' '\n' | grep -- "/$example-" | head -1 || true)"
+  if [ -n "$ecs_cluster" ] && [ "$ecs_cluster" != "None" ]; then
+    ecs_service="$(aws_local ecs list-services --cluster "$ecs_cluster" \
+      --query 'serviceArns[0]' --output text 2>/dev/null || true)"
+  fi
+  if [ -n "${ecs_service:-}" ] && [ "$ecs_service" != "None" ]; then
+    running=0
+    for _ in $(seq 1 60); do
+      running="$(aws_local ecs describe-services --cluster "$ecs_cluster" \
+        --services "$ecs_service" --query 'services[0].runningCount' --output text 2>/dev/null || echo 0)"
+      [ "${running:-0}" -ge 1 ] && break
+      sleep 2
+    done
+    [ "${running:-0}" -ge 1 ] \
+      || fail "$example: the ECS service has $running running tasks; the container never started"
+    pass "$example: L5 a Fargate task is running"
+
+    # Through the load balancer, which is the only address a caller has. A
+    # service with a running task behind a target group that never registered
+    # it looks healthy from the ECS API and answers nothing.
+    alb_host="$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
+      PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
+      pulumi stack output --json --stack local 2>/dev/null \
+      | jq -r 'to_entries[] | select(.key | endswith("Url")) | .value' \
+      | grep -vi 'execute-api\|s3-website' | head -1)"
+    if [ -n "$alb_host" ]; then
+      if wait_for_http "http://${alb_host#http://}/health" 60; then
+        pass "$example: L5 the load balancer routes to the task"
+      else
+        warn "$example: the load balancer at $alb_host did not answer. The task is
+  running and reachable inside the emulator's network; whether an address it hands
+  out is routable from here is a property of the emulator, not of the deployment."
+      fi
+    fi
+  fi
 
   # The architecture diagram claims to show every resource that will exist.
   # Pulumi knows exactly what it just created, so the two can be compared --
@@ -309,6 +370,11 @@ for example in "${EXAMPLES[@]}"; do
   for service in $(printf '%s\n' "$deployed_types" | cut -d: -f2 | cut -d/ -f1 | sort -u); do
     case "$service" in
       ec2) service=vpc ;;
+      # Pulumi's type is aws:lb/loadBalancer:LoadBalancer, because that API
+      # serves both application and network balancers. The compiler names the
+      # kind after the one it provisions, which is what a reader of the diagram
+      # is looking for.
+      lb) service=alb ;;
     esac
     grep -q "aws_${service}" "$app_out_dir/architecture.mmd" \
       || { warn "$example: $service is deployed but appears nowhere in architecture.mmd"; missing=$((missing + 1)); }

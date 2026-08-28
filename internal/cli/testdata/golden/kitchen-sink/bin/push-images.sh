@@ -13,8 +13,17 @@ for tool in docker aws pulumi jq; do
   command -v "$tool" >/dev/null 2>&1 || { echo "push-images.sh: $tool is required" >&2; exit 1; }
 done
 
-outputs="$(pulumi stack output --json)"
-region="$(pulumi config get aws:region 2>/dev/null || echo "${AWS_REGION:-us-east-1}")"
+# --stack, because this runs as its own process. `cloudcc deploy` keeps the
+# stack in an automation-API workspace that a child process cannot see, so
+# without being told which one it is, pulumi reports "no stack selected" -- a
+# message about its workspace rather than about this deployment.
+stack_args=()
+if [ -n "${CLOUDCC_STACK:-}" ]; then
+  stack_args=(--stack "$CLOUDCC_STACK")
+fi
+
+outputs="$(pulumi stack output --json "${stack_args[@]}")"
+region="$(pulumi config get aws:region "${stack_args[@]}" 2>/dev/null || echo "${AWS_REGION:-us-east-1}")"
 endpoint_args=()
 if [ -n "${CLOUDCC_AWS_ENDPOINT_URL:-}" ]; then
   endpoint_args=(--endpoint-url "$CLOUDCC_AWS_ENDPOINT_URL")

@@ -57,7 +57,7 @@ var templates = []Template{
 	{ID: "aws.ecs.Cluster", Class: "aws.ecs.Cluster", Import: "aws", VarSuffix: "Cluster"},
 	{ID: "aws.ecs.TaskDefinition", Class: "aws.ecs.TaskDefinition", Import: "aws", VarSuffix: "Task"},
 	{ID: "aws.ecs.Service", Class: "aws.ecs.Service", Import: "aws", VarSuffix: "Service"},
-	{ID: "aws.lb.LoadBalancer", Class: "aws.lb.LoadBalancer", Import: "aws", VarSuffix: "Alb"},
+	{ID: "aws.lb.LoadBalancer", Class: "aws.lb.LoadBalancer", Import: "aws", VarSuffix: "Alb", URLProp: "dnsName"},
 	{ID: "aws.lb.TargetGroup", Class: "aws.lb.TargetGroup", Import: "aws", VarSuffix: "TargetGroup"},
 	{ID: "aws.lb.Listener", Class: "aws.lb.Listener", Import: "aws", VarSuffix: "Listener"},
 	{ID: "aws.ec2.Vpc", Class: "aws.ec2.Vpc", Import: "aws", VarSuffix: "Vpc"},
