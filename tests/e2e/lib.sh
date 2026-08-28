@@ -131,8 +131,28 @@ ensure_local_bucket() {
 # JavaScript v3 clients, so nothing cloudcc-specific is involved.
 local_aws_env() {
   printf 'AWS_ENDPOINT_URL=%s;AWS_REGION=%s;AWS_DEFAULT_REGION=%s;AWS_ACCESS_KEY_ID=%s;AWS_SECRET_ACCESS_KEY=%s' \
-    "$CLOUDCC_EMULATOR_ENDPOINT" "$AWS_REGION" "$AWS_REGION" \
+    "$(app_endpoint)" "$AWS_REGION" "$AWS_REGION" \
     "${AWS_ACCESS_KEY_ID:-cloudcc-local}" "${AWS_SECRET_ACCESS_KEY:-cloudcc-local}"
+}
+
+# app_endpoint is the emulator's address as an application should be given it:
+# by IP rather than by name.
+#
+# This decides how the AWS SDKs address S3 buckets, which is not a detail. Given
+# a host*name*, the JavaScript SDK uses virtual-host addressing and sends the
+# bucket as a subdomain -- `pet-photos.localhost` -- which the emulator cannot
+# parse, and the write fails with "unknown operation ... invalid XML received",
+# a message about neither buckets nor addressing. Given an IP it uses path
+# style, `/pet-photos/key`, which every emulator understands.
+#
+# The compiled half does not depend on this: its injected client sets
+# forcePathStyle explicitly. The uncompiled half is the program as the user
+# wrote it, so there is nowhere to set that -- which is the whole point of
+# running it, and why the endpoint has to carry the hint instead.
+#
+# AWS_S3_FORCE_PATH_STYLE is not an answer: the JavaScript SDK does not read it.
+app_endpoint() {
+  printf '%s' "${CLOUDCC_EMULATOR_ENDPOINT/localhost/127.0.0.1}"
 }
 
 # emulator_python_target prints "<platform> <version>" for the Lambda runtime

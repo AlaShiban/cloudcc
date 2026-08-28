@@ -235,7 +235,12 @@ func configureEmulator(ctx context.Context, stack auto.Stack, opts Options) erro
 		{key: "aws:secretKey", value: emulatorCredential("AWS_SECRET_ACCESS_KEY")},
 		{key: "aws:skipCredentialsValidation", value: "true"},
 		{key: "aws:skipMetadataApiCheck", value: "true"},
-		{key: "aws:skipRequestingAccountId", value: "true"},
+		// Not skipped. Skipping it leaves the provider with an empty account
+		// id, which some emulators ignore and LocalStack does not: SNS answers
+		// GetTopicAttributes with "'' is not a valid AWS account ID" and the
+		// stack dies on its first topic. Every emulator answers STS, so there
+		// was never anything to skip.
+		{key: "aws:skipRequestingAccountId", value: "false"},
 		{key: "aws:s3UsePathStyle", value: "true"},
 	}
 	for _, service := range EmulatedServices {

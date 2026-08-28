@@ -26,7 +26,7 @@ import (
 // is wrong in either direction is worse than a list that has to be added to --
 // adding a helper here is one line, and forgetting to costs nothing.
 var harnessHelpers = []string{
-	"aws_local", "app_name", "app_out",
+	"aws_local", "app_name", "app_out", "app_endpoint",
 	"ensure_engine", "ensure_engines", "reset_engines", "stop_engines",
 	"ensure_local_bucket", "reset_local_table", "local_aws_env",
 	"emulator_python_target", "engine_bindings_local", "export_engine_bindings_local",
