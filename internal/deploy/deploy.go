@@ -128,9 +128,30 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 
 	case ActionUp:
-		result, err := stack.Up(ctx,
+		up := []optup.Option{
 			optup.ProgressStreams(opts.Out),
-			optup.ErrorProgressStreams(opts.Err))
+			optup.ErrorProgressStreams(opts.Err),
+		}
+		if opts.EmulatorEndpoint != "" {
+			// One resource at a time, against an emulator only.
+			//
+			// Emulators stand services up in-process as they are asked for, and
+			// two of the same kind arriving together can collide in ways the
+			// real API never does. LocalStack creating two RDS instances at
+			// once is the case that forced this: both generate a TLS
+			// certificate for their Postgres proxy at the same moment and one
+			// fails with `[SSL] PEM lib`, which reaches Pulumi as the instance
+			// entering state `error` with no reason attached. It is timing
+			// dependent -- the same stack succeeds about as often as it fails
+			// -- which makes it worse than a plain bug, because a suite that
+			// passes four times in five looks like a flaky test rather than a
+			// deployment nobody can trust.
+			//
+			// The cost is wall-clock on the emulator, which is where nobody is
+			// waiting. A real deployment is untouched.
+			up = append(up, optup.Parallel(1))
+		}
+		result, err := stack.Up(ctx, up...)
 		if err != nil {
 			return err
 		}

@@ -106,8 +106,13 @@ log "creating stack $STACK"
 pulumi stack init "$STACK" --non-interactive >/dev/null 2>&1 || pulumi stack select "$STACK" >/dev/null
 pulumi_configure_emulator "$STACK"
 
+# --parallel 1: emulators stand services up in-process as they are asked for,
+# and two of the same kind arriving together can collide in ways the real API
+# never does -- two RDS instances generate their TLS certificates at the same
+# moment and one fails with `[SSL] PEM lib`, reaching Pulumi as state `error`
+# with no reason. Timing dependent, so it looks like a flaky test.
 log "pulumi up"
-pulumi up -y --stack "$STACK" --non-interactive
+pulumi up -y --parallel 1 --stack "$STACK" --non-interactive
 pass "provisioned"
 
 # ------------------------------------------------------- L4: provisioning

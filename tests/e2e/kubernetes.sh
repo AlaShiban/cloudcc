@@ -160,7 +160,7 @@ log "creating the cluster (a real k3s container; this takes a minute or two)"
 #
 # Output kept rather than discarded: a `pulumi up` that fails says why, and a
 # harness that throws that away makes the reader run it again by hand.
-pulumi up -y --stack local \
+pulumi up -y --parallel 1 --stack local \
   --exclude "**kubernetes:**" --exclude-dependents >"$WORK/up-cluster.log" 2>&1 \
   || { tail -30 "$WORK/up-cluster.log"; fail "the EKS cluster could not be created"; }
 
@@ -366,7 +366,7 @@ fi
 
 log "deploying the Kubernetes half"
 if CLOUDCC_KUBECONFIG="$(cat "$KUBECONFIG_FILE")" \
-     pulumi up -y --stack local >"$WORK/up-k8s.log" 2>&1; then
+     pulumi up -y --parallel 1 --stack local >"$WORK/up-k8s.log" 2>&1; then
   pass "L4 the Deployment and Service were accepted by the cluster"
 else
   # One failure is expected here and is the emulator's, not the program's: a
