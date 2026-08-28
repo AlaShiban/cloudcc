@@ -28,12 +28,12 @@ docker run -d -p 4566:4566 -v /var/run/docker.sock:/var/run/docker.sock \
 ```
 
 The Docker socket mount is what lets it back Lambda, RDS and ECS with real
-processes rather than mocks. The endpoint is read from `$MINISTACK_ENDPOINT`
+processes rather than mocks. The endpoint is read from `$CLOUDCC_EMULATOR_ENDPOINT`
 everywhere and never hardcoded, so LocalStack or a remote emulator can be
 substituted by setting one variable:
 
 ```bash
-MINISTACK_ENDPOINT=http://localhost:4567 ./tests/e2e/ministack.sh
+CLOUDCC_EMULATOR_ENDPOINT=http://localhost:4567 ./tests/e2e/provisioning.sh
 ```
 
 ## Architecture

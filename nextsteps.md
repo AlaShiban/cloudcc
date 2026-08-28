@@ -86,7 +86,7 @@ with an explanation instead.
 
 ## 2. ~~N4 — deploy a Node app to the emulator~~ — DONE
 
-`./tests/e2e/ministack.sh petstore-node` provisions 11 resources (DynamoDB,
+`./tests/e2e/provisioning.sh petstore-node` provisions 11 resources (DynamoDB,
 Lambda, API Gateway v2) and passes every L4 and L5 assertion, including the
 DynamoDB round trip, and destroy removes the table. It runs in CI beside the
 Python one.

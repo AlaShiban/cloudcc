@@ -44,7 +44,7 @@ cleanup() {
   stop_app
   if [ -n "$CURRENT_OUT" ] && [ -d "$CURRENT_OUT" ]; then
     "$WORK/cloudcc" deploy "$CURRENT_OUT/../src" -o "$CURRENT_OUT" \
-      --stack ministack --destroy >/dev/null 2>&1 || true
+      --stack local --destroy >/dev/null 2>&1 || true
   fi
   [ "$KEEP" = "0" ] && rm -rf "$WORK" || log "workdir kept at $WORK"
   exit $status
@@ -52,7 +52,7 @@ cleanup() {
 trap cleanup EXIT
 
 require_endpoint
-log "emulator: $MINISTACK_ENDPOINT"
+log "emulator: $CLOUDCC_EMULATOR_ENDPOINT"
 log "seeds:    ${SEEDS[*]}"
 
 log "building cloudcc"
@@ -182,7 +182,7 @@ for seed in "${SEEDS[@]}"; do
   # AWS_ENDPOINT_URL is the AWS SDKs' own standard variable, honoured by both
   # boto3 and the JavaScript v3 clients, so the program as written needs no
   # cloudcc-specific configuration to reach the emulator.
-  AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
+  AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT" \
   AWS_REGION="$AWS_REGION" \
   AWS_DEFAULT_REGION="$AWS_REGION" \
   AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-cloudcc-local}" \
@@ -203,13 +203,13 @@ for seed in "${SEEDS[@]}"; do
 
   log "deploying to the emulator"
   CURRENT_OUT="$out"
-  "$WORK/cloudcc" deploy "$src" -o "$out" --stack ministack >/dev/null
+  "$WORK/cloudcc" deploy "$src" -o "$out" --stack local >/dev/null
 
   # The compiled unit reads its bindings from the stack, exactly as it would
   # in a real deployment.
   bindings="$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
     PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-    pulumi stack output --json --stack ministack \
+    pulumi stack output --json --stack local \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"')"
 
   log "running the compiled program against the emulator"
@@ -217,7 +217,7 @@ for seed in "${SEEDS[@]}"; do
     set -a
     eval "$bindings"
     set +a
-    export CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT"
+    export CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT"
     serve "$app_out_dir/$unit" "$target" "$PORT_B" "compiled" \
       --with fastapi --with uvicorn --with boto3
     replay "$PORT_B" "$manifest" "$case_dir/compiled.txt"
@@ -226,7 +226,7 @@ for seed in "${SEEDS[@]}"; do
   pass "compiled run recorded"
 
   log "tearing down"
-  "$WORK/cloudcc" deploy "$src" -o "$out" --stack ministack --destroy >/dev/null
+  "$WORK/cloudcc" deploy "$src" -o "$out" --stack local --destroy >/dev/null
   CURRENT_OUT=""
 
   # ------------------------------------------------------------- compare

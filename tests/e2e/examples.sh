@@ -59,7 +59,7 @@ cleanup() {
   stop_app
   if [ -n "$CURRENT_OUT" ] && [ -d "$CURRENT_OUT" ]; then
     "$WORK/cloudcc" deploy "$CURRENT_SRC" -o "$CURRENT_OUT" \
-      --stack ministack --destroy >/dev/null 2>&1 || true
+      --stack local --destroy >/dev/null 2>&1 || true
   fi
   [ "$KEEP" = "0" ] && rm -rf "$WORK" || log "workdir kept at $WORK"
   exit $status
@@ -67,7 +67,7 @@ cleanup() {
 trap cleanup EXIT
 
 require_endpoint
-log "emulator: $MINISTACK_ENDPOINT"
+log "emulator: $CLOUDCC_EMULATOR_ENDPOINT"
 log "examples: ${EXAMPLES[*]}"
 
 log "building cloudcc"
@@ -237,11 +237,11 @@ for example in "${EXAMPLES[@]}"; do
   fi
   pass "$example: every diagram written, and architecture.py parses"
 
-  "$WORK/cloudcc" deploy "$src" -o "$out" --stack ministack >/dev/null
+  "$WORK/cloudcc" deploy "$src" -o "$out" --stack local >/dev/null
 
   bindings="$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
     PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-    pulumi stack output --json --stack ministack \
+    pulumi stack output --json --stack local \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' \
     | tr '\n' ' ')"
   bindings="$(engine_bindings_local "$bindings")"
@@ -268,7 +268,7 @@ for example in "${EXAMPLES[@]}"; do
   reset_engines "$scenario"
   log "running the compiled copy against the emulator"
   serve "$unit_dir" "$language" "$target" "$PORT_B" "compiled" \
-    "$bindings CLOUDCC_AWS_ENDPOINT_URL=$MINISTACK_ENDPOINT"
+    "$bindings CLOUDCC_AWS_ENDPOINT_URL=$CLOUDCC_EMULATOR_ENDPOINT"
   replay "$PORT_B" "$scenario" "$case_dir/compiled.txt"
   stop_app
   pass "$example: compiled run recorded"
@@ -285,7 +285,7 @@ for example in "${EXAMPLES[@]}"; do
   # is not drawn.
   deployed_types="$(cd "$app_out_dir" && PULUMI_BACKEND_URL="file://$app_out_dir/.pulumi-state" \
     PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-    pulumi stack export --stack ministack 2>/dev/null \
+    pulumi stack export --stack local 2>/dev/null \
     | jq -r '.deployment.resources // [] | .[] | .urn' \
     | awk -F'::' '{print $3}' | grep '^aws:' | sort)"
   deployed_count="$(printf '%s\n' "$deployed_types" | grep -c . || true)"
@@ -324,7 +324,7 @@ for example in "${EXAMPLES[@]}"; do
   fi
 
   log "tearing down"
-  "$WORK/cloudcc" deploy "$src" -o "$out" --stack ministack --destroy >/dev/null
+  "$WORK/cloudcc" deploy "$src" -o "$out" --stack local --destroy >/dev/null
   CURRENT_OUT=""
 
   # ----------------------------------------------------------------- compare

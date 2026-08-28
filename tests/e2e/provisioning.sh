@@ -7,7 +7,7 @@
 # and assert both the HTTP responses and the resulting datastore state.
 #
 # Nothing here talks to real AWS. Every assertion goes through
-# $MINISTACK_ENDPOINT.
+# $CLOUDCC_EMULATOR_ENDPOINT.
 set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -18,7 +18,7 @@ EXAMPLE="${1:-petstore}"
 UNIT="${2:-main}"
 WORK="${CLOUDCC_E2E_WORKDIR:-$(mktemp -d "${TMPDIR:-/tmp}/cloudcc-e2e-XXXXXX")}"
 OUT="$WORK/compiled"
-STACK="ministack"
+STACK="local"
 KEEP="${CLOUDCC_E2E_KEEP:-0}"
 
 cleanup() {
@@ -40,7 +40,7 @@ cleanup() {
 trap cleanup EXIT
 
 require_endpoint
-log "emulator: $MINISTACK_ENDPOINT"
+log "emulator: $CLOUDCC_EMULATOR_ENDPOINT"
 log "workdir:  $WORK"
 
 # ---------------------------------------------------------------- compile
@@ -211,7 +211,7 @@ if [ -f "$UNIT_DIR/package.json" ]; then
   # from hardcoding a filename the compiler chose.
   ENTRY="$(jq -r '.main // "index.js"' "$UNIT_DIR/package.json")"
   cat > "$UNIT_DIR/cloudcc_e2e_serve.mjs" <<SERVE
-// Written by tests/e2e/ministack.sh. Serves the compiled unit over HTTP so the
+// Written by tests/e2e/provisioning.sh. Serves the compiled unit over HTTP so the
 // same functional assertions can be made against it as against a Python one.
 const m = await import("./$ENTRY");
 const app = m.app ?? m.default;
@@ -226,7 +226,7 @@ SERVE
   # the next run.
   (
     cd "$UNIT_DIR"
-    exec env CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
+    exec env CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT" \
       node cloudcc_e2e_serve.mjs
   ) &
 else
@@ -234,7 +234,7 @@ else
   # run before, which only went unnoticed because CI starts from a clean host.
   (
     cd "$UNIT_DIR"
-    exec env CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
+    exec env CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT" \
       PYTHONPATH="$UNIT_DIR" \
       uv run --quiet $(py_run_deps "$UNIT_DIR") \
         python -m uvicorn "$PY_TARGET" --host 127.0.0.1 --port 8099 --log-level warning

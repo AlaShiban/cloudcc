@@ -104,7 +104,7 @@ func TestEveryDefinedHelperIsUsed(t *testing.T) {
 // a real deployment and wrong here, so a harness has to ask
 // emulator_python_target() and override it.
 //
-// ministack.sh did not, and nothing noticed for a long time because no unit it
+// provisioning.sh did not, and nothing noticed for a long time because no unit it
 // deployed carried a compiled extension. The first one that did failed with
 // "No module named 'psycopg2._psycopg'" -- which reads as a missing dependency
 // rather than a wheel built for the wrong platform, and cost a CI round to

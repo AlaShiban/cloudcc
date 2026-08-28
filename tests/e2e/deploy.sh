@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end test of `cloudcc deploy` itself.
 #
-# tests/e2e/ministack.sh drives Pulumi directly, which is what proves the
+# tests/e2e/provisioning.sh drives Pulumi directly, which is what proves the
 # generated project is sound. This one goes through cloudcc's own deploy command,
 # which is what proves the preflight, the emulator stack configuration and the
 # packaging sequence work.
@@ -18,7 +18,7 @@ KEEP="${CLOUDCC_E2E_KEEP:-0}"
 cleanup() {
   local status=$?
   if [ -d "$OUT" ] && [ "${DESTROYED:-0}" != "1" ]; then
-    "$WORK/cloudcc" deploy "$SRC" -o "$OUT" --stack ministack --destroy >/dev/null 2>&1 || true
+    "$WORK/cloudcc" deploy "$SRC" -o "$OUT" --stack local --destroy >/dev/null 2>&1 || true
   fi
   [ "$KEEP" = "0" ] && rm -rf "$WORK" || log "workdir kept at $WORK"
   exit $status
@@ -26,7 +26,7 @@ cleanup() {
 trap cleanup EXIT
 
 require_endpoint
-log "emulator: $MINISTACK_ENDPOINT"
+log "emulator: $CLOUDCC_EMULATOR_ENDPOINT"
 
 log "building cloudcc"
 ( cd "$REPO_ROOT" && go build -o "$WORK/cloudcc" ./cmd/cloudcc )
@@ -38,7 +38,7 @@ cp -R "$REPO_ROOT/examples/$EXAMPLE/." "$SRC/"
 # --------------------------------------------------- preflight refusals
 
 log "checking that deploying without a compile is refused"
-if "$cloudcc_bin" deploy "$SRC" -o "$WORK/never-compiled" --stack ministack --preview >/dev/null 2>&1; then
+if "$cloudcc_bin" deploy "$SRC" -o "$WORK/never-compiled" --stack local --preview >/dev/null 2>&1; then
   fail "deploying a directory that was never compiled should be refused"
 fi
 pass "an uncompiled output is refused"
@@ -49,10 +49,10 @@ APP_OUT="$(app_out "$OUT" "$SRC")"
 
 log "checking that stale output is refused"
 printf '\n\n@app.get("/added-after-compiling")\ndef added():\n    return {}\n' >> "$SRC/app.py"
-if "$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack ministack --preview >/dev/null 2>&1; then
+if "$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack local --preview >/dev/null 2>&1; then
   fail "deploying output that no longer matches the source should be refused (D19)"
 fi
-refusal="$("$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack ministack --preview 2>&1 || true)"
+refusal="$("$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack local --preview 2>&1 || true)"
 case "$refusal" in
   *stale*) ;;
   *) fail "the refusal should say the output is stale, got: $refusal" ;;
@@ -60,20 +60,20 @@ esac
 pass "stale output is refused, with an explanation"
 
 log "checking that --force overrides the refusal"
-"$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack ministack --preview --force >/dev/null 2>&1 \
+"$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack local --preview --force >/dev/null 2>&1 \
   || fail "--force should allow deploying stale output"
 pass "--force overrides the refusal"
 
 log "recompiling so the output matches again"
 "$cloudcc_bin" "$SRC" -o "$OUT" >/dev/null
-"$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack ministack --preview >/dev/null \
+"$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack local --preview >/dev/null \
   || fail "a freshly compiled output should preview cleanly"
 pass "current output is accepted"
 
 # ------------------------------------------------------------- deploy
 
-log "cloudcc deploy --stack ministack"
-"$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack ministack
+log "cloudcc deploy --stack local"
+"$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack local
 pass "deployed"
 
 if skip_unless_service dynamodb; then
@@ -83,7 +83,7 @@ fi
 
 log "checking the exported bindings"
 eval "$(cd "$APP_OUT" && PULUMI_BACKEND_URL="file://$APP_OUT/.pulumi-state" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-        pulumi stack output --json --stack ministack \
+        pulumi stack output --json --stack local \
         | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "export \(.key)=\(.value|@sh)"')"
 [ -n "${CLOUDCC_KV_PETSBYOWNER_TABLE:-}" ] || fail "the stack did not export CLOUDCC_KV_PETSBYOWNER_TABLE"
 pass "bindings exported as $CLOUDCC_KV_PETSBYOWNER_TABLE"
@@ -91,7 +91,7 @@ pass "bindings exported as $CLOUDCC_KV_PETSBYOWNER_TABLE"
 # ------------------------------------------------------------ destroy
 
 log "cloudcc deploy --destroy"
-"$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack ministack --destroy
+"$cloudcc_bin" deploy "$SRC" -o "$OUT" --stack local --destroy
 DESTROYED=1
 
 if skip_unless_service dynamodb; then

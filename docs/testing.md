@@ -7,8 +7,8 @@
 | **L1 unit** | Each package in isolation: config merging, the scheduler, tree-sitter detection, name sanitising, the rewriter, diagnostics | none | `go test ./...` |
 | **L2 golden** | Whole compiled trees for three examples, plus a double-run diff proving byte determinism | none | `go test ./internal/cli` |
 | **L3 type/shape** | `tsc --noEmit` on the generated project under `strict` | none | inside the e2e harness |
-| **L4 provisioning** | `pulumi up` against the emulator, then assert through the AWS CLI | emulator | `./tests/e2e/ministack.sh` |
-| **L5 functional** | Run the compiled application against those resources; assert HTTP responses *and* datastore state | emulator | `./tests/e2e/ministack.sh` |
+| **L4 provisioning** | `pulumi up` against the emulator, then assert through the AWS CLI | emulator | `./tests/e2e/provisioning.sh` |
+| **L5 functional** | Run the compiled application against those resources; assert HTTP responses *and* datastore state | emulator | `./tests/e2e/provisioning.sh` |
 | **Python** | SDK emulations, and their signature parity with the injected shims | none | `cd sdk/python && uv run --with pytest --with-editable . python -m pytest tests` |
 | **Generated corpus** | Twenty generated programs compiled and checked against the generator's own ground truth | none | `go test ./internal/fuzz` |
 | **Examples** | Every example run uncompiled and compiled; every response must match, and each app's architecture diagram must match the deployed stack | emulator | `./tests/e2e/examples.sh` |
@@ -45,7 +45,7 @@ and the second undercounted by two because a topic's Mermaid shape opens with
 
 ```bash
 go test ./...                              # L1 + L2
-./tests/e2e/ministack.sh                   # L3 + L4 + L5, through raw pulumi
+./tests/e2e/provisioning.sh                   # L3 + L4 + L5, through raw pulumi
 ./tests/e2e/deploy.sh                      # the same path through `cloudcc deploy`
 cd sdk/python && uv run --with pytest --with-editable . python -m pytest tests
 ```
@@ -345,8 +345,38 @@ Two jobs, in `.github/workflows/ci.yml`:
 - **integration** — L3 to L5 with the emulator as a service container.
 
 A nightly job can run the same scripts against real AWS by leaving
-`MINISTACK_ENDPOINT` unset; it is off by default because it costs money.
+`CLOUDCC_EMULATOR_ENDPOINT` unset; it is off by default because it costs money.
 
+
+## The emulator
+
+LocalStack Pro, started by `tests/e2e/localstack.sh`. Every harness reads its
+endpoint from `$CLOUDCC_EMULATOR_ENDPOINT` and nothing else, which is what made
+moving off the previous emulator a matter of settings rather than code.
+
+Four settings are not optional, and each was found by watching something fail:
+the auth token (EKS, ECS, RDS and ElastiCache are Pro services),
+the Docker socket (Lambda runs in containers and EKS is backed by a real
+Kubernetes), `LAMBDA_IGNORE_ARCHITECTURE` (a function declares x86_64 and an
+Apple Silicon host is not, and without it every invoke fails with
+`Could not start new environment: ContainerException`, which names neither),
+and `LOCALSTACK_HOST=localhost:4566`, which makes ECR hand out repository URLs
+under `*.localhost` rather than under a public domain that does not resolve
+where DNS is restricted.
+
+Pushing to that ECR needs Docker to treat it as insecure -- Docker requires
+HTTPS for any host that is not literally `localhost`, and the certificate covers
+a different name. On colima:
+
+```yaml
+# ~/.colima/default/colima.yaml
+docker:
+  insecure-registries:
+    - "000000000000.dkr.ecr.us-east-1.localhost:4566"
+```
+
+Wildcards are rejected by dockerd, which wants the exact host, and the symptom
+is a daemon that will not start at all.
 
 ## Kubernetes on the emulator
 
@@ -355,28 +385,31 @@ This is the least mocked thing in the suite: the emulator backs an EKS cluster
 with a real `rancher/k3s` container, so `pulumi up` talks to an actual API
 server, and the pod it describes is scheduled, pulled and started.
 
-**It needs the Docker socket.** Without
-`-v /var/run/docker.sock:/var/run/docker.sock`, the emulator answers
-`create-cluster` with an ACTIVE cluster whose endpoint nothing listens on, and
-its log says `EKS: Docker unavailable -- cluster created without k3s backend`.
-The harness detects that and says so rather than timing out against a stub.
+**It needs the Docker socket.** Without it the cluster is a stub: ACTIVE, with
+an endpoint nothing listens on. The harness detects that and says so rather than
+timing out.
 
-Two things the emulator provisions but cannot serve, both compensated in the
-harness rather than pretended away:
+*Credentials are the real ones.* `aws eks get-token` is accepted, so the
+kubeconfig the compiler generates is used as written -- endpoint, certificate
+authority and exec plugin, exactly as against AWS. Only TLS verification is
+skipped, because the certificate is issued for a hostname this machine cannot
+resolve, and the address is not what is under test. `CLOUDCC_KUBECONFIG` exists
+as a fallback for an emulator that rejects the token, and is unused here.
 
-*Credentials.* k3s authenticates its own client certificates. The token
-`aws eks get-token` returns -- which is what the generated kubeconfig asks for,
-and what is correct against AWS -- is rejected. So the harness passes k3s's own
-kubeconfig through `CLOUDCC_KUBECONFIG`, the one seam the generated program has
-for this. The same bargain as an RDS instance with no engine behind it: the
-shape of the binding is tested and the address in it is not.
+*The registry is the real one too.* The image is pushed into the emulator's own
+ECR, under the repository the compiler provisioned, and the pod pulls it from
+there -- the same round trip a real deployment makes. Side-loading the image
+into the node would be easier and would prove nothing about the pull. Two things
+have to be arranged for that, and neither is about the compiler: the host must
+be allowed to push over plain HTTP (above), and inside the cluster the
+registry's hostname has to point at the emulator rather than at the node, which
+the harness writes into the node's `/etc/hosts` and containerd's `certs.d`.
 
-*The registry.* ECR hands out `000000000000.dkr.ecr.<region>.amazonaws.com`
-URLs, which resolve nowhere. The emulator does serve a real registry API on its
-own endpoint, though, so the harness writes a k3s `registries.yaml` mirroring
-that hostname to it and pushes the image there. The pod then pulls the image the
-way it would from a real ECR, which is the part worth testing -- rather than
-side-loading it into the node and proving nothing about the pull.
+*The cluster has no workers.* Its one node is the control plane, which
+Kubernetes taints so workloads stay off it; real EKS has worker nodes from a
+node group, and the emulator records the node group as an API object without
+starting any machines. The harness removes the taint, which is what a one-node
+development cluster means. Nothing in the Deployment changes.
 
 What remains unverified, and is reported as such rather than failed: a
 `LoadBalancer` Service is never given an external address, because there is no

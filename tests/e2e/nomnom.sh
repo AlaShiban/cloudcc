@@ -18,7 +18,7 @@
 # one of them.
 #
 # Nothing here talks to real AWS. Every assertion goes through
-# $MINISTACK_ENDPOINT.
+# $CLOUDCC_EMULATOR_ENDPOINT.
 set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -27,7 +27,7 @@ EXAMPLE="nomnom"
 UNIT="storefront"
 WORK="${CLOUDCC_E2E_WORKDIR:-$(mktemp -d "${TMPDIR:-/tmp}/cloudcc-nomnom-XXXXXX")}"
 OUT="$WORK/compiled"
-STACK="ministack"
+STACK="local"
 KEEP="${CLOUDCC_E2E_KEEP:-0}"
 PORT=8098
 
@@ -50,7 +50,7 @@ cleanup() {
 trap cleanup EXIT
 
 require_endpoint
-log "emulator: $MINISTACK_ENDPOINT"
+log "emulator: $CLOUDCC_EMULATOR_ENDPOINT"
 log "workdir:  $WORK"
 
 # ---------------------------------------------------------------- compile
@@ -245,7 +245,7 @@ fi
 log "starting the compiled storefront against the emulator"
 (
   cd "$OUT/$UNIT"
-  exec env CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT" \
+  exec env CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT" \
     PYTHONPATH="$OUT/$UNIT" \
     uv run --quiet --with fastapi --with uvicorn --with boto3 \
       python -m uvicorn storefront:app --host 127.0.0.1 --port $PORT --log-level warning

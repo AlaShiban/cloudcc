@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start, stop or check the LocalStack emulator this suite runs against.
 #
-# Every harness reads its endpoint from $MINISTACK_ENDPOINT and nothing else, so
+# Every harness reads its endpoint from $CLOUDCC_EMULATOR_ENDPOINT and nothing else, so
 # swapping emulators is a matter of what is listening on that port. This script
 # starts LocalStack with the four settings that are not optional, each of which
 # was found by watching something fail:
@@ -27,6 +27,26 @@
 #                           from this range. Publishing only 4566 leaves the
 #                           cluster unreachable.
 #
+#   LOCALSTACK_HOST         By default LocalStack hands out hostnames under
+#                           localhost.localstack.cloud, a public name that
+#                           resolves to 127.0.0.1 -- and does not resolve at all
+#                           where DNS is blocked or absent. Pointing it at
+#                           localhost makes ECR hand out
+#                           <account>.dkr.ecr.<region>.localhost:4566, and
+#                           *.localhost resolves without asking anyone.
+#
+# Pushing to that registry needs Docker to treat it as insecure, because Docker
+# requires HTTPS for any host that is not literally localhost and LocalStack's
+# certificate covers a different name. On colima that is:
+#
+#     # ~/.colima/default/colima.yaml
+#     docker:
+#       insecure-registries:
+#         - "000000000000.dkr.ecr.us-east-1.localhost:4566"
+#
+# then `colima restart`. Wildcards are rejected by dockerd -- it wants the exact
+# host -- and the failure is a daemon that will not start at all.
+#
 # The token is read from the environment and never written anywhere: not into
 # this repository, not into a compose file, not into a container label. Set it
 # once in your shell, or in a file outside the repository that you source.
@@ -37,7 +57,7 @@ set -euo pipefail
 
 CONTAINER="${CLOUDCC_LOCALSTACK_CONTAINER:-localstack-main}"
 IMAGE="${CLOUDCC_LOCALSTACK_IMAGE:-localstack/localstack-pro:latest}"
-ENDPOINT="${MINISTACK_ENDPOINT:-http://localhost:4566}"
+ENDPOINT="${CLOUDCC_EMULATOR_ENDPOINT:-http://localhost:4566}"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
@@ -56,6 +76,7 @@ case "${1:-status}" in
       -p 4566:4566 -p 4510-4559:4510-4559 \
       -e LOCALSTACK_AUTH_TOKEN \
       -e LAMBDA_IGNORE_ARCHITECTURE=1 \
+      -e LOCALSTACK_HOST=localhost:4566 \
       -v /var/run/docker.sock:/var/run/docker.sock \
       "$IMAGE" >/dev/null || fail "could not start $CONTAINER"
 

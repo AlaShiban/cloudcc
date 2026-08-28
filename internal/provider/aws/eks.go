@@ -45,13 +45,14 @@ const ClusterName = "kubernetes"
 // assembled from the cluster's outputs.
 //
 // Needed because a local emulator provisions a Kubernetes cluster it cannot
-// hand out EKS credentials for: ministack backs a cluster with k3s, and k3s
-// authenticates its own client certificates rather than the token
-// `aws eks get-token` returns -- so the kubeconfig that is correct for AWS is
-// rejected by the thing standing in for it. The same bargain as an RDS instance
-// with no engine behind it, and answered the same way: the harness supplies the
-// address that works, and everything about the shape of the thing is still
-// tested.
+// hand out EKS credentials for. LocalStack accepts the token
+// `aws eks get-token` returns, so against it this variable is never set and the
+// generated kubeconfig is used as written. Some emulators do not: k3s
+// authenticates its own client certificates and rejects the token outright, and
+// then the kubeconfig that is correct for AWS is rejected by the thing standing
+// in for it. The same bargain as an RDS instance with no engine behind it, and
+// answered the same way: the harness supplies what works, and the shape of the
+// thing is still tested.
 const EnvKubeconfig = "CLOUDCC_KUBECONFIG"
 
 // eksUnit expands one execution unit into a Deployment on the shared cluster.

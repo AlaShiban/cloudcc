@@ -17,7 +17,7 @@ import (
 
 // MinistackEndpointEnv names the environment variable holding the AWS-compatible
 // emulator endpoint. It is never hardcoded anywhere else.
-const MinistackEndpointEnv = "MINISTACK_ENDPOINT"
+const MinistackEndpointEnv = "CLOUDCC_EMULATOR_ENDPOINT"
 
 // DefaultMinistackEndpoint is the conventional emulator address.
 const DefaultMinistackEndpoint = "http://localhost:4566"

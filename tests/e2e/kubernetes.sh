@@ -43,7 +43,7 @@ cleanup() {
     ( cd "$CURRENT_OUT" \
         && PULUMI_BACKEND_URL="file://$CURRENT_OUT/.pulumi-state" \
            PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-           pulumi destroy -y --stack ministack >/dev/null 2>&1 ) || true
+           pulumi destroy -y --stack local >/dev/null 2>&1 ) || true
   fi
   # The k3s container outlives the stack it belonged to: deleting the EKS
   # cluster is what removes it, and a destroy that failed would otherwise leave
@@ -63,7 +63,7 @@ for tool in kubectl docker; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is required by this test"
 done
 
-log "emulator: $MINISTACK_ENDPOINT"
+log "emulator: $CLOUDCC_EMULATOR_ENDPOINT"
 
 # Anything this app left behind, removed before starting.
 #
@@ -148,8 +148,8 @@ mkdir -p "$APP_OUT/.pulumi-state"
 # `pulumi` means by a project: it searches upwards for Pulumi.yaml from the
 # working directory. Everything else this script touches is an absolute path.
 cd "$APP_OUT"
-pulumi stack init ministack 2>/dev/null || pulumi stack select ministack
-pulumi_configure_emulator ministack
+pulumi stack init local 2>/dev/null || pulumi stack select local
+pulumi_configure_emulator local
 
 log "creating the cluster (a real k3s container; this takes a minute or two)"
 # Excluding the Kubernetes half rather than targeting the AWS half. `--target`
@@ -160,7 +160,7 @@ log "creating the cluster (a real k3s container; this takes a minute or two)"
 #
 # Output kept rather than discarded: a `pulumi up` that fails says why, and a
 # harness that throws that away makes the reader run it again by hand.
-pulumi up -y --stack ministack \
+pulumi up -y --stack local \
   --exclude "**kubernetes:**" --exclude-dependents >"$WORK/up-cluster.log" 2>&1 \
   || { tail -30 "$WORK/up-cluster.log"; fail "the EKS cluster could not be created"; }
 
@@ -170,33 +170,87 @@ STATUS="$(aws_local eks describe-cluster --name "$CLUSTER" --query 'cluster.stat
 [ "$STATUS" = "ACTIVE" ] || fail "cluster $CLUSTER is $STATUS, not ACTIVE"
 pass "L4 eks: cluster $CLUSTER is ACTIVE"
 
-ECR_URL="$(pulumi stack output --json --stack ministack \
+ECR_URL="$(pulumi stack output --json --stack local \
   | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_ECR_")) | .value' | head -1)"
 [ -n "$ECR_URL" ] || fail "the stack exported no ECR repository URL"
 
-# The Kubernetes container, found by the port the cluster says it is on rather
-# than by name.
+# The Kubernetes container, found by its image.
 #
-# Both emulators back a cluster with k3s in a container and neither names it the
-# same way -- ministack uses ministack-eks-<region>-<cluster>, LocalStack uses
-# something else again. The endpoint is the one thing both report and both mean:
-# whatever is publishing that port is the cluster.
+# Both emulators back a cluster with k3s and neither names the container the
+# same way: ministack runs it directly as ministack-eks-<region>-<cluster>,
+# LocalStack runs it through k3d as k3d-<cluster>-<hash>-server-0. What they
+# share is the image, so that is what to look for. Finding it by the published
+# port does not work either -- LocalStack proxies the API server through itself,
+# so the port belongs to LocalStack rather than to the cluster.
 ENDPOINT="$(aws_local eks describe-cluster --name "$CLUSTER" --query 'cluster.endpoint' --output text)"
-PORT="${ENDPOINT##*:}"
-[ -n "$PORT" ] && [ "$PORT" != "$ENDPOINT" ] || fail "the cluster endpoint names no port: $ENDPOINT"
-
-K3S="$(docker ps --filter "publish=$PORT" --format '{{.Names}}' | head -1)"
+# Waited for, not checked once. A cluster reports ACTIVE before its container
+# has finished starting -- LocalStack answers describe-cluster from its own
+# state while k3d is still coming up -- so a single look finds nothing and
+# blames the Docker socket for a race.
+#
+# Matched on the image rather than through --filter ancestor, which resolves
+# the argument to an image id and misses a tag it has not seen under that exact
+# name.
+find_cluster_container() {
+  docker ps --format '{{.Names}}\t{{.Image}}' | awk '$2 ~ /k3s/ {print $1}' \
+    | grep -- '-server-0$' || docker ps --format '{{.Names}}\t{{.Image}}' \
+    | awk '$2 ~ /k3s/ {print $1}' | head -1
+}
+K3S=""
+waited=0
+while [ -z "$K3S" ]; do
+  K3S="$(find_cluster_container | head -1)"
+  [ -n "$K3S" ] && break
+  waited=$((waited + 1))
+  [ "$waited" -gt 120 ] && break
+  sleep 1
+done
 [ -n "$K3S" ] \
-  || fail "the cluster says it is at $ENDPOINT, and no container publishes port $PORT.
+  || fail "the cluster says it is at $ENDPOINT, and after two minutes no container is running a k3s image.
   The emulator needs the Docker socket to back a cluster with a real Kubernetes:
       docker run ... -v /var/run/docker.sock:/var/run/docker.sock <emulator>
   Without it the cluster is a stub -- ACTIVE, with an endpoint nothing listens on."
-pass "L4 eks: backed by a real Kubernetes at $K3S (port $PORT)"
+pass "L4 eks: backed by a real Kubernetes at $K3S"
+
+# The kubeconfig, in the order of how faithful each one is.
+#
+# First the one the compiler generates: the cluster's own endpoint and an exec
+# plugin calling `aws eks get-token`, which is what a program deploying to real
+# EKS uses. LocalStack accepts it; ministack's k3s does not, because k3s
+# authenticates its own client certificates and has never heard of the token.
+#
+# TLS verification is skipped rather than the certificate trusted, because the
+# certificate is issued for a hostname the emulator advertises and this machine
+# cannot resolve. The address is not what is under test.
 KUBECONFIG_FILE="$WORK/kubeconfig"
-docker exec "$K3S" cat /etc/rancher/k3s/k3s.yaml 2>/dev/null \
-  | sed "s#https://127.0.0.1:6443#https://127.0.0.1:$PORT#" > "$KUBECONFIG_FILE"
-[ -s "$KUBECONFIG_FILE" ] || fail "could not read k3s's kubeconfig from $K3S"
+cat > "$KUBECONFIG_FILE" <<KUBECONFIG
+apiVersion: v1
+clusters:
+- cluster: {server: "${ENDPOINT/localhost.localstack.cloud/localhost}", insecure-skip-tls-verify: true}
+  name: cloudcc
+contexts: [{context: {cluster: cloudcc, user: cloudcc}, name: cloudcc}]
+current-context: cloudcc
+kind: Config
+users:
+- name: cloudcc
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: aws
+      args: ["--endpoint-url", "$CLOUDCC_EMULATOR_ENDPOINT", "eks", "get-token", "--cluster-name", "$CLUSTER"]
+KUBECONFIG
 export KUBECONFIG="$KUBECONFIG_FILE"
+
+if kubectl get nodes >/dev/null 2>&1; then
+  pass "L5 the cluster accepts the credentials a real deployment would use"
+else
+  log "the cluster rejected an EKS token; falling back to its own client certificate"
+  PORT="$(docker port "$K3S" 6443/tcp 2>/dev/null | head -1 | sed 's/.*://')"
+  [ -n "$PORT" ] || fail "no EKS token accepted and $K3S publishes no API port"
+  docker exec "$K3S" cat /etc/rancher/k3s/k3s.yaml 2>/dev/null \
+    | sed "s#https://127.0.0.1:6443#https://127.0.0.1:$PORT#" > "$KUBECONFIG_FILE"
+  [ -s "$KUBECONFIG_FILE" ] || fail "could not read a kubeconfig from $K3S"
+fi
 
 waited=0
 until kubectl get nodes >/dev/null 2>&1; do
@@ -206,56 +260,113 @@ until kubectl get nodes >/dev/null 2>&1; do
 done
 pass "L5 the cluster's API answers, and a node is registered"
 
-# The registry. The emulator's ECR hands out
-# 000000000000.dkr.ecr.<region>.amazonaws.com URLs, which resolve nowhere -- but
-# it does serve a real registry API on its own endpoint, so the fix is to point
-# k3s at it rather than to smuggle the image in behind Kubernetes' back. The pod
-# then pulls the image the way it would from a real ECR, which is the part worth
-# testing.
+# The registry.
 #
-# A mirror is read at startup, so k3s is restarted after it is written.
-EMULATOR_IP="$(docker inspect "$(docker ps --filter publish=4566 --format '{{.Names}}' | head -1)" \
-  --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.IPAddress}}{{end}}' 2>/dev/null)"
-[ -n "$EMULATOR_IP" ] || fail "could not find the emulator's address on the Docker network"
-REGISTRY_HOST="$(printf '%s' "$ECR_URL" | cut -d/ -f1)"
-log "pointing k3s at the emulator's registry ($REGISTRY_HOST -> $EMULATOR_IP:4566)"
-
-# -i, because docker exec does not forward stdin without it and the heredoc
-# below would write an empty file -- which k3s reads happily, leaving no mirror
-# and a pull that fails against a hostname that resolves nowhere.
-docker exec -i "$K3S" sh -c "mkdir -p /etc/rancher/k3s && cat > /etc/rancher/k3s/registries.yaml" <<REGISTRIES
-mirrors:
-  "$REGISTRY_HOST":
-    endpoint:
-      - "http://$EMULATOR_IP:4566"
-REGISTRIES
-docker restart "$K3S" >/dev/null || fail "could not restart k3s with the registry mirror"
-
-waited=0
-until kubectl get nodes >/dev/null 2>&1; do
-  waited=$((waited + 1))
-  [ "$waited" -gt 120 ] && fail "the Kubernetes API did not come back after the restart"
-  sleep 1
+# The image goes into the emulator's own ECR, under the repository the compiler
+# provisioned, and the pod pulls it from there -- the same round trip a real
+# deployment makes. Side-loading it into the node would be easier and would
+# prove nothing about the pull.
+#
+# Two things have to be arranged for that to work against an emulator, and
+# neither is about the compiler. The host must be willing to push over plain
+# HTTP, which is a Docker daemon setting (see tests/e2e/localstack.sh). And the
+# cluster must resolve the registry's hostname to the emulator: inside the node,
+# "localhost" is the node, so the name has to be pointed at the emulator's
+# address on the Docker network explicitly.
+EMULATOR="$(docker ps --filter publish=4566 --format '{{.Names}}' | head -1)"
+[ -n "$EMULATOR" ] || fail "no container publishes the emulator's port"
+# One address, and specifically one the cluster can reach. The emulator sits on
+# several Docker networks once it has created a cluster of its own, and a
+# template that ranges over them concatenates their addresses into nonsense --
+# 172.17.0.2172.19.0.5172.18.0.2 is not a host anyone can dial. Preferring a
+# network the cluster is also on is what makes the address routable from inside
+# it; the first one is the fallback when they share none.
+EMULATOR_IP=""
+for net in $(docker inspect "$K3S" \
+    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null); do
+  EMULATOR_IP="$(docker inspect "$EMULATOR" \
+    --format "{{with index .NetworkSettings.Networks \"$net\"}}{{.IPAddress}}{{end}}" 2>/dev/null)"
+  [ -n "$EMULATOR_IP" ] && break
 done
-pass "k3s restarted with the emulator as its registry"
+if [ -z "$EMULATOR_IP" ]; then
+  EMULATOR_IP="$(docker inspect "$EMULATOR" \
+    --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.IPAddress}}
+{{end}}' 2>/dev/null | grep -m1 .)"
+fi
+[ -n "$EMULATOR_IP" ] || fail "could not find $EMULATOR's address on the Docker network"
 
-# Pushed under the repository name the compiler chose, through the endpoint the
-# emulator actually listens on. `bin/push-images.sh` does this against the ECR
-# hostname, which is the right thing everywhere except here.
-log "pushing $IMAGE to the emulator's registry"
-REPO_PATH="$(printf '%s' "$ECR_URL" | cut -d/ -f2-)"
-# Parameter expansion rather than sed: BSD sed has no \? in a basic regular
-# expression, so the scheme survived and docker was handed http://host/repo,
-# which is not a reference.
-LOCAL_REF="${MINISTACK_ENDPOINT#*://}/$REPO_PATH:latest"
-docker tag "$IMAGE" "$LOCAL_REF" || fail "could not tag $IMAGE as $LOCAL_REF"
-docker push "$LOCAL_REF" >"$WORK/push.log" 2>&1 \
-  || { tail -10 "$WORK/push.log"; fail "could not push to the emulator's registry"; }
-pass "image pushed as $REPO_PATH:latest"
+REGISTRY_HOST="$(printf '%s' "$ECR_URL" | cut -d/ -f1)"
+REGISTRY_NAME="${REGISTRY_HOST%%:*}"
+log "pushing $IMAGE to $ECR_URL"
+docker tag "$IMAGE" "$ECR_URL:latest" || fail "could not tag $IMAGE as $ECR_URL:latest"
+docker push "$ECR_URL:latest" >"$WORK/push.log" 2>&1 || {
+  tail -5 "$WORK/push.log"
+  fail "could not push to the emulator's registry.
+  Docker refuses plain HTTP unless the registry is listed as insecure. Add it:
+      # ~/.colima/default/colima.yaml
+      docker:
+        insecure-registries:
+          - \"$REGISTRY_HOST\"
+  then colima restart. Wildcards are rejected; dockerd wants the exact host."
+}
+pass "image pushed to the emulator's ECR"
+
+log "pointing the cluster at the registry ($REGISTRY_NAME -> $EMULATOR_IP)"
+# Inside the node, the registry's name must reach the emulator rather than the
+# node itself. The hostname is kept rather than replaced by the address, because
+# the emulator routes ECR on the Host header and an address would arrive as a
+# name it does not serve.
+docker exec -i "$K3S" sh -c "grep -q '$REGISTRY_NAME' /etc/hosts || echo '$EMULATOR_IP $REGISTRY_NAME' >> /etc/hosts" \
+  || fail "could not teach the cluster where the registry is"
+
+# Written where containerd reads it per pull, rather than into registries.yaml,
+# which k3s reads once at startup. No restart: k3s sets containerd's
+# config_path to this directory, so a mirror added here takes effect on the next
+# pull -- and the container cannot be restarted anyway once its cluster is
+# running.
+#
+# -i, because docker exec does not forward stdin without it and the heredoc
+# would write an empty file, leaving no mirror and a pull that fails against a
+# name resolving to the node itself.
+CERTS_D="/var/lib/rancher/k3s/agent/etc/containerd/certs.d/$REGISTRY_HOST"
+docker exec -i "$K3S" sh -c "mkdir -p '$CERTS_D' && cat > '$CERTS_D/hosts.toml'" <<HOSTS
+server = "http://$REGISTRY_HOST"
+
+[host."http://$REGISTRY_HOST"]
+  capabilities = ["pull", "resolve"]
+HOSTS
+pass "the cluster can reach the emulator's registry"
+
+# The cluster has one node and it is the control plane, which Kubernetes taints
+# so that workloads do not land on it. Real EKS has worker nodes from a node
+# group; this emulator records the node group as an API object and starts no
+# machines, so the control plane is all there is.
+#
+# Removing the taint is the harness saying "treat this single node as the
+# cluster", which is what a one-node development cluster means. It is not a
+# statement about the application: nothing in the Deployment changes, and on
+# real EKS the pods land on workers that were never tainted.
+control_plane_taint() {
+  kubectl get nodes -o jsonpath='{.items[*].spec.taints[*].key}' 2>/dev/null \
+    | grep -c 'node-role.kubernetes.io/control-plane' || true
+}
+if [ "$(control_plane_taint)" != "0" ]; then
+  # Checked by re-reading the node rather than by the command's exit code. The
+  # two forms of this command -- with and without the effect suffix -- disagree
+  # about what counts as success when there is nothing to remove, and what
+  # matters is the state afterwards either way.
+  kubectl taint nodes --all node-role.kubernetes.io/control-plane- >"$WORK/untaint.log" 2>&1 || true
+  kubectl taint nodes --all node-role.kubernetes.io/control-plane:NoSchedule- >>"$WORK/untaint.log" 2>&1 || true
+  if [ "$(control_plane_taint)" != "0" ]; then
+    cat "$WORK/untaint.log"
+    fail "the cluster's only node is still tainted, so no pod can be scheduled on it"
+  fi
+  pass "the control-plane node is schedulable (this cluster has no workers)"
+fi
 
 log "deploying the Kubernetes half"
 if CLOUDCC_KUBECONFIG="$(cat "$KUBECONFIG_FILE")" \
-     pulumi up -y --stack ministack >"$WORK/up-k8s.log" 2>&1; then
+     pulumi up -y --stack local >"$WORK/up-k8s.log" 2>&1; then
   pass "L4 the Deployment and Service were accepted by the cluster"
 else
   # One failure is expected here and is the emulator's, not the program's: a
@@ -321,7 +432,7 @@ pass "L5 the Service routes to the pod: $BODY"
 
 log "tearing down"
 CLOUDCC_KUBECONFIG="$(cat "$KUBECONFIG_FILE")" \
-  pulumi destroy -y --stack ministack >/dev/null 2>&1 || true
+  pulumi destroy -y --stack local >/dev/null 2>&1 || true
 CURRENT_OUT=""
 
 echo

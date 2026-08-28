@@ -178,7 +178,7 @@ aws_local s3api create-bucket --bucket "$FS_BUCKET" >/dev/null 2>&1 || true
 log "running the shims against them"
 (
   cd "$WORK"
-  export CLOUDCC_AWS_ENDPOINT_URL="$MINISTACK_ENDPOINT"
+  export CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT"
   export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-cloudcc-local}"
   export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-cloudcc-local}"
   export CLOUDCC_KV_PETS_TABLE="$KV_TABLE"

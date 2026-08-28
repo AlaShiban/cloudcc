@@ -95,10 +95,10 @@ docker run -d -p 4566:4566 -v /var/run/docker.sock:/var/run/docker.sock \
   ministackorg/ministack
 
 cloudcc ./examples/petstore -o /tmp/petstore
-cloudcc deploy ./examples/petstore -o /tmp/petstore --stack ministack
+cloudcc deploy ./examples/petstore -o /tmp/petstore --stack local
 ```
 
-`--stack ministack` points every service at `$MINISTACK_ENDPOINT` (default
+`--stack local` points every service at `$CLOUDCC_EMULATOR_ENDPOINT` (default
 `http://localhost:4566`), supplies throwaway credentials, and keeps Pulumi
 state inside the output directory. Nothing needs an account.
 

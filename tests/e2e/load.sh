@@ -60,7 +60,7 @@ cleanup() {
   if [ -n "$CURRENT_OUT" ] && [ -d "$CURRENT_OUT" ]; then
     ( cd "$CURRENT_OUT" \
         && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-        pulumi destroy -y --stack ministack >/dev/null 2>&1 ) || true
+        pulumi destroy -y --stack local >/dev/null 2>&1 ) || true
   fi
   [ "$KEEP" = "0" ] && rm -rf "$WORK" || log "workdir kept at $WORK"
   exit $status
@@ -175,10 +175,10 @@ observe() {
 # A wrong answer here is worse than no answer: reporting an edge as dead when
 # the emulator has died would send someone looking for a bug in their program.
 require_emulator_still_up() {
-  if curl -sf -m 5 -o /dev/null "$MINISTACK_ENDPOINT" 2>/dev/null; then
+  if curl -sf -m 5 -o /dev/null "$CLOUDCC_EMULATOR_ENDPOINT" 2>/dev/null; then
     return 0
   fi
-  fail "the emulator at $MINISTACK_ENDPOINT stopped answering during the run.
+  fail "the emulator at $CLOUDCC_EMULATOR_ENDPOINT stopped answering during the run.
   A load test is the heaviest thing this emulator is asked to do -- the
   application's units run as containers beside it -- and on a small Docker VM
   it can be killed for memory. Nothing here is evidence about $EXAMPLE either
@@ -211,7 +211,7 @@ env_slug() {
 stack_output() {
   ( cd "$1" \
       && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-      pulumi stack output --json --stack ministack 2>/dev/null ) \
+      pulumi stack output --json --stack local 2>/dev/null ) \
     | jq -r --arg key "$2" '.[$key] // ""'
 }
 
@@ -396,14 +396,14 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
     # Not suppressed: an init that fails for a reason other than "it already
     # exists" is otherwise invisible, and the select after it then reports a
     # missing stack -- which sends the reader looking in the wrong place.
-    if ! pulumi stack select ministack >/dev/null 2>&1; then
-      pulumi stack init ministack --non-interactive || exit 1
+    if ! pulumi stack select local >/dev/null 2>&1; then
+      pulumi stack init local --non-interactive || exit 1
     fi
-    PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator pulumi_configure_emulator ministack
+    PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator pulumi_configure_emulator local
     # Captured rather than discarded. Pulumi reports a failed update on
     # stdout along with the resource list, so suppressing the noise suppresses
     # the reason too -- and "pulumi up failed" on its own is not a diagnosis.
-    pulumi up -y --stack ministack --non-interactive > "$case_dir/pulumi-up.log" 2>&1
+    pulumi up -y --stack local --non-interactive > "$case_dir/pulumi-up.log" 2>&1
   ) || {
     sed 's/^/    /' "$case_dir/pulumi-up.log" | tail -30
     fail "$EXAMPLE: pulumi up failed"
@@ -411,12 +411,12 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
 
   bindings="$( ( cd "$app_out_dir" \
       && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-      pulumi stack output --json --stack ministack ) \
+      pulumi stack output --json --stack local ) \
     | jq -r 'to_entries[] | select(.key | startswith("CLOUDCC_")) | "\(.key)=\(.value)"' | tr '\n' ' ')"
   bindings="$(engine_bindings_local "$bindings")"
   seed_secrets "$( ( cd "$app_out_dir" \
       && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-      pulumi stack output --json --stack ministack ) )"
+      pulumi stack output --json --stack local ) )"
 
   # Again, before the compiled half. The table and the bucket differ between
   # the two runs -- one is the local name, the other is provisioned -- but the
@@ -428,7 +428,7 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
   require_emulator_still_up
   log "load: the compiled application"
   serve "$app_out_dir/$unit" "$language" "$target" "$PORT_B" "$EXAMPLE-after" \
-    "$bindings CLOUDCC_AWS_ENDPOINT_URL=$MINISTACK_ENDPOINT"
+    "$bindings CLOUDCC_AWS_ENDPOINT_URL=$CLOUDCC_EMULATOR_ENDPOINT"
   "$WORK/loadgen" -ir "$case_dir/ir.json" -seed "$scenario" -app "$EXAMPLE" \
     -url "http://127.0.0.1:$PORT_B" -mode compiled -scale "$scale" \
     -out "$case_dir/after.json" || fail "$EXAMPLE: the compiled run failed"
@@ -476,7 +476,7 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
 
   ( cd "$app_out_dir" \
       && PULUMI_BACKEND_URL="$CURRENT_BACKEND" PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
-      pulumi destroy -y --stack ministack >/dev/null 2>&1 ) || true
+      pulumi destroy -y --stack local >/dev/null 2>&1 ) || true
   CURRENT_OUT=""
 
   # ------------------------------------------------------- report
@@ -485,7 +485,7 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
   # talking to an emulator, whose Lambda invoke is far slower than the real
   # one. The ratio is a measurement of this machine and this emulator, and is
   # worth watching for change rather than reading as a production figure.
-  log "ratios below are against $MINISTACK_ENDPOINT, not real AWS"
+  log "ratios below are against $CLOUDCC_EMULATOR_ENDPOINT, not real AWS"
   if "$WORK/loadgen" -compare "$case_dir/before.json" "$case_dir/after.json"; then
     pass "$EXAMPLE: every edge carried traffic, and the benchmark is above"
     compared=$((compared + 1))

@@ -36,8 +36,8 @@ const (
 	ActionDestroy Action = "destroy"
 )
 
-// MinistackStack is the stack name that auto-configures for an AWS emulator.
-const MinistackStack = "ministack"
+// EmulatorStack is the stack name that auto-configures for an AWS emulator.
+const EmulatorStack = "local"
 
 // Options controls one deploy run.
 type Options struct {

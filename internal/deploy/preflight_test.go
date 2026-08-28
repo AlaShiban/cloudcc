@@ -175,7 +175,7 @@ func TestStackNameDefaultsToTheApp(t *testing.T) {
 }
 
 func TestDescribeStackSaysWhereItIsGoing(t *testing.T) {
-	emulator := DescribeStack(MinistackStack, "http://localhost:4566")
+	emulator := DescribeStack(EmulatorStack, "http://localhost:4566")
 	if !strings.Contains(emulator, "emulator") || !strings.Contains(emulator, "4566") {
 		t.Errorf("an emulator stack should say so and name the endpoint: %q", emulator)
 	}

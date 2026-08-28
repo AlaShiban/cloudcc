@@ -113,11 +113,9 @@ jobs:
       # against `ephemeral_storage`, `sizeInGib` against `size_in_gib`. A wrong
       # name compiles, emits, deploys and is silently ignored by the provider.
       #
-      # kitchen-sink because it is the only example with both compute types, and
-      # the emulator implements neither ECS nor an ALB, so it is never deployed
-      # by the integration job below. Without this step its task definition
-      # arguments have no check at all beyond a golden file that would happily
-      # pin a misspelling.
+      # kitchen-sink because it is the only example with both compute types.
+      # Cheap, and it runs in the offline job, so a misspelled argument is
+      # caught in seconds rather than after a deploy.
       - name: The generated project type-checks against Pulumi's types
         run: |
           go run ./cmd/cloudcc ./examples/kitchen-sink -o /tmp/typecheck
@@ -129,20 +127,40 @@ jobs:
     name: provisioning + functional (emulator)
     runs-on: ubuntu-latest
     services:
-      ministack:
-        image: ministackorg/ministack
-        ports: ["4566:4566"]
+      # LocalStack Pro. The Pro services are not optional for this suite: EKS,
+      # ECS, RDS and ElastiCache are all behind the licence, and without one the
+      # stack fails on the first of them it reaches.
+      #
+      # LOCALSTACK_AUTH_TOKEN must be set as a repository secret. A pull request
+      # from a fork cannot read it, and this job will fail for that reason
+      # rather than silently degrade -- which is the right way round: a suite
+      # that quietly stopped deploying RDS would still be green.
+      localstack:
+        image: localstack/localstack-pro:latest
+        ports: ["4566:4566", "4510-4559:4510-4559"]
+        env:
+          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+          # A Lambda declares x86_64 unless told otherwise. The runner is
+          # x86_64, so this is belt and braces here and load-bearing on an arm64
+          # developer machine -- kept identical to tests/e2e/localstack.sh so
+          # the two environments cannot drift.
+          LAMBDA_IGNORE_ARCHITECTURE: "1"
+          # Hand out hostnames under localhost rather than
+          # localhost.localstack.cloud, which is a public name and does not
+          # resolve where DNS is restricted. ECR's repository URLs are the ones
+          # that matter: a cluster has to be able to reach them.
+          LOCALSTACK_HOST: localhost:4566
         # No --health-cmd: the healthcheck runs inside the container, which has
         # no curl, so the emulator was being marked unhealthy while serving
         # perfectly well. The job waits from the runner side instead.
         #
-        # The Docker socket is what lets the emulator back Lambda, RDS and ECS
-        # with real processes rather than mocks.
+        # The Docker socket is what lets the emulator run Lambda in containers
+        # and back EKS with a real Kubernetes rather than a stub.
         options: >-
           -v /var/run/docker.sock:/var/run/docker.sock
 
     env:
-      MINISTACK_ENDPOINT: http://localhost:4566
+      CLOUDCC_EMULATOR_ENDPOINT: http://localhost:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
@@ -170,7 +188,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y graphviz
 
       - name: Wait for the emulator
-        run: ./hack/wait-for.sh "$MINISTACK_ENDPOINT" 120
+        run: ./hack/wait-for.sh "$CLOUDCC_EMULATOR_ENDPOINT" 120
 
       - name: Toolchain check
         run: |
@@ -185,26 +203,26 @@ jobs:
         run: ./tests/e2e/node-clients.sh
 
       - name: Provisioning and functional tests
-        run: ./tests/e2e/ministack.sh
+        run: ./tests/e2e/provisioning.sh
 
       # The same gate for a Node application: the harness is parameterised by
       # example, and everything below the language frontend is shared, so this
       # is the check that the seam actually holds.
       - name: Provisioning and functional tests (Node)
-        run: ./tests/e2e/ministack.sh petstore-node
+        run: ./tests/e2e/provisioning.sh petstore-node
 
       # A multi-unit application whose entry module is not called app.py. It
       # was never run here before, because the harness hardcoded `uvicorn
       # app:app`; it now asks the compiler which module holds the application,
       # which is a fact the compiler already worked out.
       - name: Provisioning and functional tests (multi-unit)
-        run: ./tests/e2e/ministack.sh petstore-multi api
+        run: ./tests/e2e/provisioning.sh petstore-multi api
 
       # One application, two languages, one store. The architecture has always
       # claimed to support this -- a frontend is chosen per execution unit --
       # but nothing checked it until there was an example that deploys.
       - name: Provisioning and functional tests (mixed languages)
-        run: ./tests/e2e/ministack.sh mixed api
+        run: ./tests/e2e/provisioning.sh mixed api
 
       # Six units talking to each other two ways. This is the only test in the
       # suite where a deployed unit calls another deployed unit -- dispatch,

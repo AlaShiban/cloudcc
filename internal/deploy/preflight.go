@@ -124,7 +124,7 @@ func Preflight(in PreflightInput) ([]string, error) {
 		return warnings, &PreflightError{
 			Reason: "no AWS credentials found",
 			Fix: "configure them with `aws configure`, or deploy against an emulator with --stack " +
-				MinistackStack,
+				EmulatorStack,
 		}
 	}
 	return warnings, nil
@@ -160,7 +160,7 @@ func credentialsPresent() bool {
 
 // DescribeStack explains what a stack name implies, for the deploy summary.
 func DescribeStack(name, endpoint string) string {
-	if strings.EqualFold(name, MinistackStack) {
+	if strings.EqualFold(name, EmulatorStack) {
 		return fmt.Sprintf("stack %q, configured against the emulator at %s", name, endpoint)
 	}
 	return fmt.Sprintf("stack %q, against real AWS", name)

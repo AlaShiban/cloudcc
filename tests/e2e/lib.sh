@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Shared helpers for the integration harness.
 #
-# The emulator endpoint is always read from $MINISTACK_ENDPOINT and never
+# The emulator endpoint is always read from $CLOUDCC_EMULATOR_ENDPOINT and never
 # hardcoded, so LocalStack or a remote emulator can be substituted by setting
 # one variable.
 
-: "${MINISTACK_ENDPOINT:=http://localhost:4566}"
-export MINISTACK_ENDPOINT
+: "${CLOUDCC_EMULATOR_ENDPOINT:=http://localhost:4566}"
+export CLOUDCC_EMULATOR_ENDPOINT
 
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
@@ -39,7 +39,7 @@ warn() { printf '\033[1;33m warn\033[0m %s\n' "$*" >&2; }
 fail() { printf '\033[1;31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
 pass() { printf '\033[1;32m ok\033[0m %s\n' "$*"; }
 
-aws_local() { aws --endpoint-url "$MINISTACK_ENDPOINT" --region "$AWS_REGION" "$@"; }
+aws_local() { aws --endpoint-url "$CLOUDCC_EMULATOR_ENDPOINT" --region "$AWS_REGION" "$@"; }
 
 # app_name reads `app:` out of a source tree's cloudcc.yaml.
 #
@@ -131,7 +131,7 @@ ensure_local_bucket() {
 # JavaScript v3 clients, so nothing cloudcc-specific is involved.
 local_aws_env() {
   printf 'AWS_ENDPOINT_URL=%s;AWS_REGION=%s;AWS_DEFAULT_REGION=%s;AWS_ACCESS_KEY_ID=%s;AWS_SECRET_ACCESS_KEY=%s' \
-    "$MINISTACK_ENDPOINT" "$AWS_REGION" "$AWS_REGION" \
+    "$CLOUDCC_EMULATOR_ENDPOINT" "$AWS_REGION" "$AWS_REGION" \
     "${AWS_ACCESS_KEY_ID:-cloudcc-local}" "${AWS_SECRET_ACCESS_KEY:-cloudcc-local}"
 }
 
@@ -430,10 +430,10 @@ py_run_deps() {
 
 # require_endpoint aborts unless something is answering at the emulator.
 require_endpoint() {
-  if ! curl -sf -m 5 -o /dev/null "$MINISTACK_ENDPOINT" 2>/dev/null; then
-    fail "no AWS emulator answering at $MINISTACK_ENDPOINT
+  if ! curl -sf -m 5 -o /dev/null "$CLOUDCC_EMULATOR_ENDPOINT" 2>/dev/null; then
+    fail "no AWS emulator answering at $CLOUDCC_EMULATOR_ENDPOINT
   start one with: docker run -d -p 4566:4566 -v /var/run/docker.sock:/var/run/docker.sock ministackorg/ministack
-  or point MINISTACK_ENDPOINT at an existing one"
+  or point CLOUDCC_EMULATOR_ENDPOINT at an existing one"
   fi
 }
 
@@ -462,7 +462,7 @@ skip_unless_service() {
   if probe_service "$service"; then
     return 0
   fi
-  warn "SKIP: the emulator at $MINISTACK_ENDPOINT does not answer $service; this assertion was not run"
+  warn "SKIP: the emulator at $CLOUDCC_EMULATOR_ENDPOINT does not answer $service; this assertion was not run"
   return 1
 }
 
@@ -487,7 +487,7 @@ pulumi_configure_emulator() {
   pulumi config set aws:s3UsePathStyle true --stack "$stack" >/dev/null
   local service
   for service in "${CLOUDCC_E2E_SERVICES[@]}"; do
-    pulumi config set --plaintext --path "aws:endpoints[0].$service" "$MINISTACK_ENDPOINT" --stack "$stack" >/dev/null
+    pulumi config set --plaintext --path "aws:endpoints[0].$service" "$CLOUDCC_EMULATOR_ENDPOINT" --stack "$stack" >/dev/null
   done
 }
 

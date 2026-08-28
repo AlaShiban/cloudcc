@@ -33,7 +33,7 @@ func newDeployCommand() *cobra.Command {
 			"Before touching anything, cloudcc recompiles the source in memory and compares\n" +
 			"its fingerprint with the one recorded in the output. Deploying output that\n" +
 			"no longer matches your source is refused unless you pass --force.\n\n" +
-			"Use --stack " + deploy.MinistackStack + " to deploy against a local AWS emulator instead of\n" +
+			"Use --stack " + deploy.EmulatorStack + " to deploy against a local AWS emulator instead of\n" +
 			"real AWS; cloudcc configures the endpoints for you.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,7 +66,7 @@ func newDeployCommand() *cobra.Command {
 				stackName = cfg.App
 			}
 			emulator := ""
-			if strings.EqualFold(stackName, deploy.MinistackStack) {
+			if strings.EqualFold(stackName, deploy.EmulatorStack) {
 				emulator = MinistackEndpoint()
 			}
 
@@ -111,7 +111,7 @@ func newDeployCommand() *cobra.Command {
 	}
 
 	f := cmd.Flags()
-	f.StringVar(&stack, "stack", "", "stack name (defaults to the app name; \""+deploy.MinistackStack+"\" targets a local emulator)")
+	f.StringVar(&stack, "stack", "", "stack name (defaults to the app name; \""+deploy.EmulatorStack+"\" targets a local emulator)")
 	f.BoolVar(&preview, "preview", false, "show what would change without changing it")
 	f.BoolVar(&destroy, "destroy", false, "remove everything the stack created")
 	f.BoolVar(&force, "force", false, "deploy even if the output does not match the source")
