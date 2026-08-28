@@ -205,7 +205,7 @@ starts skipping, that is a signal, not noise.
 | `static_unit` | S3 website | yes | object fetch |
 | `expose` | API Gateway v2 | probe-dependent | via local uvicorn/Mangum instead |
 | `execution_unit` (lambda) | Lambda | probe-dependent | direct handler invoke |
-| `execution_unit` (container, serverless) | ECS Fargate | preview only | Dockerfile shape only |
+| `execution_unit` (container, serverless) | ECS Fargate | yes | a task runs; the ALB's own address is unverified |
 | `execution_unit` (container, kubernetes) | EKS | yes, a real k3s | pod runs, Service routes |
 | `persist(create_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
 | `persist(create_async_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
@@ -250,13 +250,16 @@ servers by `tests/e2e/node-clients.sh`, but no example declares them, so nothing
 proves they survive a full compile and deploy.
 
 "Preview only" means the resource is checked through `pulumi preview` rather
-than actually created: creating a Fargate service in an emulator is slow and
-its behaviour is not faithful enough for the result to mean much.
+than actually created. Nothing is preview only any more: LocalStack runs Fargate
+tasks as real containers, and `examples.sh` waits for one and asks the service
+how many are running.
 
-**RDS and ElastiCache are no longer preview only.** The emulator does provision
-them -- the instance and the cluster appear, and the stack exports their
-bindings -- it simply runs no engine behind them. So the engines are real, in
-Docker, and a scenario declares which it needs:
+**RDS and ElastiCache are no longer preview only.** The emulator provisions
+both, and LocalStack does start a real PostgreSQL behind an RDS instance -- an
+earlier emulator did not, which is why the harness runs engines of its own and
+redirects the bindings at them. That redirect is now belt and braces for RDS
+rather than the only thing making it work, and still load-bearing for the cache.
+A scenario declares which engines it needs:
 
 ```json
 "engines": ["postgres", "redis"]

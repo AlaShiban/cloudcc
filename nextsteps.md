@@ -5,13 +5,25 @@ up without re-deriving any of it.
 
 **Every milestone in `docs/plan-node.md` (N0–N6) is met, and CI is green.**
 Since then: units can call each other, there is a load test that checks the
-wiring carries traffic, and one example exercises the breadth of capabilities
-against real engines. See "Rounds since N6" below.
+wiring carries traffic, every client library the compiler can detect is
+exercised by a deployed example, resources are configurable in two layers, a
+container can run on Kubernetes, and the emulator is LocalStack. See the rounds
+below.
 
-What is left is in "Smaller things noticed but not done" at the bottom, plus
-whatever the next round of sweeping turns up. The generators are the tool for
-that: `CLOUDCC_FUZZ_SEEDS=500 go test ./internal/fuzz -run TestSweep` and the
-same for `TestNodeSweep`.
+**Every example is now covered by a harness**, which was not true before. The
+last two exceptions are gone: kitchen-sink deploys, and `mega-app` is
+deliberately a specification that does not compile.
+
+The emulator is **LocalStack Pro**, and it needs a licence. `tests/e2e/localstack.sh
+start|stop|status` runs it and documents the four settings that are not
+optional; CI reads `LOCALSTACK_AUTH_TOKEN` from a repository secret. A fork's
+pull request cannot read that and the job fails rather than quietly degrading,
+which is the right way round.
+
+What is left is in "Still open" and "Smaller things noticed but not done" at the
+bottom, plus whatever the next round of sweeping turns up. The generators are
+the tool for that: `CLOUDCC_FUZZ_SEEDS=500 go test ./internal/fuzz -run TestSweep`
+and the same for `TestNodeSweep`.
 
 ---
 
@@ -330,11 +342,114 @@ which would also give per-unit retention, currently app-wide under `logging:`.
 An unknown resource key is a clear error listing what is configurable, so
 nothing is silently ignored in the meantime.
 
-**Also open.** `type: container` reads no configuration at all. A Fargate
-service is sized in cpu and memory units against a task definition, so `memory:`
-means something different there and is currently refused on a container unit
-rather than guessed at. Deciding whether the portable `memory:` should map onto
-a task definition's memory is a real design question, not an oversight.
+~~**Also open.** `type: container` reads no configuration at all.~~ — closed.
+`memory:` maps onto a task definition's memory, and the accepted set is the
+intersection of what the setting means and what the host can do: a function
+takes anything from 128 MB, Fargate takes a short ladder where each rung needs
+certain CPU. So `memory: 1024` compiles as either type, `memory: 128` only as a
+function, and `memory: 1500` as neither -- each naming what the target does
+take. Fargate infers neither number, so a unit setting only `memory:` gets the
+smallest CPU that holds it.
+
+---
+
+## Round: a container on Kubernetes
+
+`type: container` says what shape of compute a unit needs; `platform:` says what
+runs it. Two values, both portable: `kubernetes` is EKS here and GKE or AKS
+elsewhere, `serverless` is the provider's own container service and the default.
+Keeping this off the `type:` axis is what lets `memory:` go on meaning one
+thing.
+
+A Kubernetes unit becomes an EKS cluster and node group, a Kubernetes provider
+built from the cluster's own outputs, a Deployment and a Service. Three things
+the emitter could not previously express, all now general: a resource can carry
+Pulumi *options* (a Deployment is created by a different provider from every AWS
+resource beside it); a reference with no property renders as the resource
+itself, which is what `provider:` takes; and imports are derived from the
+resources a program actually has, so an application with no Kubernetes does not
+depend on the Kubernetes provider.
+
+`tests/e2e/kubernetes.sh` proves it against a real cluster -- the emulator backs
+EKS with k3d, so `pulumi up` talks to an actual API server and the pod it
+describes is scheduled, pulled from the emulator's own ECR, and started. The
+final assertion reads the pod's hostname back through its Service.
+
+## Round: the emulator is LocalStack
+
+Every harness reads `$CLOUDCC_EMULATOR_ENDPOINT` and nothing else, so the move
+was mostly settings. `tests/e2e/provisioning.sh` is the old `ministack.sh`; the
+Pulumi stack is `local`.
+
+Seven latent problems surfaced, none of them regressions -- each was something
+the previous emulator tolerated:
+
+* an empty account id, from `aws:skipRequestingAccountId`. Fixed twice: the
+  harness sets its own Pulumi config, and `cloudcc deploy` has its own settings
+  in Go, so fixing the visible one left the other for a different test to find;
+* Lambda declares x86_64 and a developer machine is arm64 --
+  `LAMBDA_IGNORE_ARCHITECTURE` or every invoke fails with a message naming
+  neither architecture;
+* the database engine is installed on first use, and the instance that triggers
+  the install can fail while it runs. Warmed out of band now;
+* an application handed the emulator by *name* gets virtual-host S3 addressing,
+  which the emulator cannot parse. By IP it gets path style. Only the uncompiled
+  half was affected, which is the point of having one: the compiled half sets
+  forcePathStyle in its injected client and the user's own program has nowhere
+  to;
+* two RDS instances created at once collide generating TLS certificates. A
+  deployment naming an emulator endpoint now creates one resource at a time;
+* a Service had no dependency on the Deployment it selects. That one was a
+  defect in the compiler's *output* rather than a harness assumption -- created
+  in parallel it resolved itself, created one at a time the Service went first
+  and the Deployment was never created at all.
+
+## Round: kitchen-sink, and a container that runs
+
+The last skipped deployable example and the last untested compute path. It could
+not run at all: its requirements named neither the database driver nor the cache
+client its own `stores.py` imports, and `/receipt` called `Engine.url` as though
+it were a method.
+
+Three gaps were the product's rather than the example's, and only a real
+container deploy could find them: `bin/push-images.sh` could not find its stack
+(it runs as its own process and `cloudcc deploy` keeps the stack in an
+automation-API workspace a child cannot see); an ALB exported no address, so a
+unit behind one gave its caller nowhere to send traffic; and a secret could not
+be read locally unless the program named an environment variable itself, so the
+two halves of a differential test could never agree on one. A `Secret` handed to
+`persist` now reads `CLOUDCC_SECRET_<ID>`, the same name its deployed binding
+gets.
+
+The harness plays operator for the two things a compiler must not invent: a
+config value with no default, and a secret's contents.
+
+---
+
+## Still open
+
+**A Kubernetes pod gets no AWS identity.** IRSA -- an OIDC provider on the
+cluster, a role trusting it, an annotated ServiceAccount -- is not emitted, so a
+unit that reaches an AWS store is warned about at compile time. On an emulator
+it appears to work anyway because nothing there authenticates, which is exactly
+why that warning is at compile time and not left to a test. This is the largest
+real gap.
+
+**Images are tagged `:latest`.** A redeploy therefore does not reliably roll
+pods or tasks: the Deployment's spec is unchanged, so Kubernetes has no reason
+to restart anything. Content-addressed tags would fix it and would touch
+`bin/package.sh`, `bin/push-images.sh` and both compute paths.
+
+**The load balancer's own hostname does not answer** from outside the emulator's
+network, so `examples.sh` reports it as unverified rather than passing over it.
+The Fargate task runs and the service is healthy; whether an address the
+emulator hands out is routable from the host is the emulator's property. Closing
+it needs either LocalStack's ELB port mapping worked out or a real account.
+
+**Only a unit's primary resource is configurable.** A unit becomes a function,
+a role and a log group; `aws.cloudwatch.LogGroup: {retention_in_days: N}` would
+extend the existing key shape and give per-unit retention, which is app-wide
+today.
 
 ---
 
