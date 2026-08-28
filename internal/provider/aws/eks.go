@@ -141,7 +141,20 @@ func (r *Resolver) eksUnit(u *ir.ExecUnit) error {
 				"protocol":   "TCP",
 			}},
 		},
-	}, nil).WithOpts(map[string]any{"provider": ir.Ref{Key: providerKey, Prop: ""}})
+	}, nil).WithOpts(map[string]any{
+		"provider": ir.Ref{Key: providerKey, Prop: ""},
+		// Ordered after the Deployment, explicitly. A Service names its pods by
+		// label and never refers to the Deployment, so nothing else tells the
+		// engine which comes first -- and a Service created before its pods
+		// exist waits for endpoints that cannot arrive yet. With resources
+		// created in parallel that resolves itself; created one at a time, the
+		// Service goes first, waits its full timeout, and the Deployment is
+		// never created at all.
+		//
+		// The edge below records the same thing in the IR, for the topology.
+		// This one is what the engine acts on.
+		"dependsOn": []any{ir.Ref{Key: deployKey, Prop: ""}},
+	})
 	r.Program.Resolve(u.Key(), service)
 	r.Program.Connect(svcKey, deployKey, ir.EdgeDependsOn)
 

@@ -369,27 +369,51 @@ if CLOUDCC_KUBECONFIG="$(cat "$KUBECONFIG_FILE")" \
      pulumi up -y --parallel 1 --stack local >"$WORK/up-k8s.log" 2>&1; then
   pass "L4 the Deployment and Service were accepted by the cluster"
 else
-  # One failure is expected here and is the emulator's, not the program's: a
-  # Service of type LoadBalancer waits for a cloud load balancer to allocate an
-  # address, and there is no cloud. Pulumi reports that as a failed update even
-  # though the Service exists and works.
+  # One resource is expected to fail here, and it is the emulator's doing rather
+  # than the program's: a Service of type LoadBalancer waits for a cloud load
+  # balancer to allocate an address, and there is no cloud. Pulumi reports that
+  # as a failed update even though the Service exists and works.
   #
-  # Tolerated only when it is the *only* thing that failed. A blanket "ignore
-  # errors here" would hide a Deployment that never started, which is most of
-  # what this test is for -- so every error line has to be that one.
-  OTHER="$(grep -E '^\s+\*' "$WORK/up-k8s.log" \
-    | grep -viE 'was not allocated an IP address|timed out waiting to be Ready' || true)"
+  # Judged by which resource failed, not by what the message said. The message
+  # varies with timing -- "was not allocated an IP address", "timed out waiting
+  # to be Ready", "does not target any Pods" -- and an allowlist of phrasings
+  # passed one run and failed the next on a third line it had not seen. What
+  # does not vary is that the Service is the only thing that failed.
+  #
+  # Everything below then proves the rest by looking at the cluster: the
+  # deployment rolled out, the pod is running, and the Service actually routes
+  # to it. If the selector really were wrong -- which is what "does not target
+  # any Pods" would mean if it were true -- the port-forward at the end would
+  # fail, and no amount of tolerance here would hide it.
+  FAILED_RESOURCES="$(grep -oE '^ *[+~-]* *[a-z0-9]+:[a-zA-Z0-9/.]+:[A-Za-z]+ [^ ]+ \*\*[a-z ]*failed\*\*' \
+    "$WORK/up-k8s.log" | sed -E 's/^ *[+~-]* *//; s/ \*\*.*//' | sort -u || true)"
+  # The stack's own line is a summary of the failure, not a resource that
+  # failed, and it is present whenever anything did -- so it has to come out or
+  # nothing is ever tolerated.
+  OTHER="$(printf '%s\n' "$FAILED_RESOURCES" \
+    | grep -v '^kubernetes:core/v1:Service ' \
+    | grep -v '^pulumi:pulumi:Stack ' | grep -v '^$' || true)"
   if [ -n "$OTHER" ]; then
+    printf '%s\n' "$FAILED_RESOURCES"
     tail -30 "$WORK/up-k8s.log"
-    fail "pulumi up failed for something other than the missing load balancer"
+    fail "something other than the LoadBalancer Service failed to deploy"
   fi
   warn "the LoadBalancer Service was not given an address: the emulator runs no cloud
   load balancer, so this is unverified rather than broken. Everything below reaches
   the Service directly, which is what the address would have been for."
 fi
 
-DEPLOY="$(kubectl get deployments -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-[ -n "$DEPLOY" ] || fail "no Deployment exists in the cluster after a successful up"
+# Read from the cluster rather than from the stack: the Service's failure above
+# means the stack has no usable outputs, and what matters now is what the API
+# server actually holds.
+# `|| true` because of `set -e`: an assignment from a command substitution takes
+# that command's exit status, so a failing kubectl ends the script here --
+# silently, before the check below can say anything useful about why.
+DEPLOY="$(kubectl get deployments -o jsonpath='{.items[0].metadata.name}' 2>"$WORK/get-deploy.log" || true)"
+if [ -z "$DEPLOY" ]; then
+  cat "$WORK/get-deploy.log" 2>/dev/null
+  fail "no Deployment exists in the cluster after the update"
+fi
 log "deployment: $DEPLOY"
 
 log "waiting for the pod"
