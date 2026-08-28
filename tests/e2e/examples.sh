@@ -294,6 +294,14 @@ for example in "${EXAMPLES[@]}"; do
   # could be deployed at all, no container unit had ever been started anywhere
   # in this suite. So the service is asked how many tasks are running, and the
   # load balancer in front of it is asked for a response.
+  # Cleared first. These are plain shell variables in a loop over every example,
+  # so without this an example with no container unit inherits the previous
+  # one's service and is asked how many tasks it is running -- which is how
+  # `mixed`, whose two units are both functions, failed with "the container
+  # never started".
+  ecs_cluster=""
+  ecs_service=""
+
   # Matched to this application by name. Listing clusters and taking the first
   # would pass on one another example left behind, which is the kind of check
   # that reports success for something it never looked at.
