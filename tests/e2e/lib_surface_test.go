@@ -32,6 +32,7 @@ var harnessHelpers = []string{
 	"emulator_python_target", "engine_bindings_local", "export_engine_bindings_local",
 	"probe_service", "pulumi_configure_emulator", "py_run_deps",
 	"require_endpoint", "scenario_databases", "seed_secrets", "skip_unless_service",
+	"warm_emulator_rds",
 	"unit_field", "unit_language", "unit_target", "wait_for_http",
 }
 

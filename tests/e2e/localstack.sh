@@ -91,12 +91,34 @@ case "${1:-status}" in
     # A license that failed to activate leaves every Pro service reporting as
     # available and failing on use, so the log is the thing to check rather than
     # the health endpoint.
-    if docker logs "$CONTAINER" 2>&1 | grep -q "activated new license"; then
+    # Waited for, not checked once: the health endpoint answers before licensing
+    # has finished, so a single look reports an unlicensed container that is
+    # about to be licensed a second later.
+    licensed=0
+    for _ in $(seq 1 30); do
+      if docker logs "$CONTAINER" 2>&1 | grep -q "activated new license"; then
+        licensed=1
+        break
+      fi
+      if docker logs "$CONTAINER" 2>&1 | grep -qi "license activation failed"; then
+        break
+      fi
+      sleep 2
+    done
+    if [ "$licensed" = "1" ]; then
       pass "licensed"
     else
+      docker logs "$CONTAINER" 2>&1 | grep -i licens | tail -3
       fail "no license was activated; the Pro services will not work.
   Check the token: docker logs $CONTAINER | grep -i licens"
     fi
+    # The database engine is installed on first use, and the instance that
+    # triggers the install can fail while it is still running. Doing it here
+    # means a test never pays for it.
+    log "warming the database engine (installed on first use)"
+    # shellcheck source=/dev/null
+    . "$(dirname "$0")/lib.sh"
+    warm_emulator_rds
     exec "$0" status
     ;;
 

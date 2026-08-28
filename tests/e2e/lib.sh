@@ -390,6 +390,36 @@ export_engine_bindings_local() {
   done
 }
 
+# warm_emulator_rds makes the emulator install its database engine before a test
+# needs one.
+#
+# LocalStack installs PostgreSQL on first use, and the instance that triggers
+# the install can fail while it is still running -- the failure is
+# `Unable to startup DB instance: [SSL] PEM lib`, which names neither the
+# install nor the reason. On a container that has served an instance before, the
+# engine is already there and nothing goes wrong, which is why this passes on a
+# developer machine that has run the suite once and fails on CI's fresh
+# container every time.
+#
+# So the first instance is created here, deliberately and out of band, where a
+# failure costs nothing and is not blamed on the application under test.
+# Idempotent: a container that already has the engine finishes this in a second.
+warm_emulator_rds() {
+  local name="cloudcc-rds-warmup" waited=0 status
+  aws_local rds describe-db-instances --db-instance-identifier "$name" >/dev/null 2>&1     || aws_local rds create-db-instance          --db-instance-identifier "$name"          --db-instance-class db.t3.micro          --engine postgres          --master-username warmup          --master-user-password warmup-password          --allocated-storage 5 >/dev/null 2>&1     || return 0
+
+  until [ "$waited" -gt 180 ]; do
+    status="$(aws_local rds describe-db-instances --db-instance-identifier "$name"       --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || true)"
+    case "$status" in
+      available) break ;;
+      error|failed) break ;;
+    esac
+    waited=$((waited + 1))
+    sleep 1
+  done
+  aws_local rds delete-db-instance --db-instance-identifier "$name"     --skip-final-snapshot >/dev/null 2>&1 || true
+}
+
 # seed_secrets gives every provisioned secret a value.
 #
 # The compiler provisions the secret and deliberately not its contents: a value
