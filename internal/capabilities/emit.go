@@ -48,16 +48,18 @@ func writeUnitTrees(ctx *compiler.Context) error {
 	return nil
 }
 
-// siteRelative strips the declaring module's directory from an asset path, so
-// public/index.html is uploaded as index.html rather than public/index.html.
+// siteRelative turns a claimed path into the name the asset is written under,
+// so public/index.html is uploaded as index.html.
+//
+// The prefix comes off the intent. This used to derive it here, the resolver
+// derived it again, and the two disagreed the moment a glob reached *out* of
+// the declaring module's directory: this stage wrote
+// static/<id>/public/index.html and the generated program asked for
+// static/<id>/index.html, so the deploy failed on a missing asset file. Where
+// the two agreed but were both wrong, it was worse -- the objects uploaded
+// fine under keys the distribution's default root object never matched.
 func siteRelative(site *ir.StaticSite, rel string) string {
-	base := stripPrefixDir(rel, site.Root)
-	// Also drop the first path segment of the glob when it is a fixed
-	// directory, which is the common "./public/**/*" shape.
-	if dir := globRootDir(site.StaticFiles); dir != "" {
-		base = stripPrefixDir(base, dir)
-	}
-	return base
+	return stripPrefixDir(stripPrefixDir(rel, site.Root), site.Prefix)
 }
 
 func stripPrefixDir(p, dir string) string {

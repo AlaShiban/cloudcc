@@ -353,3 +353,75 @@ export { pricing };
 		t.Errorf("the error should name the thing that does work: %v", diagStrings(ctx))
 	}
 }
+
+// A call over the wire is an invocation, and only a function has one.
+//
+// This compiled cleanly before: the callee resolved to an ECS service, no
+// CLOUDCC_UNIT_<ID>_FUNCTION binding was emitted, and the caller was left to
+// die on its first call with a message about an unset environment variable --
+// a green deploy and an application broken on the path the seam exists for.
+func TestCallingAContainerIsRejected(t *testing.T) {
+	ctx := compileSourceWithConfig(t, map[string]string{
+		"callee.py": `import cloudcompiler as cloudcc
+cloudcc.execution_unit(id="callee")
+
+async def work(x: int) -> int:
+    return x + 1
+`,
+		"caller.py": `import cloudcompiler as cloudcc
+import callee
+
+cloudcc.execution_unit(id="caller")
+callee = cloudcc.remote(callee, id="callee")
+
+async def go():
+    return await callee.work(1)
+`,
+	}, `app: t
+provider: aws
+execution_units:
+  caller: {type: function}
+  callee: {type: container}
+`)
+
+	if !ctx.Diags.HasErrors() {
+		t.Fatal("a container has no invoke API, so remote() pointed at one must not compile")
+	}
+	msg := ctx.Diags.Items()[0].Message
+	for _, want := range []string{"callee", "container", "function", "Topic"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the message should mention %q:\n%s", want, msg)
+		}
+	}
+}
+
+// The same program with the callee as a function is fine, so the check is
+// about the compute type and not about the call.
+func TestCallingAFunctionIsFine(t *testing.T) {
+	ctx := compileSourceWithConfig(t, map[string]string{
+		"callee.py": `import cloudcompiler as cloudcc
+cloudcc.execution_unit(id="callee")
+
+async def work(x: int) -> int:
+    return x + 1
+`,
+		"caller.py": `import cloudcompiler as cloudcc
+import callee
+
+cloudcc.execution_unit(id="caller")
+callee = cloudcc.remote(callee, id="callee")
+
+async def go():
+    return await callee.work(1)
+`,
+	}, `app: t
+provider: aws
+execution_units:
+  caller: {type: function}
+  callee: {type: function}
+`)
+
+	if ctx.Diags.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", ctx.Diags.Items())
+	}
+}

@@ -485,3 +485,145 @@ const pets = persist(new DynamoDBClient({ region: "eu-west-1" }), { id: "pets" }
 		t.Errorf("ClientArgs = %v, want nothing read", hints[0].ClientArgs)
 	}
 }
+
+// TypeScript writes the same values with type syntax around them. None of it
+// survives to runtime, and all of it used to stop the compiler recognising
+// what it was looking at: the node under inspection was an as_expression, and
+// the new_expression was inside it.
+func TestTypeScriptWrappersAroundAClientAreErased(t *testing.T) {
+	for name, expr := range map[string]string{
+		"as":           `new Redis() as Redis`,
+		"satisfies":    `new Redis() satisfies Redis`,
+		"assertion":    `<Redis>new Redis()`,
+		"parenthesers": `(new Redis())`,
+		"stacked":      `((new Redis() as Redis)!)`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			hints, d := detect(t, "app.ts", `
+import Redis from "ioredis";
+import { persist } from "@cloudcompiler/sdk";
+const cache = persist(`+expr+`, { id: "itemCache" });
+`)
+			if d.HasErrors() {
+				t.Fatalf("unexpected diagnostics: %v", d.Items())
+			}
+			if len(hints) != 1 {
+				t.Fatalf("hints = %+v", hints)
+			}
+			if got := hints[0].ClientLibrary; got != sdkdetect.LibIORedis {
+				t.Errorf("library = %q, want %q -- the wrapper hid the constructor",
+					got, sdkdetect.LibIORedis)
+			}
+		})
+	}
+}
+
+// A variable is rejected in either language: persist() reads the client's type
+// from the expression, and a name does not carry one. What this pins is that
+// the TypeScript spelling gets the *same* answer -- the message names `pool`,
+// not `pool!`, so it reads as the rule it is rather than as a syntax the
+// compiler failed to parse.
+func TestANonNullAssertionOnAVariableIsStillJustAVariable(t *testing.T) {
+	_, d := detect(t, "app.ts", `
+import { Pool } from "pg";
+import { persist } from "@cloudcompiler/sdk";
+const pool = new Pool();
+const db = persist(pool!, { id: "shopdb" });
+`)
+	if !d.HasErrors() {
+		t.Fatal("a variable carries no type, so persist() cannot read a capability from it")
+	}
+	msg := d.Items()[0].Message
+	if !strings.Contains(msg, "the variable pool") || strings.Contains(msg, "pool!") {
+		t.Errorf("the message should name the binding, not its assertion:\n%s", msg)
+	}
+}
+
+// An id narrowed with `as const` is still a literal, and an options object
+// written `{...} as const` is still an options object -- read as a positional
+// argument instead, it produced "persist() takes at most 1 positional
+// argument".
+func TestAsConstIsStillALiteral(t *testing.T) {
+	for name, src := range map[string]string{
+		"on the id":     `persist(new DynamoDBClient({}), { id: "pets" as const });`,
+		"on the object": `persist(new DynamoDBClient({}), { id: "pets" } as const);`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			hints, d := detect(t, "app.ts", `
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { persist } from "@cloudcompiler/sdk";
+const pets = `+src+`
+`)
+			if d.HasErrors() {
+				t.Fatalf("unexpected diagnostics: %v", d.Items())
+			}
+			if len(hints) != 1 || hints[0].ID() != "pets" {
+				t.Fatalf("hints = %+v", hints)
+			}
+		})
+	}
+}
+
+// The application handed to expose() is named by a binding, and the rest of
+// the compiler looks that binding up to find the routes declared on it. A
+// wrapper left in place makes the name "app!", which matches nothing -- the
+// gateway is created and the topology shows no routes at all.
+func TestATypeScriptWrapperOnTheExposedAppIsErased(t *testing.T) {
+	hints, d := detect(t, "app.ts", `
+import express from "express";
+import { expose } from "@cloudcompiler/sdk";
+const app = express();
+expose(app!, { id: "api" });
+`)
+	if d.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", d.Items())
+	}
+	if len(hints) != 1 {
+		t.Fatalf("hints = %+v", hints)
+	}
+	if got := hints[0].Str("app"); got != "app" {
+		t.Errorf("app = %q, want %q", got, "app")
+	}
+}
+
+// Route paths go through the same literal decoder as hint arguments, which is
+// the property that makes fixing one fix the other. This is that claim as a
+// test: a route path narrowed with `as const` is read, and nothing in
+// routes.go knows what `as const` is.
+func TestRoutePathsAcceptTypeScriptNarrowing(t *testing.T) {
+	files := source.NewSet("/tmp")
+	f := &source.File{Path: "server.ts", Content: []byte(`
+import express from "express";
+import { expose } from "@cloudcompiler/sdk";
+const app = express();
+expose(app, { id: "gw" });
+
+app.get("/health" as const, (req, res) => res.json({}));
+app.get(("/pets/:petId") as const, (req, res) => res.json({}));
+`)}
+	if err := (Frontend{}).Parse(f); err != nil {
+		t.Fatal(err)
+	}
+	files.Add(f)
+
+	got := routes(files, []string{"server.ts"}, "app")
+	var names []string
+	for _, r := range got {
+		names = append(names, r.Verb+" "+r.Path)
+	}
+	want := []string{"GET /health", "GET /pets/{petId}"}
+	if len(names) != len(want) {
+		t.Fatalf("routes = %v, want %v", names, want)
+	}
+	for _, w := range want {
+		found := false
+		for _, n := range names {
+			if n == w {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing route %q in %v", w, names)
+		}
+	}
+}

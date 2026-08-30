@@ -131,6 +131,38 @@ case "${1:-status}" in
     pass "stopped"
     ;;
 
+  reset)
+    # Every harness keeps its Pulumi state in a mktemp workdir and deletes it on
+    # exit. That is the right default -- runs cannot collide -- but it means an
+    # abnormal exit (a SIGKILL, a destroy that fails partway) takes the state
+    # with it and strands whatever the emulator still holds. The next run then
+    # dies on the first resource it tries to create:
+    #
+    #   EntityAlreadyExists: Role with name mixed-worker-role already exists
+    #
+    # which reads like a compiler fault and is not one. Pulumi cannot clean this
+    # up, because from its point of view the stack never existed. Resetting the
+    # emulator is the only thing that can.
+    #
+    # This wipes the emulator, and only the emulator: LocalStack holds nothing
+    # but what this suite deployed into it.
+    curl -s --max-time 5 "$ENDPOINT/_localstack/health" >/dev/null 2>&1 \
+      || fail "nothing is answering at $ENDPOINT"
+    curl -s -X POST --max-time 60 "$ENDPOINT/_localstack/state/reset" >/dev/null \
+      || fail "the emulator refused to reset"
+    # k3d clusters are containers outside LocalStack's own state, so the reset
+    # above does not touch them and a stale one keeps its old node registered.
+    for c in $(docker ps -aq --filter "name=k3d-" 2>/dev/null); do
+      docker rm -f "$c" >/dev/null 2>&1 || true
+    done
+    # The engine install is per-container state and survives a state reset, but
+    # warming again is cheap and a cold engine costs a test its first RDS call.
+    # shellcheck source=/dev/null
+    . "$(dirname "$0")/lib.sh"
+    warm_emulator_rds
+    pass "emulator reset: no resources, no k3d clusters"
+    ;;
+
   status)
     curl -s --max-time 5 "$ENDPOINT/_localstack/health" >/dev/null 2>&1 \
       || fail "nothing is answering at $ENDPOINT"
@@ -155,6 +187,6 @@ if missing:
     ;;
 
   *)
-    fail "usage: $0 start|stop|status"
+    fail "usage: $0 start|stop|status|reset"
     ;;
 esac

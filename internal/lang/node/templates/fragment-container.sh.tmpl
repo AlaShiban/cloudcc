@@ -1,4 +1,34 @@
 echo "packaging execution unit {{.ID}} (container)"
+
+# Bundled first, exactly as the function path bundles: one artefact, produced
+# one way, for both compute types. The image then carries a single index.mjs
+# instead of a source tree plus node_modules, which is what makes a TypeScript
+# unit runnable at all -- `node app.ts` is not a thing, and an image that copies
+# sources and hopes is an image that starts and immediately exits.
+#
+# The dependencies still have to be on disk for the bundler to resolve them.
+if [ -f "{{.ID}}/package.json" ]; then
+  rm -f "{{.ID}}/package-lock.json"
+  ( cd "{{.ID}}" && npm install --silent --omit=dev --no-audit --no-fund )
+fi
+
+bundler="npx --yes esbuild"
+if command -v esbuild >/dev/null 2>&1; then
+  bundler="esbuild"
+fi
+
+# The banner restores a real `require` for the CommonJS dependencies esbuild
+# converts; see fragment-bundle.sh.tmpl for what it costs to leave out.
+$bundler "{{.ID}}/{{.Entry}}" \
+  --bundle \
+  --platform=node \
+  --target=node22 \
+  --format=esm \
+  --banner:js="import { createRequire as __cloudccCreateRequire } from 'node:module'; const require = __cloudccCreateRequire(import.meta.url);" \
+  --outfile="{{.ID}}/index.mjs" \
+  --log-level=warning{{range .Externals}} \
+  --external:{{.}}{{end}}
+
 if command -v docker >/dev/null 2>&1; then
   docker build --quiet --tag "cloudcc-{{.ID}}:latest" "{{.ID}}" >/dev/null
   echo "  built image cloudcc-{{.ID}}:latest"

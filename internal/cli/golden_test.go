@@ -5,6 +5,7 @@ import (
 	"flag"
 	"github.com/cloudcompiler/cloudcc/internal/config"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -23,7 +24,20 @@ var update = flag.Bool("update", false, "rewrite the golden output trees")
 // mixed holds units in two languages sharing one store, which is the case the
 // language seam exists for and the only one where a regression in it shows up
 // as something other than a Python change.
-var examples = []string{"petstore", "petstore-multi", "kitchen-sink", "mixed", "petstore-node"}
+// petstore-ts is TypeScript compiled to a container: the only example whose
+// sources cannot be run by node directly, and the only Node container.
+var examples = []string{
+	"petstore", "petstore-multi", "kitchen-sink", "mixed", "petstore-node",
+	// The TypeScript mirrors. Compiling every one of them offline is what makes
+	// a regression in the TypeScript path cheap to catch: only two of them
+	// deploy in CI, and a golden tree costs seconds rather than minutes.
+	"petstore-ts", "petstore-multi-ts", "kitchen-sink-ts", "nomnom-ts", "k8s-web-ts",
+	// And the two Python originals that were never in this list. Their mirrors
+	// were added above and they were not, which left the pair uneven -- and
+	// TestEveryArchitectureProgramParses iterates this list, so the empty-block
+	// bug it caught in k8s-web-ts was present in k8s-web and invisible.
+	"nomnom", "k8s-web",
+}
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -223,12 +237,20 @@ func TestIAMIsLeastPrivilege(t *testing.T) {
 	if !strings.Contains(workerPolicy, "petAuditBucket") {
 		t.Errorf("the worker unit is missing access to the bucket it writes to:\n%s", workerPolicy)
 	}
-	// Only the api publishes, so only the api gets sns:Publish.
-	if !strings.Contains(apiPolicy, "sns:Publish") {
-		t.Errorf("the publisher is missing sns:Publish:\n%s", apiPolicy)
+	// The topic has one subscriber, so it is a queue, and the two ends of a
+	// queue are separate grants: the api may send and the worker may consume,
+	// and neither gets the other's half.
+	if !strings.Contains(apiPolicy, "sqs:SendMessage") {
+		t.Errorf("the publisher is missing sqs:SendMessage:\n%s", apiPolicy)
 	}
-	if strings.Contains(workerPolicy, "sns:Publish") {
-		t.Errorf("a subscriber should not be granted sns:Publish:\n%s", workerPolicy)
+	if strings.Contains(apiPolicy, "sqs:ReceiveMessage") {
+		t.Errorf("a publisher should not be able to consume the queue:\n%s", apiPolicy)
+	}
+	if !strings.Contains(workerPolicy, "sqs:ReceiveMessage") {
+		t.Errorf("the subscriber cannot read the queue Lambda polls on its behalf:\n%s", workerPolicy)
+	}
+	if strings.Contains(workerPolicy, "sqs:SendMessage") {
+		t.Errorf("a subscriber should not be granted sqs:SendMessage:\n%s", workerPolicy)
 	}
 	// Both share the table, so both get table access, scoped to that table.
 	for name, policy := range map[string]string{"api": apiPolicy, "worker": workerPolicy} {
@@ -583,5 +605,76 @@ func TestSecretWithADefaultDoesNotBlockDeployment(t *testing.T) {
 	// And the value itself must never be inlined.
 	if strings.Contains(index, `CLOUDCC_CONFIG_NO_DEFAULT: "`) {
 		t.Errorf("a secret was inlined as plaintext:\n%s", index)
+	}
+}
+
+// Every FileAsset the generated program names must exist on disk.
+//
+// The static-unit path derived one thing -- the directory an asset's key is
+// relative to -- in three places, and they disagreed the moment a glob reached
+// out of the declaring module's directory: the emit stage wrote
+// static/<id>/public/index.html and index.ts asked for static/<id>/index.html.
+// `pulumi up` failed on a missing asset file, five minutes into a deploy, in an
+// example whose golden tree was perfectly green.
+//
+// This is the check that closes the gap between the two halves of the output,
+// and it is cheap: the generated program says exactly which files it needs.
+func TestEveryAssetTheProgramNamesExists(t *testing.T) {
+	asset := regexp.MustCompile(`new pulumi\.asset\.File(?:Asset|Archive)\("([^"]+)"\)`)
+
+	for _, name := range examples {
+		t.Run(name, func(t *testing.T) {
+			out := compileExample(t, name, t.TempDir())
+			index := readFile(t, filepath.Join(out, "index.ts"))
+
+			found := 0
+			for _, m := range asset.FindAllStringSubmatch(index, -1) {
+				ref := m[1]
+				// A unit's archive is produced by bin/package.sh at package
+				// time; only the assets the compiler writes itself are on disk
+				// now, and those are the ones this is about.
+				if strings.HasPrefix(ref, "build/") {
+					continue
+				}
+				found++
+				if _, err := os.Stat(filepath.Join(out, ref)); err != nil {
+					t.Errorf("index.ts names %s, which the compiler did not write: %v", ref, err)
+				}
+			}
+			t.Logf("checked %d asset reference(s)", found)
+		})
+	}
+}
+
+// architecture.py must be a Python program, for every example.
+//
+// It is generated text that nothing in the compiler ever executes, so the only
+// thing standing between a syntax error and a user is whether anyone happened
+// to render it. `examples.sh` does check -- but only for examples that have an
+// e2e scenario, and k8s-web has none. So an application running on Kubernetes
+// produced a file whose `with` block was empty, which is an IndentationError,
+// and the compile reported it as "no icon diagram rendered": a message that
+// points at the renderer rather than at the generator that wrote the file.
+//
+// Compiling with python3 is enough. It parses without importing diagrams, so
+// this runs offline and everywhere.
+func TestEveryArchitectureProgramParses(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed")
+	}
+
+	for _, name := range examples {
+		t.Run(name, func(t *testing.T) {
+			out := compileExample(t, name, t.TempDir())
+			file := filepath.Join(out, "architecture.py")
+
+			cmd := exec.Command(python, "-c",
+				"import ast,sys; ast.parse(open(sys.argv[1]).read())", file)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Errorf("architecture.py does not parse: %v\n%s\n--- file ---\n%s",
+					err, output, readFile(t, file))
+			}
+		})
 	}
 }

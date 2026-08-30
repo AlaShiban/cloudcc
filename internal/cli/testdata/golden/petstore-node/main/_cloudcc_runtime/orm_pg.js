@@ -6,6 +6,7 @@
 import { Pool } from "pg";
 
 import { credentials, parts } from "./orm_url.js";
+import { wrap } from "./trace.js";
 
 export function connect(id) {
   const { host, port, user, database } = parts(id);
@@ -13,5 +14,5 @@ export function connect(id) {
   // credential be fetched lazily without making connect() async. When there is
   // no password to give, the key is absent rather than empty -- pg treats an
   // empty string as a credential and fails, where absence lets it fall back.
-  return new Pool({ host, port, user, database, ...credentials(id) });
+  return wrap(new Pool({ host, port, user, database, ...credentials(id) }), "orm", id);
 }

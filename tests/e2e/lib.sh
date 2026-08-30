@@ -30,9 +30,9 @@ export REPO_ROOT
 # zone lookup to real AWS and failed with "AuthFailure: AWS was not able to
 # validate the provided access credentials" -- which looks like a credentials
 # problem and is a missing endpoint.
-CLOUDCC_E2E_SERVICES=(apigateway apigatewayv2 cloudwatch cloudwatchlogs dynamodb \
-  ec2 ecr ecs eks elasticache elbv2 iam lambda logs \
-  memorydb rds s3 secretsmanager sns sts)
+CLOUDCC_E2E_SERVICES=(apigateway apigatewayv2 cloudfront cloudwatch cloudwatchlogs \
+  dynamodb ec2 ecr ecs eks elasticache elbv2 iam lambda logs \
+  memorydb rds s3 secretsmanager sns sqs sts)
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warn\033[0m %s\n' "$*" >&2; }
@@ -93,6 +93,306 @@ unit_target() {
     return 0
   fi
   printf '%s:%s' "$(printf '%s' "${entry%.py}" | tr '/' '.')" "$app"
+}
+
+# ---------------------------------------------------------- serving a unit
+#
+# Node has no uvicorn, so every harness that wanted to run a Node unit grew its
+# own launcher: four of them, each subtly different, and one of them the reason
+# a stale server outlived its run. They are one function now, for the reason
+# lib_surface_test.go exists at all -- four copies of a launcher is four places
+# to fix a TypeScript loader, and three of them would have been missed.
+
+# node_ts_loader prints the `--import <url>` flags a program needs to run
+# TypeScript, and nothing at all for a program that has none.
+#
+# The decision is about the *program*, not the entry. A generated program can
+# have a JavaScript entry importing a TypeScript module -- the compiler resolves
+# "./store.js" to store.ts either way -- and keying this on the entry's
+# extension left node to load a file it cannot parse, which fails as a module
+# that does not exist rather than as a syntax it does not understand.
+#
+# tsx rather than Node's own --experimental-strip-types: the CI image pins Node
+# 22, where stripping is flagged and erasable-syntax-only (no enums, no
+# namespaces, no constructor parameter properties), and it does not resolve
+# "./store.js" to store.ts -- which is a spelling cloudcc's own resolver
+# explicitly supports, so a program the compiler accepts would fail to run.
+# tsx is esbuild underneath, which is also what packages the unit, so the two
+# halves of a differential comparison share one transform.
+node_ts_loader() {
+  local entry="$1" dir="$2"
+  case "$entry" in
+    *.ts | *.tsx | *.mts | *.cts) ;;
+    *)
+      # Not a TypeScript entry, but the modules it reaches may be. node_modules
+      # is excluded: a dependency shipping .ts sources is not this program's
+      # language, and every project has one somewhere.
+      if [ -z "$(find "$dir" -name node_modules -prune -o \
+                 \( -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -name '*.cts' \) -print 2>/dev/null | head -1)" ]; then
+        return 0
+      fi
+      ;;
+  esac
+
+  # Resolved from the served directory first, so a project that lists tsx as a
+  # devDependency uses its own copy and its own version.
+  local url
+  url="$(cd "$dir" 2>/dev/null && node -e '
+    const { createRequire } = require("module");
+    const { pathToFileURL } = require("url");
+    console.log(pathToFileURL(createRequire(process.cwd() + "/").resolve("tsx")).href);
+  ' 2>/dev/null)" || true
+  if [ -n "${url:-}" ]; then
+    printf -- '--import\n%s\n' "$url"
+    return 0
+  fi
+
+  # Otherwise one shared copy for the whole run. Installed once, not per unit.
+  local cache="${CLOUDCC_E2E_TSX_DIR:-$WORK/.tsx}"
+  if [ ! -d "$cache/node_modules/tsx" ]; then
+    mkdir -p "$cache"
+    if ! ( cd "$cache" && npm install tsx --silent --no-audit --no-fund --no-package-lock >/dev/null 2>&1 ); then
+      # Not `fail`: this function runs inside a command substitution, where an
+      # exit kills the subshell and nothing else. Saying so and returning
+      # non-zero lets the caller stop for a reason it can print.
+      echo "cloudcc: could not install tsx, needed to run TypeScript uncompiled" >&2
+      return 1
+    fi
+  fi
+  url="$(cd "$cache" && node -e '
+    const { createRequire } = require("module");
+    const { pathToFileURL } = require("url");
+    console.log(pathToFileURL(createRequire(process.cwd() + "/").resolve("tsx")).href);
+  ' 2>/dev/null)"
+  if [ -z "$url" ]; then
+    echo "cloudcc: tsx was installed but could not be resolved" >&2
+    return 1
+  fi
+  printf -- '--import\n%s\n' "$url"
+}
+
+# serve_node starts a Node or TypeScript unit and leaves its pid in APP_PID.
+#
+#   serve_node <dir> <entry> <binding> <port> <logfile-or-empty> <env-pairs-or-empty>
+#
+# Nothing is written into the directory being served. The uncompiled half is
+# the user's own source tree, and a harness that drops a launcher into it is
+# modifying its input -- which this compiler does not do and its tests should
+# not either. An absolute specifier resolves the module's own node_modules from
+# where the module is, so no file is needed.
+#
+# `exec`, so that $! is the server itself: backgrounding a subshell makes $! the
+# subshell's pid, and killing that leaves the server running to poison the next
+# run with a health check that passes against a destroyed stack.
+serve_node() {
+  local dir="$1" entry="$2" binding="$3" port="$4" logfile="$5" env_pairs="${6:-}"
+  # Resolved before the subshell, so a failure to obtain the loader stops the
+  # run here with its own message rather than surfacing later as a program that
+  # would not start.
+  local flags
+  flags="$(node_ts_loader "$entry" "$dir")" \
+    || fail "could not prepare the TypeScript loader for $dir"
+  local loader=()
+  while IFS= read -r flag; do
+    [ -n "$flag" ] && loader+=("$flag")
+  done <<EOF
+$flags
+EOF
+
+  local program="
+    const m = await import(\"file://$dir/$entry\");
+    const app = m.$binding ?? m.default;
+    if (!app) {
+      console.error(\"$entry exports neither $binding nor a default\");
+      process.exit(1);
+    }
+    app.listen($port, \"127.0.0.1\", () => console.log(\"listening\"));
+  "
+
+  if [ -n "$logfile" ]; then
+    ( cd "$dir" && exec env $env_pairs node ${loader[@]+"${loader[@]}"} \
+        --input-type=module -e "$program" ) >"$logfile" 2>&1 &
+  else
+    ( cd "$dir" && exec env $env_pairs node ${loader[@]+"${loader[@]}"} \
+        --input-type=module -e "$program" ) &
+  fi
+  APP_PID=$!
+}
+
+# ------------------------------------------------------------------- tracing
+#
+# Comparing the two halves on their HTTP responses answers "did it reply the
+# same?", which is necessary and not sufficient. A compiled program that writes
+# to the wrong store, drops a publish, or never reads its secret can answer
+# every request byte-identically. What closes that gap is comparing the seams:
+# every call the program made through a persisted client, in order.
+#
+# Both halves record through the same code -- the SDK vendors the injected
+# tracer verbatim, pinned byte-identical by a test -- so a difference in the
+# trace is a difference in the program, not in the instrument.
+
+#: The prefix the tracer puts on every emitted line. Must match trace.py.
+TRACE_MARKER="##cloudcc-trace##"
+
+# trace_env returns the environment a traced run needs, for `env`.
+trace_env() { printf 'CLOUDCC_TRACE=1'; }
+
+# trace_from_log extracts trace events from a local run's captured output.
+#
+#   trace_from_log <logfile> <out>
+trace_from_log() {
+  local logfile="$1" out="$2"
+  : > "$out"
+  [ -f "$logfile" ] || return 0
+  grep -a -F "$TRACE_MARKER" "$logfile" 2>/dev/null \
+    | sed "s/.*$TRACE_MARKER //" >> "$out" || true
+}
+
+# trace_from_cloudwatch collects a deployed application's trace events.
+#
+#   trace_from_cloudwatch <app> <out>
+#
+# A Lambda has no filesystem to share and a Fargate task's is its own, so the
+# only channel both compute types have is stderr -- which both ship to
+# CloudWatch. Events are ordered by the emitter's timestamp across every log
+# group belonging to the app, which is sound here because the scenario replay
+# is strictly sequential: one request completes before the next is issued.
+#
+# Delivery is not instant, so this polls until the event count stops growing
+# rather than reading once and hoping. A trace that is merely *late* would
+# otherwise read as a compiled program that did less work than it did.
+trace_from_cloudwatch() {
+  local app="$1" out="$2"
+  local groups previous=-1 current=0 stable=0
+
+  groups="$(aws_local logs describe-log-groups \
+    --query "logGroups[?contains(logGroupName, \`$app-\`)].logGroupName" \
+    --output text 2>/dev/null | tr '\t' '\n' | grep -v '^$' || true)"
+
+  if [ -z "$groups" ]; then
+    : > "$out"
+    return 0
+  fi
+
+  # Up to ~30s. Three consecutive equal counts, so a slow group cannot look
+  # settled just because it was between batches when we looked.
+  local attempt
+  for ((attempt = 0; attempt < 15; attempt++)); do
+    : > "$out.raw"
+    while IFS= read -r group; do
+      [ -n "$group" ] || continue
+      aws_local logs filter-log-events --log-group-name "$group" \
+        --filter-pattern "$TRACE_MARKER" \
+        --query 'events[].[timestamp,message]' --output text 2>/dev/null \
+        >> "$out.raw" || true
+    done <<EOF
+$groups
+EOF
+    current="$(wc -l < "$out.raw" | tr -d ' ')"
+    if [ "$current" = "$previous" ]; then
+      stable=$((stable + 1))
+      [ "$stable" -ge 2 ] && break
+    else
+      stable=0
+    fi
+    previous="$current"
+    sleep 2
+  done
+
+  # Sort by the emitting timestamp, then strip it.
+  sort -n "$out.raw" 2>/dev/null \
+    | sed "s/.*$TRACE_MARKER //" > "$out" || : > "$out"
+  rm -f "$out.raw"
+}
+
+# trace_normalize turns raw trace events into something two runs can be diffed
+# on.
+#
+#   trace_normalize <in> <comparable-out> <asynchronous-out>
+#
+# Events are grouped by the resource they touched, and order is preserved
+# within a resource -- which is where read-your-write bugs live -- but not
+# across resources. Two independent stores touched in either order are not a
+# behavioural difference, and insisting on a global order would fail runs for
+# reasons that are not defects.
+#
+# **Topic deliveries are separated out and NOT compared.** This is the one
+# place the comparison is deliberately weaker, so it is worth being exact about
+# why. Uncompiled, a topic fans out in process: publish() calls the subscriber
+# before it returns. Compiled, publish() puts a message on SNS or SQS and the
+# subscriber is a different execution unit that this harness is not running at
+# all. The uncompiled half therefore records deliveries that the compiled half
+# cannot produce here, however correct it is. Comparing them would fail every
+# pub/sub example forever.
+#
+# What still *is* compared is the publish itself -- that a message was sent, to
+# which topic, with which payload -- which is the publisher's whole
+# contribution. That the subscriber is really wired up is a different claim,
+# and it is checked elsewhere: examples.sh counts declared subscribers against
+# deployed deliveries, and nomnom.sh drives a real message end to end.
+trace_normalize() {
+  local in="$1" out="$2" async_out="${3:-/dev/null}"
+  python3 - "$in" "$out" "$async_out" <<'PY'
+import json, sys
+
+src, dst, async_dst = sys.argv[1], sys.argv[2], sys.argv[3]
+comparable, asynchronous = {}, {}
+malformed = 0
+
+with open(src, encoding="utf-8", errors="replace") as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            malformed += 1
+            continue
+        # Keyed on the logical id alone, never on `kind`.
+        #
+        # The compiled half knows its capability literally -- each shim is one
+        # capability -- while the uncompiled half infers it from the client's
+        # type, and in JavaScript that cannot be made reliable: a `pg.Pool`
+        # instance reports `BoundPool`, and an ioredis client reports
+        # `EventEmitter`. Comparing an inference against a literal produced a
+        # failure on `mixed` where every operation and every result matched and
+        # only the label differed -- a difference invented by the instrument,
+        # which is the one kind this comparison must never report.
+        #
+        # The id is what both halves agree on by construction: it is the
+        # argument to persist().
+        key = rec.get("id", "")
+        parts = [rec.get("op", "?")]
+        for field in ("args", "ret", "err"):
+            if field in rec:
+                parts.append("%s=%s" % (
+                    field, json.dumps(rec[field], sort_keys=True, separators=(",", ":"))))
+        bucket = asynchronous if rec.get("op") == "deliver" else comparable
+        bucket.setdefault(key, []).append(" ".join(parts))
+
+
+def dump(path, groups, note=None):
+    with open(path, "w", encoding="utf-8") as fh:
+        if note:
+            fh.write("# %s\n" % note)
+        for key in sorted(groups):
+            fh.write("== %s\n" % key)
+            for entry in groups[key]:
+                fh.write("   %s\n" % entry)
+
+
+dump(dst, comparable)
+dump(async_dst, asynchronous,
+     "asynchronous deliveries -- recorded, not compared; see trace_normalize")
+
+if malformed:
+    # Never silent. A truncated line dropped without saying so would make a
+    # run look as though it did less work than it did, which is precisely the
+    # kind of quiet under-reporting this whole comparison exists to prevent.
+    with open(dst, "a", encoding="utf-8") as fh:
+        fh.write("== malformed lines: %d\n" % malformed)
+PY
 }
 
 # ------------------------------------------------------------------ the store
@@ -563,6 +863,8 @@ probe_service() {
     dynamodb)       aws_local dynamodb list-tables            >/dev/null 2>&1 ;;
     s3)             aws_local s3api list-buckets              >/dev/null 2>&1 ;;
     sns)            aws_local sns list-topics                 >/dev/null 2>&1 ;;
+    sqs)            aws_local sqs list-queues                 >/dev/null 2>&1 ;;
+    cloudfront)     aws_local cloudfront list-distributions   >/dev/null 2>&1 ;;
     lambda)         aws_local lambda list-functions           >/dev/null 2>&1 ;;
     apigatewayv2)   aws_local apigatewayv2 get-apis           >/dev/null 2>&1 ;;
     secretsmanager) aws_local secretsmanager list-secrets     >/dev/null 2>&1 ;;

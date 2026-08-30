@@ -8,6 +8,7 @@ flowchart LR
     aws_apigatewayv2_stage_shop_api["shop-api\napigatewayv2.stage"]
     aws_apigatewayv2_shop_api(["shop-api\napigatewayv2"])
     aws_cloudwatch_loggroup_api["api\ncloudwatch.loggroup"]
+    aws_cloudwatch_loggroup_auditor["auditor\ncloudwatch.loggroup"]
     aws_cloudwatch_loggroup_reporter["reporter\ncloudwatch.loggroup"]
     aws_dynamodb_catalogue[("catalogue\ndynamodb")]
     aws_ecr_reporter["reporter\necr"]
@@ -19,12 +20,17 @@ flowchart LR
     aws_ecs_taskrole_reporter_task["reporter-task\necs.taskrole"]
     aws_elasticache_itemCache[("itemCache\nelasticache")]
     aws_iam_policy_api["api\niam.policy"]
+    aws_iam_policy_auditor["auditor\niam.policy"]
     aws_iam_role_api["api\niam.role"]
+    aws_iam_role_auditor["auditor\niam.role"]
+    aws_lambda_permission_auditor_itemEvents_sns["auditor-itemEvents-sns\nlambda.permission"]
     aws_lambda_permission_shop_api["shop-api\nlambda.permission"]
     aws_lambda_api["api\nlambda"]
+    aws_lambda_auditor["auditor\nlambda"]
     aws_rds_shopdb[("shopdb\nrds")]
     aws_s3_itemDocs[("itemDocs\ns3")]
     aws_secretsmanager_signingKey[("signingKey\nsecretsmanager")]
+    aws_sns_subscription_auditor_itemEvents>"auditor-itemEvents\nsns.subscription"]
     aws_sns_itemEvents>"itemEvents\nsns"]
     aws_subnetgroup_elasticache["elasticache\nsubnetgroup"]
     aws_subnetgroup_rds["rds\nsubnetgroup"]
@@ -72,12 +78,23 @@ flowchart LR
     aws_iam_policy_api --> aws_s3_itemDocs
     aws_iam_policy_api --> aws_secretsmanager_signingKey
     aws_iam_policy_api --> aws_sns_itemEvents
+    aws_iam_policy_auditor --> aws_dynamodb_catalogue
+    aws_iam_policy_auditor --> aws_iam_role_auditor
+    aws_iam_policy_auditor --> aws_rds_shopdb
+    aws_iam_policy_auditor --> aws_s3_itemDocs
+    aws_iam_policy_auditor --> aws_secretsmanager_signingKey
+    aws_lambda_permission_auditor_itemEvents_sns --> aws_lambda_auditor
+    aws_lambda_permission_auditor_itemEvents_sns --> aws_sns_itemEvents
     aws_lambda_permission_shop_api --> aws_apigatewayv2_shop_api
     aws_lambda_permission_shop_api --> aws_lambda_api
     aws_lambda_api --> aws_cloudwatch_loggroup_api
     aws_lambda_api --> aws_iam_role_api
+    aws_lambda_auditor --> aws_cloudwatch_loggroup_auditor
+    aws_lambda_auditor --> aws_iam_role_auditor
     aws_rds_shopdb --> aws_subnetgroup_rds
     aws_rds_shopdb --> aws_vpc_securitygroup_network
+    aws_sns_subscription_auditor_itemEvents --> aws_lambda_auditor
+    aws_sns_subscription_auditor_itemEvents --> aws_sns_itemEvents
     aws_subnetgroup_elasticache --> aws_vpc_subnet_network_0
     aws_subnetgroup_elasticache --> aws_vpc_subnet_network_1
     aws_subnetgroup_rds --> aws_vpc_subnet_network_0
@@ -110,3 +127,9 @@ flowchart LR
     aws_lambda_api -->|uses| aws_s3_itemDocs
     aws_lambda_api -->|uses| aws_secretsmanager_signingKey
     aws_lambda_api -->|uses| aws_sns_itemEvents
+    aws_lambda_auditor -->|uses| aws_dynamodb_catalogue
+    aws_lambda_auditor -->|uses| aws_elasticache_itemCache
+    aws_lambda_auditor -->|uses| aws_rds_shopdb
+    aws_lambda_auditor -->|uses| aws_s3_itemDocs
+    aws_lambda_auditor -->|uses| aws_secretsmanager_signingKey
+    aws_lambda_auditor -->|uses| aws_sns_itemEvents

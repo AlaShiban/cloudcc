@@ -1,6 +1,6 @@
 """Secret backed by AWS Secrets Manager."""
 
-from . import _client
+from . import _client, trace
 
 
 def connect(id):
@@ -39,11 +39,19 @@ class Secret:
                 ) from None
             raise
         if "SecretString" in response:
-            return response["SecretString"]
-        return response["SecretBinary"].decode("utf-8")
+            value = response["SecretString"]
+        else:
+            value = response["SecretBinary"].decode("utf-8")
+        # Length, never the value: a trace goes to stderr and on to CloudWatch
+        # (D21). What is worth recording is that the read happened and found
+        # something, which is what tells a working binding from one quietly
+        # yielding "".
+        trace.emit("secret", self.id, "get", ret="<secret:%d>" % len(value))
+        return value
 
     def set(self, value):
         """Replace the secret's value."""
+        trace.emit("secret", self.id, "set", args={"len": len(str(value))})
         self._sm.put_secret_value(SecretId=self._arn, SecretString=str(value))
 
     def __repr__(self):

@@ -1,0 +1,63 @@
+{
+  "description": "The TypeScript mirror of kitchen-sink: every capability in one program, and the only TypeScript example with both compute types -- a function behind an HTTP API and a container behind a load balancer. It is also where a typed channel is exercised: `new Topic<ItemEvent>()` means the publisher and the subscriber are checked against each other, which a bare Topic cannot do.",
+  "unit": "api",
+  "tables": [
+    "catalogue"
+  ],
+  "buckets": [
+    "item-docs"
+  ],
+  "engines": [
+    "postgres",
+    "redis"
+  ],
+  "databases": [
+    "shopdb"
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "method": "GET",
+      "path": "/items/1"
+    },
+    {
+      "method": "PUT",
+      "path": "/items/1",
+      "body": {
+        "name": "anvil",
+        "price": 20
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/items/1"
+    },
+    {
+      "method": "GET",
+      "path": "/items/1"
+    },
+    {
+      "method": "PUT",
+      "path": "/items/2",
+      "body": {
+        "name": "rope",
+        "price": 5
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/items/2"
+    },
+    {
+      "method": "GET",
+      "path": "/receipt/1"
+    },
+    {
+      "method": "GET",
+      "path": "/items/missing"
+    }
+  ]
+}

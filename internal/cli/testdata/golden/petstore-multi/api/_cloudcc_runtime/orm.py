@@ -14,7 +14,7 @@ import json
 import os
 from urllib.parse import quote
 
-from . import _client
+from . import _client, trace
 
 
 def connect(id, library="sqlalchemy"):
@@ -22,11 +22,11 @@ def connect(id, library="sqlalchemy"):
     if library == "sqlalchemy-async":
         from sqlalchemy.ext.asyncio import create_async_engine
 
-        return create_async_engine(_async_url(id))
+        return trace.wrap(create_async_engine(_async_url(id)), "orm", id)
 
     from sqlalchemy import create_engine
 
-    return create_engine(url(id))
+    return trace.wrap(create_engine(url(id)), "orm", id)
 
 
 def _async_url(id):

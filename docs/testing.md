@@ -53,6 +53,79 @@ cd sdk/python && uv run --with pytest --with-editable . python -m pytest tests
 `CLOUDCC_E2E_KEEP=1` leaves the work directory and the deployed stack in place for
 inspection; the harness prints the command to tear it down.
 
+## Same answers is not the same work
+
+Comparing responses asks "did it reply the same?". That is necessary and it is
+not sufficient, because it only ever sees what a route chose to return. A
+compiled program that writes to the wrong store, drops a publish, or reads a
+secret that resolved to `""` can answer every request byte-identically and pass.
+
+So both halves also record what they *did*. Set `CLOUDCC_TRACE=1` and every
+call through a persisted client is written to stderr as one tagged line: the
+operation, the logical id from `persist(id=...)`, the arguments, the result.
+
+```
+##cloudcc-trace## {"kind":"kv","id":"petsByOwner","op":"put_item","args":{...},"ret":{}}
+```
+
+`examples.sh` collects that from both runs, groups it by resource, and diffs
+it. `cloudcc trace <file>` reads the same stream by hand, and
+`cloudcc trace a --diff b` compares two.
+
+Tracing is **off unless the variable is set**, and that matters more than it
+looks. The runtime hands back the library's own object on purpose -- a boto3
+`Table`, a knex instance -- and a permanent wrapper would undo that design.
+With the variable unset, `wrap` returns the client it was given.
+
+Both halves observe through the *same* code: the SDKs vendor the injected
+tracer verbatim, and a test in each pins the copies byte-identical. If the
+instrument differed between halves, a difference in the trace would not tell
+you whether the program or the observer had changed.
+
+### What it normalises, and what that costs
+
+Every normalisation removes a class of difference this check could otherwise
+catch, so each is a trade rather than a tidy-up:
+
+| normalised | why | what it costs |
+|---|---|---|
+| physical resource names | `pets` vs `petstore-pets` *must* differ; the logical id does not | nothing -- a unit wired to the wrong store still differs, because its id would |
+| the capability (`kind`) | compiled knows it literally; uncompiled infers it from the client's type, and in JavaScript that cannot be made reliable -- a `pg.Pool` instance reports `BoundPool`, an ioredis client reports `EventEmitter` | nothing -- a capability that changed would change the operations too. It stays *in* the event, because it is worth reading; it is not worth comparing |
+| timestamps → `<time>` | always differ | a wrong *kind* of timestamp is invisible |
+| uuids → `<uuid:N>`, first-seen order | two runs minting ids in the same order agree | a run minting a different *number* still diverges |
+| `$metadata`, `ResponseMetadata` | HTTP status, request ids, attempt counts | none; this is the transport, not the program |
+| path-like values, relative to the root | a local directory and an `s3://` URL | a write to the wrong key still differs |
+
+**Topic deliveries are recorded and deliberately not compared.** Uncompiled, a
+topic fans out in process: `publish()` calls the subscriber before returning.
+Compiled, `publish()` hands off to SNS or SQS and the subscriber is another
+execution unit this harness does not run. Comparing them would fail every
+pub/sub example forever. The publish itself *is* compared; that a subscriber is
+really wired up is a different claim, checked by the subscriber-count assertion
+in the same file and by `nomnom.sh` driving a real message end to end.
+
+### It has caught things nothing else could
+
+Proved by mutation before being believed. A publish made a no-op in the
+compiled runtime: the response comparison passed, the subscriber-count
+assertion passed -- the infrastructure really was wired -- and the trace failed
+with the two `publish` events missing.
+
+The same run surfaced a real bug nobody planted. The cache shim set
+`decode_responses=True`, so `get` answered with `str` where the program's own
+client answers with `bytes`; `value.decode("utf-8")` worked locally and raised
+`AttributeError: 'str' object has no attribute 'decode'` once deployed. No
+response comparison could see it, because the one example that reaches it
+guards with `isinstance` -- and that example's comment asserted the two halves
+agreed. The shim no longer overrides the option, and a test pins that.
+
+Still open, and a design decision rather than an oversight: a program's own
+constructor keyword arguments are not passed through to the compiled client.
+`sdkdetect/hint.go` argues that what host a `Redis(host=...)` uses is none of
+the compiler's business. That principle is why the fix above only stopped the
+shim *inventing* an option; a program that explicitly writes
+`Redis(decode_responses=True)` still diverges, in the other direction.
+
 ## Generated programs
 
 `internal/fuzz` writes idiomatic Python programs that use the SDK, from a seed,
@@ -201,12 +274,16 @@ starts skipping, that is a signal, not noise.
 | `persist(boto3…Table())` | DynamoDB | yes | yes, through the running app |
 | `persist(Path(...))` | S3 | yes | yes, through the running app |
 | `persist(Secret())` | Secrets Manager | yes | yes, through the running app |
-| `pubsub` | SNS + subscription | yes | publish reaches the subscriber |
+| `pubsub` (fan-out) | SNS + subscription | yes | publish reaches the subscriber |
+| `pubsub` (one subscriber) | SQS + event source mapping | yes | the mapping is enabled, and the load suite counts the subscriber's invocations — Python only; no Node program declares one subscriber, so that shim's queue branch is unobserved |
 | `static_unit` | S3 website | yes | object fetch |
+| `static_unit` (`type: cloudfront`) | CloudFront + origin access identity | yes | the distribution serves the index document; that the bucket is private is not observable here, because the emulator does not enforce bucket policies |
 | `expose` | API Gateway v2 | probe-dependent | via local uvicorn/Mangum instead |
-| `execution_unit` (lambda) | Lambda | probe-dependent | direct handler invoke |
+| `execution_unit` (lambda) | Lambda | probe-dependent | the *deployed* bundle is invoked: every function must start, and the exposed one must answer GET /health |
 | `execution_unit` (container, serverless) | ECS Fargate | yes | a task runs; the ALB's own address is unverified |
+| a TypeScript unit | either compute type | yes | every example has a TypeScript mirror; each is run uncompiled through tsx, deployed, compared before and after compiling, and its compiled unit type-checks under `strict` |
 | `execution_unit` (container, kubernetes) | EKS | yes, a real k3s | pod runs, Service routes |
+| all three compute types in one application | Lambda + Fargate + EKS | yes | nomnom and nomnom-ts: five functions, one Fargate container, one pod. Which units *can* be containers is enforced rather than documented -- a `remote()` at a container and a container that subscribes are both compile errors |
 | `persist(create_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
 | `persist(create_async_engine(...))` | RDS Postgres | yes | yes, against a real Postgres in Docker |
 | `persist(Redis())` | ElastiCache | yes | yes, against a real Redis in Docker |
@@ -232,11 +309,11 @@ example, deployed and driven, rather than by a unit test alone:
 | `redis-py-async` | petstore-multi (api) | ElastiCache |
 | `pathlib` | petstore-multi (worker), mixed (worker), nomnom | S3 |
 | `boto3-dynamodb` | petstore, petstore-multi, mixed, nomnom | DynamoDB |
-| `pg` | mixed (api) | RDS Postgres |
-| `ioredis` | mixed (api) | ElastiCache |
-| `aws-sdk-s3` | mixed (api) | S3 |
-| `aws-sdk-dynamodb` | mixed (api), petstore-node | DynamoDB |
-| `knex`, `node-redis` | tests/e2e/node-clients.sh only | RDS Postgres, ElastiCache |
+| `pg` | mixed (api), kitchen-sink-ts, petstore-multi-ts (worker) | RDS Postgres |
+| `ioredis` | mixed (api), kitchen-sink-ts | ElastiCache |
+| `aws-sdk-s3` | mixed (api), kitchen-sink-ts, nomnom-ts, petstore-multi-ts (worker) | S3 |
+| `aws-sdk-dynamodb` | mixed (api), petstore-node, and every TypeScript mirror | DynamoDB |
+| `knex`, `node-redis` | petstore-multi-ts (api) | RDS Postgres, ElastiCache |
 
 `petstore-multi` deliberately holds both halves of the SQLAlchemy pair: the api
 unit's engine is asynchronous and the worker's is synchronous, against two
@@ -245,9 +322,22 @@ of the same claim -- one Postgres instance reached through `pg` from Node and
 through an ORM from Python, and one bucket reached through an `S3Client` and a
 `pathlib.Path`.
 
-The last row is the honest one: `knex` and `node-redis` are covered against real
-servers by `tests/e2e/node-clients.sh`, but no example declares them, so nothing
-proves they survive a full compile and deploy.
+That last row used to be the honest one -- `knex` and `node-redis` were covered
+against real servers by `tests/e2e/node-clients.sh` and by nothing else, which
+proves a shim can connect and not that a program using one survives a compile
+and a deploy. `examples/petstore-multi-ts` closes it: its api unit holds both,
+and the example is deployed and compared before and after compiling.
+
+Knex needed the `externals` escape hatch to get there, which nothing else in the
+repository had ever used: it statically requires every dialect driver it
+supports, so the bundler sees `require("oracledb")` and six more that are not
+installed. They are never called, so `pulumi_params.externals` tells the bundler
+to leave them alone.
+
+`tests/e2e/node-clients.sh` still runs all four Node shim modules against a real
+Redis and a real Postgres, and still earns its place: it is the only thing that
+exercises a shim directly rather than through a program, which is how it found
+`orm_pg.js` handing Postgres an empty-string password.
 
 "Preview only" means the resource is checked through `pulumi preview` rather
 than actually created. Nothing is preview only any more: LocalStack runs Fargate
@@ -380,6 +470,31 @@ docker:
 
 Wildcards are rejected by dockerd, which wants the exact host, and the symptom
 is a daemon that will not start at all.
+
+### When a run dies and the next one will not start
+
+Every harness keeps its Pulumi state in a `mktemp` workdir and deletes it on
+exit, so two runs can never collide over one state file. The cost is that a run
+killed outright -- or one whose teardown fails partway -- takes the state with
+it while the emulator keeps everything that run created. The next run then fails
+on the first resource it tries to create, and the message names the resource
+rather than the cause:
+
+```
+EntityAlreadyExists: Role with name mixed-worker-role already exists
+```
+
+Read `pulumi:pulumi:Stack <app>-local **creating**` in that output as the
+diagnosis: Pulumi had no prior state, so it was not re-applying anything -- the
+role is orphaned. `pulumi destroy` cannot help, because from its point of view
+the stack never existed.
+
+```bash
+./tests/e2e/localstack.sh reset   # wipes the emulator and any k3d clusters
+```
+
+This is safe by construction: the emulator holds nothing except what this suite
+put there.
 
 ## Kubernetes on the emulator
 

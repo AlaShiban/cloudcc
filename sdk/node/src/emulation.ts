@@ -40,6 +40,8 @@ import {
 } from "node:fs";
 import { dirname, join, posix, relative, resolve } from "node:path";
 
+import { emit } from "./trace.js";
+
 /** Where the supplied clients keep their state. */
 export const LOCAL_STATE_DIR_ENV = "CLOUDCC_LOCAL_STATE_DIR";
 const DEFAULT_LOCAL_ROOT = ".cloudcc-local";
@@ -78,29 +80,57 @@ export type Json = Record<string, unknown>;
  * without a cloud account.
  */
 export class Secret {
-  readonly #env: string | null;
+  #env: string | null;
   #value: string | null = null;
+  #traceId: string | null = null;
+
+  /** Name this secret for the trace. See trace.js for why. */
+  _bindTrace(id: string): void {
+    this.#traceId = id;
+  }
 
   constructor(env?: string) {
     this.#env = env ?? null;
   }
 
+  /**
+   * Where an unsourced secret should look, set by `persist` from the id.
+   *
+   * Not part of the API a program uses -- a parity test pins the public surface
+   * of this class against the injected shim's, and the shim has no equivalent
+   * because a compiled secret reads Secrets Manager. Hence the underscore.
+   */
+  _bindEnv(name: string): void {
+    this.#env ??= name;
+  }
+
+  /** Whether a source has been set. */
+  _envName(): string | null {
+    return this.#env;
+  }
+
   /** Return the secret's value. */
   async get(): Promise<string> {
-    if (this.#value !== null) {
-      return this.#value;
-    }
-    return (this.#env === null ? "" : process.env[this.#env]) ?? "";
+    const value =
+      this.#value !== null
+        ? this.#value
+        : ((this.#env === null ? "" : process.env[this.#env]) ?? "");
+    // Length, never the value: a trace is written to stderr and read by a test
+    // harness, and a secret that leaks there has leaked (D21). What is worth
+    // recording is that the read happened and found something.
+    emit("secret", this.#traceId ?? "", "get", { ret: `<secret:${value.length}>` });
+    return value;
   }
 
   /** Replace the secret's value. */
   async set(value: string): Promise<void> {
+    emit("secret", this.#traceId ?? "", "set", { args: { len: String(value).length } });
     this.#value = String(value);
   }
 }
 
 /** A handler a topic delivers messages to. */
-export type Subscriber = (message: Json) => unknown;
+export type Subscriber<T = Json> = (message: T) => unknown;
 
 /**
  * A publish/subscribe topic with in-process fan-out. Compiles to SNS.
@@ -130,8 +160,14 @@ export interface TopicRequirements {
   maxMessageKb?: number;
 }
 
-export class Topic {
-  readonly #subscribers: Subscriber[] = [];
+export class Topic<T = Json> {
+  readonly #subscribers: Subscriber<T>[] = [];
+  #traceId: string | null = null;
+
+  /** Name this topic for the trace. See trace.js for why. */
+  _bindTrace(id: string): void {
+    this.#traceId = id;
+  }
 
   /**
    * The requirements are read by the compiler, not by this class. Locally
@@ -141,20 +177,25 @@ export class Topic {
   constructor(readonly requirements: TopicRequirements = {}) {}
 
   /** Deliver `message` to every subscriber. */
-  async publish(message: Json): Promise<void> {
+  async publish(message: T): Promise<void> {
+    emit("pubsub", this.#traceId ?? "", "publish", { args: message });
     for (const fn of [...this.#subscribers]) {
+      // Recorded separately from the publish, and compared separately: locally
+      // a subscriber runs inside publish(), compiled it is another unit
+      // invoked later. See trace_normalize in tests/e2e/lib.sh.
+      emit("pubsub", this.#traceId ?? "", "deliver", { args: message });
       fn(message);
     }
   }
 
   /** Register `fn` as a subscriber; returns it, so it reads as a wrapper. */
-  subscribe(fn: Subscriber): Subscriber {
+  subscribe(fn: Subscriber<T>): Subscriber<T> {
     this.#subscribers.push(fn);
     return fn;
   }
 
   /** The registered subscribers, in registration order. */
-  subscribers(): readonly Subscriber[] {
+  subscribers(): readonly Subscriber<T>[] {
     return [...this.#subscribers];
   }
 }

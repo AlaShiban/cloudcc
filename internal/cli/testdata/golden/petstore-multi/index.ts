@@ -12,6 +12,10 @@ const networkZones = aws.getAvailabilityZonesOutput({
     state: "available",
 });
 
+const petstoreSiteOai = new aws.cloudfront.OriginAccessIdentity("petstore-site", {
+    comment: "cloudcc petstore-multi static unit petstore-site",
+});
+
 const apiLogs = new aws.cloudwatch.LogGroup("api", {
     name: "/aws/lambda/petstore-multi-api",
     retentionInDays: 14,
@@ -82,6 +86,72 @@ const petstoreSiteBucket = new aws.s3.BucketV2("petstore-site", {
     forceDestroy: true,
 });
 
+const petstoreSiteBucketPolicy = new aws.s3.BucketPolicy("petstore-site", {
+    bucket: petstoreSiteBucket.id,
+    policy: pulumi.jsonStringify({
+    Statement: [
+        {
+            Action: [
+                "s3:GetObject",
+            ],
+            Effect: "Allow",
+            Principal: {
+                AWS: petstoreSiteOai.iamArn,
+            },
+            Resource: [
+                pulumi.interpolate`${petstoreSiteBucket.arn}/*`,
+            ],
+        },
+    ],
+    Version: "2012-10-17",
+}),
+});
+
+const petstoreSiteCdn = new aws.cloudfront.Distribution("petstore-site", {
+    comment: "cloudcc petstore-multi static unit petstore-site",
+    defaultCacheBehavior: {
+        allowedMethods: [
+            "GET",
+            "HEAD",
+        ],
+        cachedMethods: [
+            "GET",
+            "HEAD",
+        ],
+        defaultTtl: 3600,
+        forwardedValues: {
+            cookies: {
+                forward: "none",
+            },
+            queryString: false,
+        },
+        maxTtl: 86400,
+        minTtl: 0,
+        targetOriginId: "s3-petstoreSite",
+        viewerProtocolPolicy: "redirect-to-https",
+    },
+    defaultRootObject: "index.html",
+    enabled: true,
+    origins: [
+        {
+            domainName: petstoreSiteBucket.bucketRegionalDomainName,
+            originId: "s3-petstoreSite",
+            s3OriginConfig: {
+                originAccessIdentity: petstoreSiteOai.cloudfrontAccessIdentityPath,
+            },
+        },
+    ],
+    priceClass: "PriceClass_100",
+    restrictions: {
+        geoRestriction: {
+            restrictionType: "none",
+        },
+    },
+    viewerCertificate: {
+        cloudfrontDefaultCertificate: true,
+    },
+});
+
 const petstoreSiteIndexHtmlObject = new aws.s3.BucketObject("petstore-site/index.html", {
     bucket: petstoreSiteBucket.id,
     contentType: "text/html; charset=utf-8",
@@ -96,20 +166,14 @@ const petstoreSiteStyleCssObject = new aws.s3.BucketObject("petstore-site/style.
     source: new pulumi.asset.FileAsset("static/petstore-site/style.css"),
 });
 
-const petstoreSiteWebsite = new aws.s3.BucketWebsiteConfigurationV2("petstore-site", {
-    bucket: petstoreSiteBucket.id,
-    indexDocument: {
-        suffix: "index.html",
-    },
-});
-
 const auditKeySecret = new aws.secretsmanager.Secret("auditKey", {
     name: "petstore-multi-auditKey",
     recoveryWindowInDays: 0,
 });
 
-const petEventsTopic = new aws.sns.Topic("petEvents", {
+const petEventsQueue = new aws.sqs.Queue("petEvents", {
     name: "petstore-multi-petEvents",
+    visibilityTimeoutSeconds: 120,
 });
 
 const networkVpc = new aws.ec2.Vpc("network", {
@@ -282,6 +346,17 @@ const workerPolicy = new aws.iam.RolePolicy("worker", {
                 auditKeySecret.arn,
             ],
         },
+        {
+            Action: [
+                "sqs:ReceiveMessage",
+                "sqs:DeleteMessage",
+                "sqs:GetQueueAttributes",
+            ],
+            Effect: "Allow",
+            Resource: [
+                petEventsQueue.arn,
+            ],
+        },
     ],
     Version: "2012-10-17",
 }),
@@ -296,7 +371,9 @@ const workerEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_ORM_AUDITDB_SECRET_ARN: pulumi.interpolate`${auditdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`,
     CLOUDCC_ORM_AUDITDB_URL: pulumi.interpolate`postgresql://ccadmin@${auditdbDb.address}:${auditdbDb.port}/auditdb`,
     CLOUDCC_SECRET_AUDITKEY_ARN: pulumi.interpolate`${auditKeySecret.arn}`,
-    CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
+    CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsQueue.arn}`,
+    CLOUDCC_TOPIC_PETEVENTS_BACKING: "sqs",
+    CLOUDCC_TOPIC_PETEVENTS_URL: pulumi.interpolate`${petEventsQueue.url}`,
     CLOUDCC_UNIT: `worker`,
 };
 
@@ -314,12 +391,14 @@ const workerFn = new aws.lambda.Function("worker", {
     timeout: 120,
 });
 
-const workerPetEventsSnsPermission = new aws.lambda.Permission("worker-petEvents-sns", {
-    action: "lambda:InvokeFunction",
-    function: workerFn.name,
-    principal: "sns.amazonaws.com",
-    sourceArn: petEventsTopic.arn,
-    statementId: "petstore-multi-worker-petEvents-sns",
+const workerPetEventsEventSource = new aws.lambda.EventSourceMapping("worker-petEvents", {
+    batchSize: 1,
+    eventSourceArn: petEventsQueue.arn,
+    functionName: workerFn.arn,
+}, {
+    dependsOn: [
+        workerPolicy,
+    ],
 });
 
 const petsdbDb = new aws.rds.Instance("petsdb", {
@@ -369,11 +448,11 @@ const apiPolicy = new aws.iam.RolePolicy("api", {
         },
         {
             Action: [
-                "sns:Publish",
+                "sqs:SendMessage",
             ],
             Effect: "Allow",
             Resource: [
-                petEventsTopic.arn,
+                petEventsQueue.arn,
             ],
         },
     ],
@@ -392,7 +471,9 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_REDIS_PETCACHE_ENDPOINT: pulumi.interpolate`${petCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`,
     CLOUDCC_REDIS_PETCACHE_PORT: "6379",
     CLOUDCC_REDIS_PETCACHE_TLS: "false",
-    CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsTopic.arn}`,
+    CLOUDCC_TOPIC_PETEVENTS_ARN: pulumi.interpolate`${petEventsQueue.arn}`,
+    CLOUDCC_TOPIC_PETEVENTS_BACKING: "sqs",
+    CLOUDCC_TOPIC_PETEVENTS_URL: pulumi.interpolate`${petEventsQueue.url}`,
     CLOUDCC_UNIT: `api`,
     LOG_LEVEL: "info",
 };
@@ -439,12 +520,6 @@ const petApiPermission = new aws.lambda.Permission("pet-api", {
     statementId: "petstore-multi-pet-api-invoke",
 });
 
-const workerPetEventsSubscription = new aws.sns.TopicSubscription("worker-petEvents", {
-    endpoint: workerFn.arn,
-    protocol: "lambda",
-    topic: petEventsTopic.arn,
-});
-
 const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {
     routeTableId: networkRoutes.id,
     subnetId: network1Subnet.id,
@@ -465,9 +540,12 @@ export const CLOUDCC_REDIS_PETCACHE_PORT = "6379";
 export const CLOUDCC_REDIS_PETCACHE_TLS = "false";
 export const CLOUDCC_SECRET_AUDITKEY_ARN = pulumi.interpolate`${auditKeySecret.arn}`;
 export const CLOUDCC_STATIC_PETSTORE_SITE_BUCKET = pulumi.interpolate`${petstoreSiteBucket.bucket}`;
-export const CLOUDCC_STATIC_PETSTORE_SITE_URL = pulumi.interpolate`${petstoreSiteWebsite.websiteEndpoint}`;
-export const CLOUDCC_TOPIC_PETEVENTS_ARN = pulumi.interpolate`${petEventsTopic.arn}`;
+export const CLOUDCC_STATIC_PETSTORE_SITE_URL = pulumi.interpolate`${petstoreSiteCdn.domainName}`;
+export const CLOUDCC_TOPIC_PETEVENTS_ARN = pulumi.interpolate`${petEventsQueue.arn}`;
+export const CLOUDCC_TOPIC_PETEVENTS_BACKING = "sqs";
+export const CLOUDCC_TOPIC_PETEVENTS_URL = pulumi.interpolate`${petEventsQueue.url}`;
 export const CLOUDCC_UNIT_API_FUNCTION = pulumi.interpolate`${apiFn.name}`;
 export const CLOUDCC_UNIT_WORKER_FUNCTION = pulumi.interpolate`${workerFn.name}`;
 export const petApiUrl = petApiApi.apiEndpoint;
-export const petstoreSiteUrl = petstoreSiteWebsite.websiteEndpoint;
+export const petEventsUrl = petEventsQueue.url;
+export const petstoreSiteUrl = petstoreSiteCdn.domainName;

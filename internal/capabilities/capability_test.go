@@ -357,3 +357,37 @@ def b():
 		t.Errorf("routes = %v; an f-string path should not be guessed", gw.Routes)
 	}
 }
+
+// A static unit declared from a module in a subdirectory, reaching assets that
+// sit beside that subdirectory. This is the shape every TypeScript project has
+// -- sources under src/, assets beside it -- and it produced object keys that
+// kept their `public/` prefix while the distribution asked for `index.html`,
+// so the stack deployed clean and served a 404.
+//
+// The prefix is recorded on the intent because working it out needs the
+// declaring module's directory and the glob resolved against each other, and
+// doing that twice is what went wrong.
+func TestAStaticUnitDeclaredFromASubdirectory(t *testing.T) {
+	ctx := compileSource(t, map[string]string{
+		"src/api.py": `import cloudcompiler as cloudcc
+cloudcc.static_unit("site", static_files="../public/**/*", index_document="index.html")
+`,
+		"public/index.html": "<h1>hi</h1>",
+		"public/style.css":  "body{}",
+	})
+	if ctx.Diags.HasErrors() {
+		t.Fatalf("diagnostics: %v", ctx.Diags.Items())
+	}
+
+	in, ok := ctx.Graph.Intent(ir.Key{Kind: config.KindStaticUnit, ID: "site"})
+	if !ok {
+		t.Fatal("no static unit was declared")
+	}
+	site := in.(*ir.StaticSite)
+	if len(site.Files) != 2 {
+		t.Fatalf("files = %v, want both assets", site.Files)
+	}
+	if site.Prefix != "public" {
+		t.Errorf("prefix = %q, want %q -- the keys would keep the directory", site.Prefix, "public")
+	}
+}

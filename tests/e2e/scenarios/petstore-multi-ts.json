@@ -1,0 +1,23 @@
+{
+  "description": "The TypeScript mirror of petstore-multi: two units sharing a module, a table and a queue. It is also the only example that deploys `knex` and `node-redis` -- until now both were exercised by tests/e2e/node-clients.sh alone, which proves a shim can connect and not that a program using one survives a compile and a deploy. The api unit holds a Knex instance and a node-redis client, both built by a factory rather than a constructor, so both carry a type annotation the rewrite preserves; the worker holds a pg Pool against a second database.",
+  "unit": "api",
+  "tables": ["pets"],
+  "engines": ["postgres", "redis"],
+  "databases": ["petsdb", "auditdb"],
+  "requests": [
+    {"method": "GET", "path": "/health"},
+    {"method": "GET", "path": "/breeds"},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "PUT", "path": "/pets/1", "body": {"name": "rex", "species": "dog", "breed": "labrador"}},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "GET", "path": "/pets/1"},
+    {"method": "PUT", "path": "/pets/2", "body": {"name": "mia", "species": "cat", "breed": "siamese"}},
+    {"method": "GET", "path": "/breeds"},
+    {"method": "DELETE", "path": "/pets/1"},
+    {"method": "GET", "path": "/pets/1"}
+  ],
+  "load": {
+    "scale": 0.06,
+    "_scale_why": "One PUT publishes one message, and the emulator starts a Lambda container per delivery without reaping it. This is the emulator's ceiling, not the application's."
+  }
+}

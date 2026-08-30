@@ -92,6 +92,27 @@ jobs:
           npm run build
           npm test
 
+      # Every TypeScript example type-checks as written.
+      #
+      # This is the cheap half of covering them: the golden trees already
+      # compile all five offline, and only some of them deploy. What a golden
+      # tree cannot say is whether the *source* a reader copies is valid
+      # TypeScript -- `tsc` never runs during a compile, because esbuild strips
+      # types without checking them, so an example could carry a type error
+      # indefinitely and still deploy.
+      #
+      # The compiled copy is checked too, but only where an example deploys
+      # (tests/e2e/examples.sh does it). This step is what covers the rest.
+      - name: TypeScript examples type-check
+        run: |
+          set -e
+          for dir in examples/*-ts examples/mixed; do
+            [ -f "$dir/tsconfig.json" ] || continue
+            echo "==> $dir"
+            ( cd "$dir" && npm install --silent --no-audit --no-fund \
+                && npx --yes -p typescript@5 tsc --noEmit )
+          done
+
       # The icon diagram is generated as a Python program, and the two ways it
       # can be wrong are both silent: a class name that is not in the diagrams
       # package, and a call site the imports did not bind. Installing the
@@ -260,6 +281,19 @@ jobs:
       # covers more shapes; this covers the code a newcomer actually reads, and
       # it checks that each application's architecture diagram matches the
       # resources the stack really created.
+      # Which TypeScript mirrors deploy here is a deliberate subset, and the
+      # scenario directory is what decides it: an example with no scenario is
+      # compiled and type-checked offline and not deployed. Three deploy --
+      # petstore-ts, petstore-multi-ts, kitchen-sink-ts -- which between them
+      # cover both compute types, every store, a queue, a CDN and a typed topic.
+      #
+      # nomnom-ts and k8s-web-ts have no scenario, so they are compile-only
+      # here. Both were validated against the emulator by hand, and both can be
+      # re-run on demand -- `./tests/e2e/nomnom.sh nomnom-ts` and
+      # `./tests/e2e/kubernetes.sh k8s-web-ts` -- because those harnesses take
+      # an example name. What CI runs below is the Python original of each; six
+      # units and a k3s cluster twice per push is the cost this subset avoids,
+      # and the mechanism they prove is the same in either language.
       - name: Every example, uncompiled vs compiled
         run: ./tests/e2e/examples.sh
 

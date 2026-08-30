@@ -55,6 +55,49 @@ find "$unit_build" -exec touch -t 198001010000 {} +
 ( cd "$unit_build" && find . -type f | LC_ALL=C sort | zip -q -X -@ "../api.zip" )
 echo "  wrote $build/api.zip"
 
+echo "packaging execution unit auditor"
+unit_build="$build/auditor"
+mkdir -p "$unit_build"
+cp -R "auditor/." "$unit_build/"
+
+if [ -s "auditor/requirements.txt" ]; then
+  # Wheels are resolved for the *target*, not for whoever is running this.
+  #
+  # A dependency with a compiled extension -- pydantic, cryptography, numpy --
+  # ships a different wheel per platform, and without this the build picks the
+  # one matching the machine doing the packaging. Compiling on a Mac then
+  # produced a bundle that installed cleanly, zipped cleanly, deployed cleanly
+  # and failed on its first invocation with "No module named
+  # pydantic_core._pydantic_core" -- which says nothing about the actual cause.
+  #
+  # The defaults are this unit's own target: 3.12 is the runtime
+  # it declares, and x86_64-manylinux2014 follows the architecture it declares -- so a
+  # unit that says `architectures: [arm64]` is packaged for arm64 without
+  # anyone having to remember a second place to say so. Getting that wrong is
+  # not a warning: the function deploys and dies on its first invocation.
+  #
+  # The two variables exist for a runtime that does not honour what the function
+  # declares. A local emulator generally runs containers of whatever the host
+  # is, with whatever Python it has: on an arm64 machine with Python 3.13 that
+  # is aarch64-manylinux2014 and 3.13, even though the deployed function would
+  # be x86_64 and 3.12. Both have to match or a compiled extension
+  # will not import -- the ABI tag is in the filename.
+  uv pip install \
+    --quiet \
+    --target "$unit_build" \
+    --python-version "${CLOUDCC_PYTHON_VERSION:-3.12}" \
+    --python-platform "${CLOUDCC_PYTHON_PLATFORM:-x86_64-manylinux2014}" \
+    --only-binary=:all: \
+    -r "auditor/requirements.txt"
+fi
+
+# Deterministic zip: fixed timestamps and sorted entries, so an unchanged unit
+# produces a byte-identical artefact and Pulumi sees no diff.
+find "$unit_build" -name '__pycache__' -type d -prune -exec rm -rf {} +
+find "$unit_build" -exec touch -t 198001010000 {} +
+( cd "$unit_build" && find . -type f | LC_ALL=C sort | zip -q -X -@ "../auditor.zip" )
+echo "  wrote $build/auditor.zip"
+
 echo "packaging execution unit reporter (container)"
 if command -v docker >/dev/null 2>&1; then
   docker build --quiet --tag "cloudcc-reporter:latest" "reporter" >/dev/null

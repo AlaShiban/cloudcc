@@ -1,6 +1,19 @@
 app: petstore-multi
 provider: aws
 
+static_units:
+  petstore-site:
+    # `s3` serves the objects from the bucket's own website endpoint, which
+    # means the bucket has to be readable by anyone. `cloudfront` keeps it
+    # private and puts a distribution in front: the objects are reachable
+    # through an origin access identity and no other way.
+    #
+    # The cost of the second one is that the index document only applies at the
+    # root -- CloudFront does not rewrite /docs/ to /docs/index.html the way an
+    # S3 website does -- which is why the two are separate types rather than a
+    # flag on one.
+    type: cloudfront
+
 execution_units:
   api:
     # What shape of compute this needs, not which product runs it. `function` is

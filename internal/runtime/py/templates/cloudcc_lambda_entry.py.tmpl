@@ -20,11 +20,11 @@ def handler(event, context):
 
     A single unit can be an HTTP handler, a topic subscriber and callable by
     other units all at once, so the event shape decides: a call envelope goes
-    to the named function, SNS deliveries go to the registered subscribers, and
-    anything else is treated as an HTTP request.
+    to the named function, a topic or queue delivery goes to the registered
+    subscribers, and anything else is treated as an HTTP request.
     """
     if _cloudcc_rpc.is_call(event):
         return _cloudcc_rpc.dispatch(_module, event)
-    if _cloudcc_pubsub.is_sns_event(event):
+    if _cloudcc_pubsub.is_delivery(event):
         return _cloudcc_pubsub.dispatch(event)
 {{if .ASGIApp}}    return _asgi(event, context){{else}}    return {"unit": "{{.Unit}}", "handled": False}{{end}}

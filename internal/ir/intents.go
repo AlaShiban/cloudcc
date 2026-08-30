@@ -136,6 +136,15 @@ type StaticSite struct {
 	// Root is the directory, relative to the source root, that Files are
 	// uploaded relative to.
 	Root string `json:"root"`
+	// Prefix is the directory a site key is relative to: strip it from a
+	// claimed path and what is left is the object's key.
+	//
+	// Recorded here rather than re-derived, because deriving it needs both the
+	// declaring module's directory *and* the glob, resolved against each other
+	// -- and doing that twice is how `../public/**/*` from a module in src/
+	// ended up uploading `public/index.html` while the distribution asked for
+	// `index.html` and got a 404.
+	Prefix string `json:"prefix,omitempty"`
 }
 
 func (s *StaticSite) Key() Key           { return Key{Kind: config.KindStaticUnit, ID: s.ID} }

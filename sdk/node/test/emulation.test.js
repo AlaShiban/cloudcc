@@ -150,3 +150,34 @@ test("slug matches the compiler's spelling", () => {
     assert.equal(cloudcc.slug(input), want);
   }
 });
+
+// A secret with no source of its own learns where to look, from the id it was
+// persisted under.
+//
+// Without this a local run always read an empty string while the compiled half
+// read Secrets Manager, so the two could never agree -- and any differential
+// test of a program with a secret had to avoid the secret entirely. The Python
+// SDK has done this since a test first needed it; Node had not, and the gap
+// only showed when a TypeScript example declared one.
+test("persist binds an unsourced secret to the name its compiled form reads", async () => {
+  const secret = cloudcc.persist(new cloudcc.Secret(), { id: "signing-key" });
+  process.env.CLOUDCC_SECRET_SIGNING_KEY = "s3kr1t";
+  try {
+    assert.equal(await secret.get(), "s3kr1t");
+  } finally {
+    delete process.env.CLOUDCC_SECRET_SIGNING_KEY;
+  }
+});
+
+// A secret told where to look keeps looking there.
+test("persist does not override a secret's own source", async () => {
+  const secret = cloudcc.persist(new cloudcc.Secret("MY_OWN_VAR"), { id: "signing-key" });
+  process.env.MY_OWN_VAR = "mine";
+  process.env.CLOUDCC_SECRET_SIGNING_KEY = "theirs";
+  try {
+    assert.equal(await secret.get(), "mine");
+  } finally {
+    delete process.env.MY_OWN_VAR;
+    delete process.env.CLOUDCC_SECRET_SIGNING_KEY;
+  }
+});

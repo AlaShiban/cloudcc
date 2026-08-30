@@ -102,6 +102,12 @@ func SNSTopic(app, id string) string {
 	return clamp(keep(join(app, id), isLambdaRune, '-'), 1, 256, "topic")
 }
 
+// SQSQueue: 1-80 characters of [a-zA-Z0-9_-]. Shorter than an SNS topic name,
+// and the ".fifo" suffix a FIFO queue needs counts against the same 80.
+func SQSQueue(app, id string) string {
+	return clamp(keep(join(app, id), isLambdaRune, '-'), 1, 80, "queue")
+}
+
 // SecretName: 1-512 characters of [a-zA-Z0-9/_+=.@-].
 func SecretName(app, id string) string {
 	return clamp(keep(join(app, id), isSecretRune, '-'), 1, 512, "secret")

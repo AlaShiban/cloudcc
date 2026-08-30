@@ -1,0 +1,37 @@
+app: kitchen-sink-ts
+provider: aws
+
+# `type:` names the shape of compute, not the product. `memory:` beside it is
+# portable and means the same thing on both -- megabytes the application gets --
+# but which *values* are legal is not portable at all, and each is checked
+# against the host it lands on.
+execution_units:
+  api:
+    type: function
+    # A function takes any size from 128 MB up, in 1 MB steps.
+    memory: 1024
+    timeout: 30
+  auditor:
+    # A function, and it has to be: it is the unit that subscribes. A topic
+    # delivery is pushed to a function, so a container cannot receive one.
+    type: function
+  reporter:
+    type: container
+    # The same setting, and a value Fargate actually has. It takes 512, then
+    # multiples of 1024 -- so `memory: 1500` here is a compile error, where on
+    # the api unit above it would be fine.
+    memory: 2048
+    aws.ecs.TaskDefinition:
+      # Say it explicitly when the default is too little CPU for the work,
+      # rather than inflating memory to buy CPU by accident.
+      cpu: 512
+
+exposed:
+  shop-api:
+    type: apigateway
+  reporter-web:
+    type: alb
+
+persisted:
+  itemCache:
+    type: elasticache

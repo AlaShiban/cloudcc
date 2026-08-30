@@ -13,8 +13,9 @@
 import IORedis from "ioredis";
 
 import { endpoint } from "./redis_endpoint.js";
+import { wrap } from "./trace.js";
 
 export function connect(id) {
   const { host, port, tls } = endpoint(id);
-  return new IORedis({ host, port, ...(tls ? { tls: {} } : {}) });
+  return wrap(new IORedis({ host, port, ...(tls ? { tls: {} } : {}) }), "redis", id);
 }

@@ -129,6 +129,45 @@ if skip_unless_service lambda; then
   aws_local lambda list-functions | grep -q "$APP_NAME" \
     || fail "no Lambda function matching $APP_NAME was provisioned"
   pass "L4 lambda: function provisioned"
+
+  # Provisioned is not the same claim as runnable, and the difference is the
+  # whole artefact: everything below this line runs the unit's *source* from
+  # the output directory, so the zip that was actually deployed is never
+  # loaded. A Node bundle spent this project's entire history unable to start
+  # -- esbuild's CommonJS shim throwing `Dynamic require of "node:https"` at
+  # import, before the handler was reached -- and nothing said so, because
+  # nothing had ever invoked one.
+  #
+  # Two claims, because they fail differently. *Every* unit must start: a
+  # bundle that cannot import its own modules raises before the handler is
+  # reached, and Lambda reports that as a FunctionError. Only the exposed one
+  # must answer HTTP, because a unit nothing exposes has no adapter and
+  # correctly replies {"handled": false}.
+  HTTP_PAYLOAD='{"version":"2.0","routeKey":"$default","rawPath":"/health","rawQueryString":"","headers":{},"requestContext":{"http":{"method":"GET","path":"/health","protocol":"HTTP/1.1","sourceIp":"127.0.0.1"},"stage":"$default","requestId":"probe","apiId":"probe","domainName":"probe","accountId":"000000000000","time":"","timeEpoch":0},"isBase64Encoded":false}'
+  PROBED_EXPOSED=0
+  for FN in $(aws_local lambda list-functions \
+              | jq -r --arg app "$APP_NAME" '.Functions[] | select(.FunctionName | startswith($app)) | .FunctionName'); do
+    aws_local lambda invoke --function-name "$FN" \
+      --cli-binary-format raw-in-base64-out --payload "$HTTP_PAYLOAD" \
+      "$WORK/deployed-probe.json" > "$WORK/deployed-probe.meta" 2>&1 \
+      || fail "could not invoke the deployed function $FN"
+    if grep -q '"FunctionError"' "$WORK/deployed-probe.meta"; then
+      fail "the deployed bundle for $FN does not start:
+  $(cat "$WORK/deployed-probe.json")"
+    fi
+    if [ "$FN" = "$APP_NAME-$UNIT" ]; then
+      jq -e '.statusCode == 200' "$WORK/deployed-probe.json" >/dev/null \
+        || fail "the deployed $FN did not answer GET /health: $(cat "$WORK/deployed-probe.json")"
+      PROBED_EXPOSED=1
+    fi
+  done
+  # The HTTP half is the load-bearing one, and it is matched by name -- so a
+  # name this harness did not predict would leave it silently unrun, which reads
+  # exactly like a pass. Physical names are allocated rather than derived (a
+  # collision appends a digest), so the assumption is worth checking.
+  [ "$PROBED_EXPOSED" = 1 ] \
+    || fail "no deployed function is named $APP_NAME-$UNIT, so the HTTP probe never ran"
+  pass "L4b every deployed bundle starts, and the exposed one serves HTTP"
 fi
 
 # Where logs go is configuration rather than code, so nothing in the program
@@ -215,25 +254,8 @@ if [ -f "$UNIT_DIR/package.json" ]; then
   # takes the app off the same export. Reading it from the manifest keeps this
   # from hardcoding a filename the compiler chose.
   ENTRY="$(jq -r '.main // "index.js"' "$UNIT_DIR/package.json")"
-  cat > "$UNIT_DIR/cloudcc_e2e_serve.mjs" <<SERVE
-// Written by tests/e2e/provisioning.sh. Serves the compiled unit over HTTP so the
-// same functional assertions can be made against it as against a Python one.
-const m = await import("./$ENTRY");
-const app = m.app ?? m.default;
-if (!app) {
-  console.error("the compiled entry exports neither app nor default");
-  process.exit(1);
-}
-app.listen(8099, "127.0.0.1", () => console.log("listening"));
-SERVE
-  # exec, so that $! is the server itself: backgrounding a subshell makes $!
-  # the subshell's pid, and killing that leaves the server running to poison
-  # the next run.
-  (
-    cd "$UNIT_DIR"
-    exec env CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT" \
-      node cloudcc_e2e_serve.mjs
-  ) &
+  serve_node "$UNIT_DIR" "$ENTRY" "app" 8099 "" \
+    "CLOUDCC_AWS_ENDPOINT_URL=$CLOUDCC_EMULATOR_ENDPOINT"
 else
   # exec, for the same reason as above -- this branch leaked a uvicorn on every
   # run before, which only went unnoticed because CI starts from a clean host.
@@ -244,8 +266,8 @@ else
       uv run --quiet $(py_run_deps "$UNIT_DIR") \
         python -m uvicorn "$PY_TARGET" --host 127.0.0.1 --port 8099 --log-level warning
   ) &
+  APP_PID=$!
 fi
-APP_PID=$!
 
 wait_for_http "http://127.0.0.1:8099/health" 45 \
   || fail "the compiled application did not start; it should run unchanged against an emulator (D15)"

@@ -1,0 +1,58 @@
+app: nomnom-ts
+provider: aws
+
+# Seven units and three kinds of compute, in one application. Nothing in the
+# program says which is which -- that is all here -- and nothing here says which
+# units talk to which, because that is in the code and the compiler reads it.
+#
+# Which units *can* be containers is not a free choice, and the compiler is what
+# decides it: a remote call is an invocation and only a function has one, and a
+# topic delivery is pushed to a function with nothing polling on a container's
+# behalf. So the five units that are called or subscribed to are functions, and
+# the two that only serve HTTP are containers.
+execution_units:
+  storefront:
+    # A container on the provider's own container service: Fargate here, Cloud
+    # Run or Container Apps elsewhere. It is the front door, it holds a
+    # connection for as long as a customer is on the page, and it calls three
+    # other units -- all of which a container does perfectly well. What it does
+    # not do is get called itself.
+    type: container
+    memory: 1024
+
+  menu:
+    # The same shape of compute, run by Kubernetes instead. `platform:` is the
+    # second portable axis: `kubernetes` is EKS here and GKE or AKS elsewhere,
+    # and dropping this line moves the unit to Fargate with nothing else
+    # changing.
+    #
+    # It reaches no store, deliberately. A pod's AWS identity comes from IRSA,
+    # which cloudcc does not emit yet, so a Kubernetes unit that reached one
+    # would be warned about -- and the menu genuinely needs nothing but the
+    # catalogue it is compiled with.
+    type: container
+    platform: kubernetes
+    memory: 512
+  pricing:
+    type: function
+  inventory:
+    type: function
+  dispatch:
+    type: function
+  tracking:
+    type: function
+  notify:
+    type: function
+
+exposed:
+  # A container cannot sit behind an HTTP API -- that integration is a Lambda
+  # invocation -- so both exposed units get a load balancer. On Kubernetes that
+  # is the Service in front of the pod.
+  nomnom-api:
+    type: alb
+  nomnom-menu:
+    type: alb
+
+logging:
+  type: cloudwatch
+  retention_days: 14

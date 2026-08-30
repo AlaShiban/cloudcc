@@ -191,6 +191,18 @@ type Hint struct {
 	// Client is the source text of the wrapped client expression, kept so the
 	// rewriter knows what it is replacing.
 	Client string
+	// ClientClass is the class the client was constructed from -- the `X` in
+	// `new X(...)` -- when the program named one, and empty otherwise.
+	//
+	// It is what lets the rewritten TypeScript keep its types. A shim's
+	// `connect()` is declared to return `any`, because which client it hands
+	// back is a fact about the call site rather than about the shim; without
+	// this the compiled copy loses every inference downstream of a store and
+	// stops type-checking under `strict`, in code the user did not write.
+	// A constructor is also a type in TypeScript, so naming it is exact rather
+	// than a guess -- which is why only the `new X(...)` form sets this, and a
+	// factory function like `createClient()` does not.
+	ClientClass string
 	// ClientArgs holds the literal arguments of the wrapped constructor, for
 	// the SDK-supplied clients whose arguments are declarations rather than
 	// connection settings.

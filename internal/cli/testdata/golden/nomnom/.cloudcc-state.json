@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "app": "nomnom",
+  "fingerprint": "872423ade0e43afd4cffe64a84b6c94ede979e358b64eb4ddbc2dc647fb85aa6",
+  "units": [
+    "dispatch",
+    "inventory",
+    "menu",
+    "notify",
+    "pricing",
+    "storefront",
+    "tracking"
+  ]
+}

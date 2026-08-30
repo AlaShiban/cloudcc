@@ -1,0 +1,53 @@
+app: petstore-multi-ts
+provider: aws
+
+static_units:
+  petstore-ts-site:
+    # The bucket kept private, reached through an origin access identity: one
+    # address for the content instead of two, and the cached one at that.
+    type: cloudfront
+
+execution_units:
+  api:
+    # What shape of compute this needs, not which product runs it.
+    type: function
+
+    environment_variables:
+      LOG_LEVEL: info
+
+    # The portable layer. Every provider has an answer for these two.
+    #
+    # This unit carries Knex, node-redis and two AWS SDK clients on top of
+    # Express, and the default 512 MB spends most of a cold start loading them.
+    memory: 1024
+
+    # The provider layer: what one cloud offers beyond the portable set, named
+    # after the resource it configures, spelled the way OpenTofu and Terraform
+    # spell it.
+    aws.lambda.Function:
+      architectures: [arm64]
+
+    # Knex statically requires every dialect driver it supports, so the bundler
+    # sees `require("mysql")`, `require("oracledb")` and five more that are not
+    # installed and refuses. They are never *called* -- this connection is
+    # `client: "pg"` -- so leaving them out of the bundle is exactly right, and
+    # this is the escape hatch for saying so.
+    pulumi_params:
+      externals:
+        - better-sqlite3
+        - mariadb/callback
+        - mysql
+        - mysql2
+        - oracledb
+        - pg-query-stream
+        - sqlite3
+        - tedious
+
+  worker:
+    type: function
+    # The worker signs a record, writes it to S3 and writes a row to its
+    # database, all after the API has already replied. Nothing is waiting on it.
+    timeout: 120
+    memory: 512
+    aws.lambda.Function:
+      architectures: [arm64]

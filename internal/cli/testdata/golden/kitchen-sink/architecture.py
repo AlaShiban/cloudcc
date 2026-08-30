@@ -31,6 +31,7 @@ with Diagram(
     direction="LR",
 ):
     n_execution_unit_api = Lambda("api\nLambda")
+    n_execution_unit_auditor = Lambda("auditor\nLambda")
     n_execution_unit_reporter = ElasticContainerServiceService("reporter\nFargate")
     n_expose_reporter_web = ElbApplicationLoadBalancer("reporter-web\nLoad Balancer")
     n_expose_shop_api = APIGateway("shop-api\nAPI Gateway")
@@ -44,12 +45,17 @@ with Diagram(
     n_expose_reporter_web >> n_execution_unit_reporter
     n_expose_shop_api >> n_execution_unit_api
     n_execution_unit_api >> Edge(label="publishes") >> n_pubsub_itemEvents
-    n_pubsub_itemEvents >> Edge(label="subscribes", style="dashed") >> n_execution_unit_reporter
+    n_pubsub_itemEvents >> Edge(label="subscribes", style="dashed") >> n_execution_unit_auditor
     n_execution_unit_api >> n_persist_fs_itemDocs
     n_execution_unit_api >> n_persist_kv_catalogue
     n_execution_unit_api >> n_persist_orm_shopdb
     n_execution_unit_api >> n_persist_redis_itemCache
     n_execution_unit_api >> n_persist_secret_signingKey
+    n_execution_unit_auditor >> n_persist_fs_itemDocs
+    n_execution_unit_auditor >> n_persist_kv_catalogue
+    n_execution_unit_auditor >> n_persist_orm_shopdb
+    n_execution_unit_auditor >> n_persist_redis_itemCache
+    n_execution_unit_auditor >> n_persist_secret_signingKey
     n_execution_unit_reporter >> n_persist_fs_itemDocs
     n_execution_unit_reporter >> n_persist_kv_catalogue
     n_execution_unit_reporter >> n_persist_orm_shopdb

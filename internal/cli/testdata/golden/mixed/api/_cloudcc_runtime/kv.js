@@ -20,12 +20,13 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { common, env, slug } from "./client.js";
+import { wrap } from "./trace.js";
 
 export function connect(id) {
   const table = env(`CLOUDCC_KV_${slug(id)}_TABLE`, "persist", id);
   const client = new DynamoDBClient(common());
   bindTable(client, table);
-  return client;
+  return wrap(client, "kv", id);
 }
 
 /**

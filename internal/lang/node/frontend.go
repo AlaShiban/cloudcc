@@ -176,6 +176,16 @@ func (Frontend) Tools() []lang.Tool {
 			Install: "npm install --global esbuild",
 			Why:     "bundles Node execution units; npx is used when it is absent",
 		},
+		{
+			// Only for running a TypeScript program *before* it is compiled.
+			// Nothing cloudcc produces needs it: a unit is bundled by esbuild,
+			// which strips types on its way through, so the deployed artefact
+			// is plain JavaScript either way.
+			Name: "tsx", Binary: "tsx", Required: false,
+			Install: "npm install --save-dev tsx",
+			Why: "runs a TypeScript program uncompiled, the way uvicorn runs a Python one; " +
+				"npx is used when it is absent",
+		},
 	}
 }
 

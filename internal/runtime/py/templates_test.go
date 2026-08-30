@@ -41,6 +41,7 @@ func TestRuntimeFilesAreEmbedded(t *testing.T) {
 		"_cloudcc_runtime/pubsub.py",
 		"_cloudcc_runtime/config.py",
 		"_cloudcc_runtime/expose.py",
+		"_cloudcc_runtime/trace.py",
 	} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("missing embedded file %s", want)
@@ -94,7 +95,7 @@ func TestRenderLambdaEntry(t *testing.T) {
 		"from mangum import Mangum",
 		`Mangum(getattr(_module, "app")`,
 		"def handler(event, context):",
-		"_cloudcc_pubsub.is_sns_event(event)",
+		"_cloudcc_pubsub.is_delivery(event)",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing %q in:\n%s", want, src)

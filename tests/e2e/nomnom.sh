@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end integration test for the nomnom example against an AWS emulator.
 #
-# nomnom is six execution units that talk to each other two ways -- awaited
+# nomnom is seven execution units that talk to each other two ways -- awaited
 # calls that compile to Lambda invocations, and published messages that compile
 # to SNS -- so this harness exists to prove the parts that cannot be checked by
 # reading the generated project:
@@ -14,7 +14,7 @@
 #       store along that chain ends up in the right state
 #
 # L5c is the one worth having. It is the whole point of the example, it spans
-# five of the six units, and nothing about it is visible from the source of any
+# five of the seven units, and nothing about it is visible from the source of any
 # one of them.
 #
 # Nothing here talks to real AWS. Every assertion goes through
@@ -23,7 +23,32 @@ set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-EXAMPLE="nomnom"
+# The example, and therefore the app name every deployed function is prefixed
+# with. Parameterised so the TypeScript mirror runs through the same harness:
+# what this proves -- seven units, three remote calls, two fan-out topics, and the
+# state left in every store -- is a property of the program, not of the syntax
+# it is written in.
+#
+#   ./tests/e2e/nomnom.sh            # the Python one
+#   ./tests/e2e/nomnom.sh nomnom-ts  # the TypeScript one
+EXAMPLE="${1:-nomnom}"
+APP="$(app_name "$REPO_ROOT/examples/$EXAMPLE")"
+
+# A remote function's *name* is the program's, and the two languages spell it
+# differently: `set_price` reads as wrong in TypeScript and `setPrice` reads as
+# wrong in Python. The compiler does not translate between them -- a remote call
+# is same-language by design -- so the harness asks which one it is looking at
+# rather than picking a side.
+# The units that are functions, which is every unit that is called over the
+# wire or subscribes to a topic. `storefront` and `menu` are containers and are
+# neither -- the compiler refuses both arrangements, so this list follows from
+# the application's shape rather than being a second place to keep in step.
+LAMBDA_UNITS="pricing inventory dispatch tracking notify"
+
+case "$EXAMPLE" in
+  *-ts | *-node) SET_PRICE="setPrice" ;;
+  *)             SET_PRICE="set_price" ;;
+esac
 UNIT="storefront"
 WORK="${CLOUDCC_E2E_WORKDIR:-$(mktemp -d "${TMPDIR:-/tmp}/cloudcc-nomnom-XXXXXX")}"
 OUT="$WORK/compiled"
@@ -70,9 +95,9 @@ pass "compiled"
 # split would be cosmetic -- the caller would still be granted that unit's
 # permissions and still be carrying its dependencies.
 for foreign in pricing inventory tracking dispatch notify; do
-  if [ -f "$OUT/$UNIT/nomnom/$foreign.py" ]; then
-    fail "the storefront bundle contains nomnom/$foreign.py; the remote boundary did not cut the import closure"
-  fi
+  for found in $(find "$OUT/$UNIT" -name "$foreign.py" -o -name "$foreign.ts" 2>/dev/null); do
+    fail "the storefront bundle contains ${found#$OUT/$UNIT/}; the remote boundary did not cut the import closure"
+  done
 done
 pass "each unit's bundle stops at the remote boundary"
 
@@ -87,16 +112,22 @@ pass "tsc --noEmit"
 
 # What a real deploy gets is x86_64 and the declared runtime, and neither
 # variable is set there. The emulator honours neither, so it is asked.
-if TARGET="$(emulator_python_target)"; then
-  export CLOUDCC_PYTHON_PLATFORM="${TARGET%% *}"
-  export CLOUDCC_PYTHON_VERSION="${TARGET##* }"
-else
-  warn "could not determine the emulator's Lambda target; packaging for the deployed defaults"
+# Only a Python unit is packaged for a target: a Node bundle is JavaScript and
+# runs anywhere the runtime does, so there is nothing to resolve wheels against.
+if [ "$(unit_language "$WORK/cloudcc" "$REPO_ROOT/examples/$EXAMPLE" "$UNIT")" = "python" ]; then
+  if TARGET="$(emulator_python_target)"; then
+    export CLOUDCC_PYTHON_PLATFORM="${TARGET%% *}"
+    export CLOUDCC_PYTHON_VERSION="${TARGET##* }"
+  else
+    warn "could not determine the emulator's Lambda target; packaging for the deployed defaults"
+  fi
 fi
-log "packaging six execution units for ${CLOUDCC_PYTHON_PLATFORM:-the deployed default} / python ${CLOUDCC_PYTHON_VERSION:-declared}"
+log "packaging seven execution units for ${CLOUDCC_PYTHON_PLATFORM:-the deployed default} / python ${CLOUDCC_PYTHON_VERSION:-declared}"
 ( cd "$OUT" && ./bin/package.sh )
-[ "$(ls "$OUT"/build/*.zip 2>/dev/null | wc -l | tr -d ' ')" = "6" ] \
-  || fail "expected six deployment artefacts, found $(ls "$OUT"/build/*.zip 2>/dev/null | wc -l | tr -d ' ')"
+# Five zips, not seven: the two container units are images rather than
+# archives, which is the packaging difference the compute type actually makes.
+[ "$(ls "$OUT"/build/*.zip 2>/dev/null | wc -l | tr -d ' ')" = "5" ] \
+  || fail "expected five deployment archives for the function units, found $(ls "$OUT"/build/*.zip 2>/dev/null | wc -l | tr -d ' ')"
 pass "packaged"
 
 # ---------------------------------------------------------------- deploy
@@ -110,17 +141,68 @@ pulumi stack init "$STACK" --non-interactive >/dev/null 2>&1 || pulumi stack sel
 pulumi_configure_emulator "$STACK"
 
 log "pulumi up"
-pulumi up -y --stack "$STACK" --non-interactive
-pass "provisioned"
+# Everything except the Kubernetes half.
+#
+# This application runs on three kinds of compute, and one of them needs a
+# cluster wired to the emulator's registry before a pod can pull anything --
+# finding the k3s container, writing a kubeconfig, teaching containerd where the
+# registry is, untainting the single node. That is `tests/e2e/kubernetes.sh`,
+# and it deploys *this* application in full:
+#
+#     ./tests/e2e/kubernetes.sh nomnom menu
+#
+# So the split is deliberate rather than a gap: that harness proves all three
+# compute types come up in one stack, and this one proves the calls and the
+# messages, which it can do without the pod. Excluding is how Pulumi expresses
+# it -- `--target` takes a resource and its dependents, and there is no way to
+# ask for its dependencies.
+pulumi up -y --stack "$STACK" --non-interactive \
+  --exclude "**kubernetes:**" --exclude-dependents
+pass "provisioned (all but the Kubernetes half; see kubernetes.sh)"
+
+# The images, which nothing else here would push.
+#
+# A container unit's repository does not exist until `pulumi up` has run, so the
+# push comes after -- `cloudcc deploy` sequences the two, and this harness
+# drives pulumi directly, so it has to do the same. Without it the ECS service
+# is created, its task tries to pull an image that was never uploaded, and the
+# service sits at zero running tasks for reasons that have nothing to do with
+# the application.
+if [ -x "$OUT/bin/push-images.sh" ]; then
+  log "pushing container images"
+  ( cd "$OUT" && CLOUDCC_STACK="$STACK" \
+      CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT" \
+      ./bin/push-images.sh ) >"$WORK/push.log" 2>&1 \
+    || { tail -15 "$WORK/push.log"; fail "could not push the container images"; }
+  pass "container images pushed to the emulator's ECR"
+fi
 
 # ------------------------------------------------------- L4: provisioning
 
 if skip_unless_service lambda; then
-  for unit in storefront pricing inventory dispatch tracking notify; do
-    aws_local lambda get-function --function-name "nomnom-$unit" >/dev/null 2>&1 \
+  # The five that are called or subscribed to. `storefront` is a container and
+  # `menu` runs on Kubernetes, and neither is a function -- which is the point
+  # the application is making: a call is an invocation and only a function has
+  # one, and a delivery is pushed to a function and nothing polls on a
+  # container's behalf. The compiler enforces both, so this list is the shape
+  # of the application rather than a list to keep in step by hand.
+  for unit in $LAMBDA_UNITS; do
+    aws_local lambda get-function --function-name "$APP-$unit" >/dev/null 2>&1 \
       || fail "execution unit $unit was not provisioned as a Lambda function"
   done
-  pass "L4 lambda: all six units provisioned"
+  pass "L4 lambda: the five function units are provisioned"
+
+  # And the storefront is not one, which is worth asserting rather than
+  # assuming: if it quietly resolved to a Lambda the calls below would still
+  # pass and the example would no longer be demonstrating anything.
+  if aws_local lambda get-function --function-name "$APP-storefront" >/dev/null 2>&1; then
+    fail "storefront is \`type: container\` and was provisioned as a Lambda"
+  fi
+  CLUSTER_ARN="$(aws_local ecs list-clusters --query 'clusterArns[]' --output text 2>/dev/null \
+    | tr '\t' '\n' | grep -- "/$APP-" | head -1 || true)"
+  [ -n "$CLUSTER_ARN" ] && [ "$CLUSTER_ARN" != "None" ] \
+    || fail "storefront is a container and no ECS cluster was provisioned for $APP"
+  pass "L4 ecs: the storefront runs on Fargate, not Lambda"
 fi
 
 if skip_unless_service dynamodb; then
@@ -154,13 +236,13 @@ fi
 # This found a real one: tracking imports the module declaring both topics but
 # only subscribes to one, so it was given one ARN and died on the other.
 log "probing every deployed unit for a clean start"
-for unit in storefront pricing inventory dispatch tracking notify; do
+for unit in $LAMBDA_UNITS; do
   aws_local lambda invoke \
-    --function-name "nomnom-$unit" \
+    --function-name "$APP-$unit" \
     --cli-binary-format raw-in-base64-out \
     --payload '{"cloudcc_call":{"function":"__cloudcc_probe__","args":[],"kwargs":{}}}' \
     "$WORK/probe-$unit.json" > "$WORK/probe-$unit.meta" 2>&1 \
-    || fail "could not invoke nomnom-$unit"
+    || fail "could not invoke $APP-$unit"
 
   if grep -q '"FunctionError"' "$WORK/probe-$unit.meta"; then
     fail "execution unit $unit does not start:
@@ -169,18 +251,35 @@ for unit in storefront pricing inventory dispatch tracking notify; do
   jq -e 'has("cloudcc_error")' "$WORK/probe-$unit.json" >/dev/null \
     || fail "$unit answered a probe for a function it does not have: $(cat "$WORK/probe-$unit.json")"
 done
-pass "L4b all six units import their modules and answer"
+pass "L4b every function unit imports its modules and answers"
 
-# The storefront's job is HTTP, and Mangum is initialised at import, so the
-# probe above does not cover it.
-log "probing the deployed storefront over HTTP"
-aws_local lambda invoke --function-name "nomnom-storefront" \
-  --cli-binary-format raw-in-base64-out \
-  --payload '{"version":"2.0","routeKey":"$default","rawPath":"/health","rawQueryString":"","headers":{},"requestContext":{"http":{"method":"GET","path":"/health","protocol":"HTTP/1.1","sourceIp":"127.0.0.1"},"stage":"$default","requestId":"probe","apiId":"probe","domainName":"probe","accountId":"000000000000","time":"","timeEpoch":0},"isBase64Encoded":false}' \
-  "$WORK/http-probe.json" >/dev/null
-jq -e '.statusCode == 200' "$WORK/http-probe.json" >/dev/null \
-  || fail "the deployed storefront did not answer GET /health: $(cat "$WORK/http-probe.json")"
-pass "L4b the deployed storefront serves HTTP"
+# The storefront used to be probed here with a Lambda invoke. It is a Fargate
+# container now, so what there is to check is that a task started: an ECS
+# service creates whether or not its task can pull an image or stay up, so
+# "the service exists" says nothing on its own.
+#
+# Its HTTP surface is still covered, twice over -- L5b below serves the
+# compiled storefront and drives every route through it, and kubernetes.sh
+# reaches the deployed one. The load balancer's own address is not asked for:
+# whether an address the emulator hands out is routable from this host is a
+# property of the emulator rather than of the deployment.
+if [ -n "${CLUSTER_ARN:-}" ]; then
+  log "waiting for the storefront's Fargate task"
+  SERVICE_ARN="$(aws_local ecs list-services --cluster "$CLUSTER_ARN" \
+    --query 'serviceArns[0]' --output text 2>/dev/null || true)"
+  if [ -n "$SERVICE_ARN" ] && [ "$SERVICE_ARN" != "None" ]; then
+    RUNNING=0
+    for _ in $(seq 1 60); do
+      RUNNING="$(aws_local ecs describe-services --cluster "$CLUSTER_ARN" \
+        --services "$SERVICE_ARN" --query 'services[0].runningCount' --output text 2>/dev/null || echo 0)"
+      [ "${RUNNING:-0}" -ge 1 ] && break
+      sleep 2
+    done
+    [ "${RUNNING:-0}" -ge 1 ] \
+      || fail "the storefront service has $RUNNING running tasks; the container never started"
+    pass "L4b the storefront's Fargate task is running"
+  fi
+fi
 
 # ---------------------------------------------------- wire from the stack
 
@@ -210,13 +309,13 @@ log "invoking the deployed pricing unit with a call envelope"
 aws_local lambda invoke \
   --function-name "$CLOUDCC_UNIT_PRICING_FUNCTION" \
   --cli-binary-format raw-in-base64-out \
-  --payload '{"cloudcc_call":{"function":"set_price","args":["margherita",1500],"kwargs":{}}}' \
+  --payload "{\"cloudcc_call\":{\"function\":\"$SET_PRICE\",\"args\":[\"margherita\",1500],\"kwargs\":{}}}" \
   "$WORK/setprice.json" >/dev/null
 # Through the envelope: a reply is always an object carrying either a result
 # or an error, so that a function returning a bare string is not indistinguishable
 # from a truncated document.
 jq -e '.cloudcc_result.cents == 1500' "$WORK/setprice.json" >/dev/null \
-  || fail "the deployed pricing unit did not answer set_price: $(cat "$WORK/setprice.json")"
+  || fail "the deployed pricing unit did not answer $SET_PRICE: $(cat "$WORK/setprice.json")"
 pass "L5a a deployed unit answers a call envelope"
 
 PRICE="$(aws_local dynamodb get-item --table-name "$CLOUDCC_KV_MENUPRICES_TABLE" \
@@ -243,14 +342,20 @@ fi
 # the compiled code runs unchanged, so the host supplies the host's own
 # dependencies, exactly as uvicorn itself is supplied.
 log "starting the compiled storefront against the emulator"
-(
-  cd "$OUT/$UNIT"
-  exec env CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT" \
-    PYTHONPATH="$OUT/$UNIT" \
-    uv run --quiet --with fastapi --with uvicorn --with boto3 \
-      python -m uvicorn storefront:app --host 127.0.0.1 --port $PORT --log-level warning
-) &
-APP_PID=$!
+if [ "$(unit_language "$WORK/cloudcc" "$REPO_ROOT/examples/$EXAMPLE" "$UNIT")" = "node" ]; then
+  STOREFRONT_TARGET="$(unit_target "$WORK/cloudcc" "$REPO_ROOT/examples/$EXAMPLE" "$UNIT")"
+  serve_node "$OUT/$UNIT" "${STOREFRONT_TARGET%%:*}" "${STOREFRONT_TARGET##*:}" "$PORT" "" \
+    "CLOUDCC_AWS_ENDPOINT_URL=$CLOUDCC_EMULATOR_ENDPOINT"
+else
+  (
+    cd "$OUT/$UNIT"
+    exec env CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT" \
+      PYTHONPATH="$OUT/$UNIT" \
+      uv run --quiet --with fastapi --with uvicorn --with boto3 \
+        python -m uvicorn storefront:app --host 127.0.0.1 --port $PORT --log-level warning
+  ) &
+  APP_PID=$!
+fi
 
 wait_for_http "http://127.0.0.1:$PORT/health" 60 \
   || fail "the compiled storefront did not start; it should run unchanged against an emulator (D15)"
@@ -373,7 +478,7 @@ pulumi destroy -y --stack "$STACK" --non-interactive
 DESTROYED=1
 
 if skip_unless_service lambda; then
-  if aws_local lambda list-functions | grep -q "nomnom-pricing"; then
+  if aws_local lambda list-functions | grep -q "$APP-pricing"; then
     fail "a function survived destroy"
   fi
   pass "L4 destroy removed the units"

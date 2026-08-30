@@ -15,10 +15,10 @@ was already true of every other store: redis-py wants a Redis, SQLAlchemy wants
 a Postgres. The key/value store has stopped being the exception.
 """
 
-from . import _client
+from . import _client, trace
 
 
 def connect(id):
     """Return the Table declared as ``persist(boto3...Table(...), id=...)``."""
     name = _client.env("CLOUDCC_KV_%s_TABLE" % _client.slug(id), "persist", id)
-    return _client.resource("dynamodb").Table(name)
+    return trace.wrap(_client.resource("dynamodb").Table(name), "kv", id)

@@ -195,15 +195,74 @@ func (r *Resolver) subscriptions() error {
 		unit := in.(*ir.ExecUnit)
 		fnKey := ir.Key{Kind: KindLambda, ID: unit.ID}
 		if _, ok := r.Program.Resource(fnKey); !ok {
-			continue // a non-Lambda unit subscribes through its own runtime
+			// Not a function, so there is nothing to deliver to.
+			//
+			// The comment here used to say a non-Lambda unit "subscribes
+			// through its own runtime", and nothing did: a container that
+			// called subscribe() produced no subscription, no event source
+			// mapping and no permission, and its handler was simply never
+			// called. Silent, and only visible as messages that vanish.
+			//
+			// Delivering to a container is a real thing -- a queue the process
+			// polls for itself -- but it is not implemented, and saying so is
+			// the whole point (D9).
+			if len(r.Program.EdgesFrom(unit.Key(), ir.EdgeSubscribes)) > 0 {
+				return errUnsupported(
+					"execution unit %q is `type: %s` and subscribes to a topic, which is not yet "+
+						"supported: a delivery is pushed to a function, and nothing polls on a "+
+						"container's behalf. Make %q a function, or have it read the store the "+
+						"subscriber writes to",
+					unit.ID, unit.Config().Type, unit.ID)
+			}
+			continue
 		}
 		for _, edge := range r.Program.EdgesFrom(unit.Key(), ir.EdgeSubscribes) {
 			for _, topic := range r.Program.ResolvedFrom(edge.To) {
-				if topic.Key().Kind != KindSNSTopic {
-					continue
-				}
 				id := unit.ID + "-" + edge.To.ID
 				topicKey := topic.Key()
+
+				// A queue is pulled rather than pushed, so the wiring is the
+				// other way round: Lambda polls it through an event source
+				// mapping, and the permission to do so is on the function's own
+				// role rather than a policy on the queue. Nothing here grants
+				// anything -- see unitPolicy, which reads the same edge.
+				if topicKey.Kind == KindSQSQueue {
+					esm := ir.NewResource(KindLambdaESM, id, "aws.lambda.EventSourceMapping", map[string]any{
+						"eventSourceArn": ir.Ref{Key: topicKey, Prop: "arn"},
+						"functionName":   ir.Ref{Key: fnKey, Prop: "arn"},
+						// One message per invocation. A batch is faster and
+						// cheaper, but it also means one handler raising takes
+						// the whole batch back to the queue and every message in
+						// it is delivered again -- which turns a bug in one
+						// message into repeated work on the others. A program
+						// that wants batching can say so once batching is a
+						// requirement the topic carries.
+						"batchSize": 1,
+					}, nil)
+					// Ordered after the role policy, explicitly. The mapping
+					// names the queue and the function and never the policy, so
+					// nothing else tells the engine which comes first -- and
+					// creating an event source mapping is not a passive
+					// declaration: Lambda checks then and there that the
+					// function's role can call ReceiveMessage, and refuses the
+					// mapping outright if the policy has not landed yet. The
+					// failure is a race, so it appears on some deploys and not
+					// others, which is the worst shape a failure can have.
+					policyKey := ir.Key{Kind: KindLambdaPolicy, ID: unit.ID}
+					if _, ok := r.Program.Resource(policyKey); ok {
+						esm.WithOpts(map[string]any{
+							"dependsOn": []any{ir.Ref{Key: policyKey, Prop: ""}},
+						})
+						r.Program.Connect(esm.Key(), policyKey, ir.EdgeDependsOn)
+					}
+					r.Program.Resolve(edge.To, esm)
+					r.Program.Connect(esm.Key(), topicKey, ir.EdgeDependsOn)
+					r.Program.Connect(esm.Key(), fnKey, ir.EdgeDependsOn)
+					continue
+				}
+				if topicKey.Kind != KindSNSTopic {
+					continue
+				}
 
 				sub := ir.NewResource(KindSNSSub, id, "aws.sns.TopicSubscription", map[string]any{
 					"topic":    ir.Ref{Key: topicKey, Prop: "arn"},
@@ -370,12 +429,38 @@ func (r *Resolver) unitPolicy(u *ir.ExecUnit, roleKey ir.Key) *ir.GenericResourc
 	// actually publish get it.
 	for _, e := range r.Program.EdgesFrom(u.Key(), ir.EdgePublishes) {
 		for _, res := range r.Program.ResolvedFrom(e.To) {
-			if res.Key().Kind != KindSNSTopic {
+			var actions []any
+			switch res.Key().Kind {
+			case KindSNSTopic:
+				actions = []any{"sns:Publish"}
+			case KindSQSQueue:
+				actions = []any{"sqs:SendMessage"}
+			default:
 				continue
 			}
 			statements = append(statements, map[string]any{
 				"Effect":   "Allow",
-				"Action":   []any{"sns:Publish"},
+				"Action":   actions,
+				"Resource": []any{ir.Ref{Key: res.Key(), Prop: "arn"}},
+			})
+		}
+	}
+	// Consuming is a grant too, and only for a queue. An SNS subscriber is
+	// pushed to and needs nothing on its role -- the permission there lives on
+	// the function, as a resource policy naming the topic. This is the pull
+	// side: Lambda's poller uses the *function's* role to read the queue, so
+	// without these three actions the mapping exists, reads nothing, and reports
+	// it nowhere the application can see.
+	for _, e := range r.Program.EdgesFrom(u.Key(), ir.EdgeSubscribes) {
+		for _, res := range r.Program.ResolvedFrom(e.To) {
+			if res.Key().Kind != KindSQSQueue {
+				continue
+			}
+			statements = append(statements, map[string]any{
+				"Effect": "Allow",
+				"Action": []any{
+					"sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes",
+				},
 				"Resource": []any{ir.Ref{Key: res.Key(), Prop: "arn"}},
 			})
 		}

@@ -1,6 +1,7 @@
 # CloudCompiler (`cloudcc`)
 
-Write a plain Python application. Add a few hints. Get infrastructure.
+Write a plain application — Python, TypeScript or JavaScript. Add a few hints.
+Get infrastructure.
 
 ```python
 # app.py
@@ -115,16 +116,51 @@ CLOUDCC_AWS_ENDPOINT_URL=http://localhost:4566 \
   uv run --with fastapi --with uvicorn --with boto3 uvicorn app:app
 ```
 
+### Seeing what it actually did
+
+A compiled unit talks to resources you did not name, through bindings you did
+not write. When it misbehaves, the useful evidence is the sequence of calls it
+made at its stores — not a stack trace, and not a log line somebody remembered
+to add.
+
+Set `CLOUDCC_TRACE=1` on either half and every call through a persisted client
+is written to stderr, tagged, so it survives a Lambda (where it reaches
+CloudWatch) and interleaves harmlessly with your own logging:
+
+```bash
+CLOUDCC_TRACE=1 uvicorn app:app 2> trace.log
+cloudcc trace trace.log
+```
+```
+== petsByOwner (kv)
+   put_item args={"kw":{"Item":{"id":"1","pet":"…"}}} ret={}
+   get_item args={"kw":{"Key":{"id":"1"}}} ret={"Item":{"id":"1","pet":"…"}}
+```
+
+Resources appear under the id *you* gave them in `persist(id=...)`, never the
+provisioned name — which is what lets a local run and a deployed one be
+compared directly:
+
+```bash
+cloudcc trace before.log --diff after.log     # non-zero if they did different work
+```
+
+Tracing is off unless the variable is set. `persist` still hands back the
+library's own object, so nothing about your program changes when it is unset.
+
 ## The SDK
 
-Everything `cloudcc` understands is a call in the `cloudcompiler` package:
+Everything `cloudcc` understands is a call in the `cloudcompiler` package. This
+section is the reference; [Every capability, by
+example](#every-capability-by-example) is the same ground in one snippet each,
+with [a TypeScript mirror](docs/typescript.md).
 
 | Call | Compiles to |
 |---|---|
 | `cloudcc.expose(app, id=...)` | API Gateway v2 (or an ALB) |
 | `cloudcc.execution_unit(id=...)` | Lambda (or ECS Fargate) |
 | `cloudcc.persist(client, id=...)` | see below — the client decides |
-| `cloudcc.static_unit(id, static_files=...)` | S3 website |
+| `cloudcc.static_unit(id, static_files=...)` | S3 website (or CloudFront) |
 | `cloudcc.config_value(id, secret=...)` | environment variable, Pulumi stack secret when secret |
 | `cloudcc.embed_assets(pattern)` | files bundled with the declaring unit |
 
@@ -146,8 +182,42 @@ docs  = cloudcc.persist(Path("./itemDocs"), id="itemDocs")
 | `sqlalchemy.create_engine("mysql…")` | RDS MySQL |
 | `pathlib.Path(...)` | S3, as a `cloudpathlib.S3Path` |
 | `boto3.resource("dynamodb").Table(...)` | DynamoDB, as a `Table` |
-| `cloudcc.Topic()` | SNS, SQS or Kinesis |
+| `cloudcc.Topic()` | SNS, or SQS for a single subscriber |
 | `cloudcc.Secret()` | Secrets Manager |
+
+A topic is the one place where the arguments, not the client, decide the
+service — because the variants do not behave alike:
+
+```python
+events = cloudcc.persist(cloudcc.Topic(subscribers="one"), id="petEvents")
+```
+
+`subscribers="many"` is a fan-out and compiles to SNS, which pushes each
+notification to every subscriber. `subscribers="one"` is a work queue and
+compiles to SQS, which the subscriber's function polls through an event source
+mapping. Both ends of your program are unchanged — `publish()` and
+`subscribe()` mean the same thing either way — and the queue's visibility
+timeout is derived from how long the subscriber may run, because AWS refuses a
+mapping where the function can outrun it.
+
+`ordering`, `replay` and the rest still resolve to FIFO queues, FIFO topics and
+Kinesis, and those three are refused at compile time rather than approximated.
+
+### Static units: a bucket, or a bucket behind a CDN
+
+```yaml
+static_units:
+  petstore-site:
+    type: cloudfront      # s3 | cloudfront
+```
+
+`s3` serves the objects from the bucket's own website endpoint. `cloudfront`
+keeps the bucket private and puts a distribution in front of it, reaching the
+objects through an origin access identity and no other way — one address for
+the content instead of two, and the cached one at that. The cost is that the
+index document only applies at the root: CloudFront does not rewrite `/docs/`
+to `/docs/index.html` the way an S3 website does, which is why these are two
+types rather than a flag.
 
 Where logs go is configuration rather than code:
 
@@ -192,6 +262,198 @@ losing a database to a rename is not a trade worth making for brevity.
 **Your program still runs locally.** `uvicorn app:app` works on your laptop with
 no cloud account. The SDK never imports boto3; that only ever appears in the
 `_cloudcc_runtime` package injected into the compiled copy.
+
+A TypeScript program needs something that can run TypeScript, exactly as a
+Python one needs uvicorn:
+
+```bash
+npx tsx server.ts        # or: node --import tsx server.ts
+```
+
+`tsx` is esbuild underneath, which is also what packages the unit, so the
+program you run and the program you deploy are transformed the same way.
+Node's own `--experimental-strip-types` is not enough here: it is
+erasable-syntax-only, so enums, namespaces and constructor parameter properties
+fail, and it does not resolve `./store.js` to `store.ts` — a spelling `cloudcc`
+does support. Nothing `cloudcc` *produces* needs `tsx`: a unit is bundled by
+esbuild on the way out, so what gets deployed is plain JavaScript either way.
+
+## Every capability, by example
+
+Python below. **[The same gallery in TypeScript →](docs/typescript.md)** — same
+capabilities, same resources, only the spelling differs.
+
+Each snippet is distilled from a working example in `examples/`, and every one
+of those is deployed and compared before and after compiling on each run.
+
+```python
+import cloudcompiler as cloudcc
+```
+
+### An execution unit
+
+```python
+cloudcc.execution_unit(id="api")
+```
+
+→ a Lambda. `type: container` in `cloudcc.yaml` makes it ECS Fargate;
+`platform: kubernetes` makes it a Deployment on EKS. The code does not change —
+that is the whole point of the axis being configuration.
+
+### Exposing HTTP
+
+```python
+app = FastAPI()
+cloudcc.expose(app, id="pet-api")
+```
+
+→ API Gateway v2 in front of the unit, or an ALB for a container unit.
+`cloudcc` only needs to know *which variable* holds the app; your framework
+still owns routing.
+
+### Key/value — DynamoDB
+
+```python
+catalogue = cloudcc.persist(boto3.resource("dynamodb").Table("catalogue"), id="catalogue")
+
+catalogue.put_item(Item={"id": "1", "name": "rex"})
+```
+
+→ a DynamoDB table. You keep a boto3 `Table`, so `put_item`, `query`,
+`batch_writer` and the paginators all work — because they *are* boto3's.
+
+### Relational — RDS
+
+```python
+db = cloudcc.persist(
+    create_engine("postgresql://ccadmin@localhost:5432/shopdb"),
+    id="shopdb",
+    models=["Item", "Order"],
+)
+```
+
+→ RDS Postgres; a `mysql://` URL gives RDS MySQL, and `create_async_engine`
+gives an `AsyncEngine` back. The master credential is managed by AWS and never
+enters an environment variable.
+
+### Cache — ElastiCache
+
+```python
+cache = cloudcc.persist(Redis(host="localhost"), id="itemCache")
+
+cache.setex(f"item:{item_id}", 300, summary)
+```
+
+→ ElastiCache. `type: memorydb` in `cloudcc.yaml` switches the service without
+touching this line. What you hold is a `redis.Redis`, with the library's own
+defaults — the compiler supplies where it connects and nothing else.
+
+### Files — S3
+
+```python
+docs = cloudcc.persist(Path("./itemDocs"), id="itemDocs")
+
+(docs / f"{item_id}.json").write_text(json.dumps(body))
+```
+
+→ an S3 bucket, and `docs` becomes a `cloudpathlib.S3Path`: the `/` operator,
+`read_text`, `iterdir` and `exists` all behave as they did locally.
+
+### Pub/sub — SNS, or SQS
+
+```python
+events = cloudcc.persist(cloudcc.Topic(), id="itemEvents")
+
+events.publish({"action": "upserted", "id": item_id})    # publisher
+events.subscribe(on_item_event)                          # subscriber, another unit
+```
+
+→ SNS for fan-out. `cloudcc.Topic(subscribers="one")` is a work queue and
+compiles to SQS with an event-source mapping instead — the same two lines of
+program either way. The queue's visibility timeout is derived from how long the
+subscriber may run, because AWS refuses a mapping whose function can outrun it.
+
+### Secrets
+
+```python
+signing_key = cloudcc.persist(cloudcc.Secret(), id="signingKey")
+
+key = signing_key.get()
+```
+
+→ Secrets Manager. `cloudcc` provisions the secret and deliberately not its
+value, so nothing sensitive lands in the generated project or the state file
+(D21). Setting it is a deploy-time step, and an unset secret says so rather
+than yielding `""`.
+
+### Calling another unit
+
+```python
+from nomnom import pricing
+
+pricing = cloudcc.remote(pricing, id="pricing")
+
+quote = await pricing.quote_basket(items)
+```
+
+→ a Lambda invoke, with arguments and return values crossing as JSON.
+Uncompiled it is an ordinary in-process call, so the program runs as one
+process. The functions must be `async def`, the names must exist, and the calls
+may not form a cycle — all three are compile errors rather than production
+surprises.
+
+### Configuration values
+
+```python
+log_level = cloudcc.config_value("log_level", default="info")
+stripe_key = cloudcc.config_value("stripe_key", secret=True)
+```
+
+→ an environment variable on the unit; `secret=True` makes it a Pulumi stack
+secret, encrypted in state rather than sitting in plaintext.
+
+### Assets bundled with a unit
+
+```python
+SEED = cloudcc.embed_assets("./data/*.json")
+```
+
+→ the matching files travel inside the unit's own deployment bundle, and the
+call returns the directory they landed in.
+
+### A static site, optionally behind a CDN
+
+```python
+cloudcc.static_unit(
+    "petstore-site",
+    static_files="./public/**/*",
+    index_document="index.html",
+)
+```
+
+→ an S3 website. `type: cloudfront` keeps the bucket private and puts a
+distribution in front of it, reachable only through an origin access identity.
+
+### Logging
+
+```python
+logging.getLogger(__name__).info("started")
+```
+
+→ CloudWatch, with the unit's identity attached, configured before your module
+is imported. Where logs go is `cloudcc.yaml`'s business rather than your
+program's — which is what makes swapping the destination a change to one key
+instead of to every call site.
+
+### Seeing what it did
+
+```bash
+CLOUDCC_TRACE=1 uvicorn app:app 2> trace.log
+cloudcc trace trace.log
+```
+
+→ every call the program made through a persisted client, grouped by the id you
+gave it. See [above](#seeing-what-it-actually-did).
 
 ## Configuration
 
@@ -247,15 +509,40 @@ from shared.store import pets
 
 Each unit gets its own function, its own role and its own environment. A module
 both units import is copied into both bundles. Files a static unit claimed
-never enter a compute bundle at all. See `examples/petstore-multi`.
+never enter a compute bundle at all. See `examples/petstore-multi`, or
+`examples/petstore-multi-ts` for the same application in TypeScript.
+
+### The examples
+
+Every example exists in both languages. The Python one is the original; the
+`-ts` sibling is the same application written in TypeScript, and both are
+compiled, deployed and compared before and after compiling.
+
+| | Python | TypeScript | what it is for |
+|---|---|---|---|
+| one unit | `petstore` | `petstore-ts` | the smallest thing that works |
+| breadth | `petstore-multi` | `petstore-multi-ts` | two units, every store, a queue, a CDN |
+| coverage | `kitchen-sink` | `kitchen-sink-ts` | every capability, both compute types |
+| many units | `nomnom` | `nomnom-ts` | six units, remote calls and fan-out topics |
+| Kubernetes | `k8s-web` | `k8s-web-ts` | a container, and nothing that names the platform |
+| two languages | — | `mixed` | a TypeScript API beside a Python worker |
+| JavaScript | — | `petstore-node` | plain JavaScript, no types |
+| the target | `mega-app` | — | a specification; it does not compile, on purpose |
 
 ## What is not here
 
-No auth, telemetry or self-update. No Go, C# or JavaScript source. No GCP or
+No auth, telemetry or self-update. No Go or C# source. No GCP or
 Azure — an unknown `--provider` is a clean error, never a silent fallback. No
-EKS or CockroachDB: they are accepted by the schema and rejected at compile
-time with "not yet supported", rather than quietly becoming something else. No
-watch mode, no Windows.
+CockroachDB: it is accepted by the schema and rejected at compile time with
+"not yet supported", rather than quietly becoming something else. No watch
+mode, no Windows.
+
+Python, JavaScript and TypeScript are the languages, and a unit's frontend is
+chosen from its entrypoint's extension — so a Python worker beside a TypeScript
+API is not a special case. Within TypeScript, decorator frameworks (NestJS),
+Koa routers, Deno and Bun are not supported, JSX/TSX parses but implies no
+framework support, and a `tsconfig` `extends` chain deeper than one level is a
+clear error rather than a configuration read halfway.
 
 Routes registered on a FastAPI `APIRouter` are not discovered. They are still
 served — the gateway forwards everything to your unit — but they will not show
@@ -298,7 +585,15 @@ It is worth having as a *file* rather than only an image: it is the one output
 someone can edit — regroup it, annotate it for a review — without hand-drawing
 anything, and it diffs in a pull request like the rest of the compiled tree. A
 PNG is rendered during the compile when `diagrams` and graphviz are both
-installed, and skipped with a one-line note when they are not. Nothing is
+installed, and skipped with a one-line note when they are not. `cloudcc doctor`
+reports whether the package is there, which is the difference between choosing
+not to have the picture and not knowing it was available:
+
+```console
+$ pip install diagrams
+$ cloudcc doctor | grep diagrams
+  ok       diagrams /usr/bin/python3 (import diagrams)
+``` Nothing is
 downloaded to draw a picture nobody asked for.
 
 All three are rendered from the program's own edges rather than a structure
@@ -307,6 +602,8 @@ something that was. Rendering is entirely local (D12).
 
 ## Further reading
 
+- [`docs/typescript.md`](docs/typescript.md) — every capability in TypeScript,
+  mirroring the gallery above.
 - [`docs/dev.md`](docs/dev.md) — how the compiler is put together, and how to
   add a capability or a resource type.
 - [`docs/testing.md`](docs/testing.md) — the test pyramid and the

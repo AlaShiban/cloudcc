@@ -1,7 +1,7 @@
 """The background execution unit.
 
 It shares shared/store.py with the api unit, which is what makes both units
-resolve to the same DynamoDB table and the same SNS topic.
+resolve to the same DynamoDB table and the same queue.
 
 What it does *not* share is shared/catalogue.py. Permissions and environment
 are both derived from what a unit bundles, so a worker that never imports the
