@@ -168,10 +168,44 @@ less work than the plan assumed.
 
 ## Out of scope for v1
 
-`tsconfig` path aliases (warn), decorator frameworks such as NestJS, JSX/TSX,
-Koa routers, deployment without a bundler, and Deno/Bun. Each is a clean "not
-yet supported" error rather than a silent misbehaviour, following the existing
-convention for `eks` and `cockroachdb_serverless`.
+~~`tsconfig` path aliases (warn)~~ — done, and the parenthesis was wrong: there
+was no warning. A non-relative specifier was taken for an npm package, so the
+module never entered the closure and the first sign was esbuild failing to
+resolve it. `baseUrl` and `paths` now resolve, and an alias that maps to nothing
+is a diagnostic naming the tsconfig.
+
+Still out of scope: decorator frameworks such as NestJS, JSX/TSX, Koa routers,
+deployment without a bundler, and Deno/Bun. Each is a clean "not yet supported"
+error rather than a silent misbehaviour, following the existing convention for
+`eks` and `cockroachdb_serverless`.
+
+## What the TypeScript round found
+
+Milestones N0–N6 left TypeScript in a state that is worth naming precisely,
+because "supported" was true of the compiler and not of the product: `.ts`
+parsed, detected, rewrote and produced an IR, and **no TypeScript program had
+ever been run or deployed**. `newJSModule` refused TypeScript in behavioural
+mode -- "node cannot import a .ts file without a loader" -- so `.ts` appeared
+only in structural sweeps, and there was no `.ts` example, golden tree or e2e.
+
+Four things were wrong underneath that, and none would have surfaced without
+running one:
+
+- **A TypeScript container could not start.** The generated Dockerfile ran
+  `node cloudcc_server_entry.mjs`, which imports the unit's own module -- and
+  `node app.ts` is not a thing. A container is now bundled exactly as a function
+  is, so the image carries one `index.mjs` and the question does not arise.
+- **Idiomatic TypeScript was not recognised.** `as`, `satisfies`, `!` and
+  `<T>x` around a client or a literal reached the detectors as themselves. One
+  `unwrapTS` helper strips them, and it replaced the literal decoder's own
+  parenthesis case rather than adding a second implementation of that job.
+- **Type-only imports were followed.** `import type { Pet } from "./store"` is
+  erased by every TypeScript build, so pulling the store into the unit gave it a
+  binding and IAM permissions for a store it never touches -- the least
+  privilege property, quietly lost.
+- **Node Lambda bundles did not load at all**, in either language. That one is
+  in `docs/decisions.md`: it is a JavaScript bug that TypeScript work found,
+  because nothing had ever invoked a deployed Node function.
 
 ## The one thing most likely to go wrong
 

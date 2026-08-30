@@ -233,25 +233,15 @@ serve() {
   fi
 
   if [ "$language" = "node" ]; then
-    local entry="${target%%:*}" binding="${target##*:}"
-    # Nothing is written into the directory being served. The uncompiled half
-    # is the user's own source tree, and a harness that drops a launcher into it
-    # is modifying the input -- which this compiler does not do and its tests
-    # should not either. An absolute specifier resolves the module's own
-    # node_modules from where the module is, so no file is needed.
-    ( cd "$dir" && exec env $env_pairs node --input-type=module -e "
-      const m = await import(\"file://$dir/$entry\");
-      const app = m.$binding ?? m.default;
-      app.listen($port, \"127.0.0.1\", () => console.log(\"listening\"));
-    " ) >"$WORK/$label.log" 2>&1 &
+    serve_node "$dir" "${target%%:*}" "${target##*:}" "$port" "$WORK/$label.log" "$env_pairs"
   else
     ( cd "$dir" && exec env $env_pairs PYTHONPATH="$dir" \
         uv run --quiet $(py_run_deps "$dir") \
           ${sdk[@]+"${sdk[@]}"} \
           python -m uvicorn "$target" --host 127.0.0.1 --port "$port" \
             --log-level warning --no-access-log ) >"$WORK/$label.log" 2>&1 &
+    APP_PID=$!
   fi
-  APP_PID=$!
 
   wait_for_http "http://127.0.0.1:$port/health" 60 \
     || { sed 's/^/    /' "$WORK/$label.log" | tail -20; fail "the $label application did not start"; }

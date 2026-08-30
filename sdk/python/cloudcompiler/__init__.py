@@ -44,6 +44,7 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
+from . import _trace
 from ._emulation import (
     Gateway,
     Secret,
@@ -115,7 +116,53 @@ def persist(client: T, *, id: str, models: list | None = None) -> T:
     # comparing the two halves had to avoid the secret entirely.
     if isinstance(client, Secret) and client._env_name() is None:
         client._bind_env("CLOUDCC_SECRET_" + _env_suffix(id))
-    return client
+
+    # With CLOUDCC_TRACE unset this returns `client` itself, so the promise
+    # above -- that what you hold is the library's own type -- is untouched.
+    # With it set, calls through the client are recorded so an uncompiled run
+    # and a compiled one can be compared on what they *did*, not only on what
+    # they answered. Topic and Secret record from inside instead; they are
+    # ours, so there is no foreign object to proxy.
+    if isinstance(client, (Topic, Secret)):
+        client._bind_trace(id)
+        return client
+    return _trace.wrap(client, _kind_of(client), id)
+
+
+#: How a client's library maps to the capability the compiler provisions for
+#: it. The compiled half records these names literally -- each shim knows what
+#: it is -- so the uncompiled half has to arrive at the same word or every
+#: event would differ on `kind` alone. test_trace_parity pins the two together.
+_KIND_BY_ROOT_MODULE = {
+    "redis": "redis",
+    "sqlalchemy": "orm",
+    "boto3": "kv",
+    "pathlib": "fs",
+}
+
+
+def _kind_of(client: Any) -> str:
+    """Which capability a persisted client stands for.
+
+    Inferred from the type rather than declared, because `persist` deliberately
+    takes the library's own object and this package imports none of those
+    libraries -- naming the module is as close as it can get without adding a
+    dependency it has spent its design avoiding.
+    """
+    t = type(client)
+    root = (getattr(t, "__module__", "") or "").split(".")[0]
+    if root in _KIND_BY_ROOT_MODULE:
+        return _KIND_BY_ROOT_MODULE[root]
+    # boto3 builds resource classes dynamically, so the module is
+    # boto3.resources.factory and the name carries the service.
+    if "dynamodb" in t.__name__.lower() or t.__name__ == "Table":
+        return "kv"
+    if hasattr(client, "__fspath__"):
+        return "fs"
+    # Unrecognised is recorded as such rather than guessed. A wrong kind would
+    # make two identical runs differ, which is the one failure this comparison
+    # must never invent.
+    return "unknown"
 
 
 def _env_suffix(id: str) -> str:

@@ -37,6 +37,11 @@ type Unresolved struct {
 	Rendered string
 	// Offset is the statement's byte offset in the importing file.
 	Offset int
+	// Why explains a resolution the reader would not otherwise expect, and is
+	// appended to the diagnostic. A relative import that names no file needs no
+	// explanation; an alias that a tsconfig pattern claimed and could not
+	// satisfy does, because there is no file on disk with that name to look for.
+	Why string
 }
 
 // MethodCall is one `receiver.method(...)` site, which is how a publisher is

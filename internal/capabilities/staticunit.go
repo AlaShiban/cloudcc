@@ -51,6 +51,11 @@ func (p *StaticUnitsPlugin) Transform(ctx *compiler.Context) error {
 			site.IndexDocument = cfg.IndexDocument
 		}
 
+		// The one place the glob and the declaring directory are resolved
+		// against each other, so everything downstream reads the answer rather
+		// than working it out again.
+		site.Prefix = globRootDir(normalizeGlob(site.Root, site.StaticFiles))
+
 		claimed := p.match(ctx, site.Root, site.StaticFiles)
 		shared := p.match(ctx, site.Root, site.SharedFiles)
 

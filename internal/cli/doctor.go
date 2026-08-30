@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -37,6 +38,12 @@ type tool struct {
 	required bool
 	brew     string
 	why      string
+	// present overrides the binary lookup for things that are not on PATH.
+	// A Python package is the case that forced it: `diagrams` is what turns
+	// architecture.py into a picture, and a checklist that only knows how to
+	// look for executables reports every tool green while that picture is
+	// silently never produced.
+	present func() (string, bool)
 }
 
 var toolchain = []tool{
@@ -44,6 +51,11 @@ var toolchain = []tool{
 	{name: "pulumi", binary: "pulumi", required: true, brew: "brew install pulumi", why: "runs the generated infrastructure project"},
 	{name: "node", binary: "node", required: false, brew: "brew install node", why: "type-checks the generated TypeScript"},
 	{name: "dot", binary: "dot", required: false, brew: "brew install graphviz", why: "renders the topology diagram as PNG"},
+	{
+		name: "diagrams", required: false, brew: "pip install diagrams",
+		why:     "renders architecture.py as an icon diagram; without it that file is still written, but no PNG",
+		present: pythonPackage("diagrams"),
+	},
 	{name: "docker", binary: "docker", required: false, brew: "brew install --cask docker", why: "runs the AWS emulator and builds container images"},
 	{name: "aws", binary: "aws", required: false, brew: "brew install awscli", why: "used by the integration tests to assert provisioned resources"},
 }
@@ -75,6 +87,14 @@ func newDoctorCommand() *cobra.Command {
 
 			for _, t := range allTools() {
 				path, err := exec.LookPath(t.binary)
+				if t.present != nil {
+					var ok bool
+					path, ok = t.present()
+					err = nil
+					if !ok {
+						err = errNotPresent
+					}
+				}
 				switch {
 				case err == nil:
 					fmt.Fprintf(w, "  ok       %-8s %s\n", t.name, path)
@@ -109,6 +129,26 @@ func newDoctorCommand() *cobra.Command {
 			fmt.Fprintln(w, "\nAll required tools are present.")
 			return nil
 		},
+	}
+}
+
+// errNotPresent stands in for exec.LookPath's error when a tool is checked
+// some other way.
+var errNotPresent = errors.New("not present")
+
+// pythonPackage reports whether an importable package is installed, using the
+// same interpreter and the same probe the renderer itself uses -- so the
+// checklist cannot say yes to something the compile will then say no to.
+func pythonPackage(name string) func() (string, bool) {
+	return func() (string, bool) {
+		python, err := exec.LookPath("python3")
+		if err != nil {
+			return "", false
+		}
+		if err := exec.Command(python, "-c", "import "+name).Run(); err != nil {
+			return "", false
+		}
+		return python + " (import " + name + ")", true
 	}
 }
 

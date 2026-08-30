@@ -11,12 +11,13 @@
 import { S3Client } from "@aws-sdk/client-s3";
 
 import { common, env, slug } from "./client.js";
+import { wrap } from "./trace.js";
 
 export function connect(id) {
   const bucket = env(`CLOUDCC_FS_${slug(id)}_BUCKET`, "persist", id);
   const client = new S3Client(common());
   bindBucket(client, bucket);
-  return client;
+  return wrap(client, "fs", id);
 }
 
 /**

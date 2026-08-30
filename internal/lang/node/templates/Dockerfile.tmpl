@@ -2,17 +2,29 @@
 #
 # Supply your own Dockerfile in the source tree to take over completely:
 # cloudcc copies it through untouched rather than generating this one.
+#
+# The image carries one file. bin/package.sh bundles this unit the same way it
+# bundles a function -- esbuild, to a single index.mjs -- so there is no source
+# tree to copy, no npm install to run, and no question of whether `node` can
+# load the entry: by this point it is plain JavaScript whatever the unit was
+# written in. The .mjs extension is what says ESM, so not even a package.json
+# is needed.
 FROM node:22-slim
 
 ENV NODE_ENV=production \
     PORT=8080
 
 WORKDIR /app
-
-COPY package*.json ./
-RUN npm install --omit=dev
-
-COPY . .
+{{if .Externals}}
+# This unit declares `externals` in cloudcc.yaml, so those packages were left
+# out of the bundle -- a native module cannot be bundled -- and have to be
+# installed. The whole manifest is installed rather than a trimmed one: the
+# externals are certainly in it, and an image that is bigger than it needs to be
+# is a better failure than one missing the package it was told to keep.
+COPY package.json ./
+RUN npm install --omit=dev --no-audit --no-fund
+{{end}}
+COPY index.mjs ./
 
 EXPOSE 8080
-{{if .ASGIApp}}CMD ["node", "cloudcc_server_entry.mjs"]{{else}}CMD ["node", "{{.EntryFile}}"]{{end}}
+CMD ["node", "index.mjs"]

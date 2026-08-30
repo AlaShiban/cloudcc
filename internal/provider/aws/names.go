@@ -19,6 +19,22 @@ func EnvRedisPort(id string) string     { return "CLOUDCC_REDIS_" + sanitize.Env
 func EnvRedisTLS(id string) string      { return "CLOUDCC_REDIS_" + sanitize.EnvVar(id) + "_TLS" }
 func EnvTopicARN(id string) string      { return "CLOUDCC_TOPIC_" + sanitize.EnvVar(id) + "_ARN" }
 
+// EnvTopicURL carries a queue's URL. SNS is addressed by ARN and SQS by URL,
+// and the SDKs take one each -- there is no converting between them at runtime
+// without knowing the account id, which is exactly the kind of thing a compiled
+// program should not have to work out for itself.
+func EnvTopicURL(id string) string { return "CLOUDCC_TOPIC_" + sanitize.EnvVar(id) + "_URL" }
+
+// EnvTopicBacking names the service a topic resolved to, so the shim builds the
+// right client and reads the right delivery shape.
+//
+// A binding rather than something the shim infers from which of the two
+// variables above is set, for the same reason the log destination is a binding:
+// inferring it means sniffing the environment, and an environment that is half
+// populated -- a stack half deployed, a developer exporting one variable by
+// hand -- then silently picks the wrong client instead of failing.
+func EnvTopicBacking(id string) string { return "CLOUDCC_TOPIC_" + sanitize.EnvVar(id) + "_BACKING" }
+
 // EnvUnitFunction carries a unit's deployed function name to the units that
 // call it. Every other binding here points at a store; this one points at
 // another piece of the same program.
@@ -66,6 +82,11 @@ const (
 	KindSecret         = "aws.secretsmanager"
 	KindSNSTopic       = "aws.sns"
 	KindSNSSub         = "aws.sns.subscription"
+	KindSQSQueue       = "aws.sqs"
+	KindLambdaESM      = "aws.lambda.eventsourcemapping"
+	KindCloudFront     = "aws.cloudfront"
+	KindCloudFrontOAI  = "aws.cloudfront.oai"
+	KindS3BucketPolicy = "aws.s3.bucketpolicy"
 	KindRDS            = "aws.rds"
 	KindElastiCache    = "aws.elasticache"
 	KindMemoryDB       = "aws.memorydb"

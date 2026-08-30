@@ -12,7 +12,12 @@ import boto3
 import cloudcompiler as cloudcc
 
 pets = cloudcc.persist(boto3.resource("dynamodb").Table("pets"), id="petsByOwner")
-events = cloudcc.persist(cloudcc.Topic(), id="petEvents")
+
+#: One subscriber -- the worker, and nothing else listens -- so this is a queue
+#: rather than a fan-out, and the compiler resolves it to SQS. Nothing here says
+#: SQS: what is declared is the requirement, and a second listener later is a
+#: change to this line rather than to either unit's code.
+events = cloudcc.persist(cloudcc.Topic(subscribers="one"), id="petEvents")
 
 
 def summarize(pet: dict) -> str:

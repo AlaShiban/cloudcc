@@ -301,6 +301,79 @@ credential; the URL delivered to the shim carries no password, and the managed
 secret's ARN is passed separately so the shim can fetch it. Putting the
 password in the environment would have defeated the point of D21.
 
+## Accepted, after the seam trace made them visible
+
+`CLOUDCC_TRACE` compares the two halves on the calls they made rather than on
+what they answered (see docs/testing.md). It exposed four divergences. Two were
+fixed; three behaviours below are accepted as they stand, and are written down
+because each is a place where "the compiled program behaves like the
+uncompiled one" is knowingly approximate.
+
+**A client's own constructor arguments are not passed through.** `hint.go` says
+what host a `Redis(host=...)` uses is none of the compiler's business, and that
+principle is kept. It cuts both ways, which is the part worth stating: the
+compiler must not *invent* options either. The cache shim used to set
+`decode_responses=True`, so `get` answered `str` where the program's own client
+answers `bytes` -- `value.decode("utf-8")` worked locally and raised
+`AttributeError: 'str' object has no attribute 'decode'` once deployed. That
+invention is gone and a test pins it. What remains is the mirror case: a
+program that *explicitly* writes `Redis(decode_responses=True)` gets a compiled
+client that does not, because reading those arguments is the thing this
+principle forbids. Accepted, with the asymmetry named rather than hidden.
+
+**Topic deliveries are recorded and not compared.** Uncompiled a topic fans out
+in process -- `publish()` calls the subscriber before returning. Compiled,
+`publish()` hands off to SNS or SQS and the subscriber is a different execution
+unit, which the differential harness does not run. There is no ordering both
+halves can satisfy, so comparing deliveries would fail every pub/sub example
+forever. The publish itself is compared; that a subscriber is really wired up
+is a different claim, checked by the subscriber-count assertion in
+`examples.sh` and by `nomnom.sh` driving a real message end to end.
+
+**The Node SDK's local `Topic.publish` does not await its subscribers.** It
+calls `fn(message)` and drops the promise, where the Python SDK runs the
+coroutine and explains at the call site why. So an `async` subscriber appears
+to have run, wrote nothing, and warned on a stream nobody reads. Left as it is
+because changing it changes local runtime behaviour, and the asymmetry is now
+recorded rather than latent.
+
+**The capability name is not part of the comparison.** A compiled unit knows
+its capability literally -- one shim, one capability -- while an uncompiled one
+infers it from the client's type, and in JavaScript that cannot be made
+reliable: a `pg.Pool` instance reports `BoundPool`, an ioredis client reports
+`EventEmitter`. Comparing an inference against a literal failed `mixed` with
+every operation and every result matching and only the label different. Events
+are keyed on the logical id from `persist(id=...)`, which both halves agree on
+by construction. `kind` stays in the event because it is worth reading.
+
+## What the trace was worth, and what it cost
+
+**Two of the three real divergences were masked by defensive code in the
+examples themselves** -- `isinstance(value, bytes)` in `petstore-multi`, and
+`.catch(() => undefined)` in `petstore-multi-ts`. Both read as ordinary
+caution. Both were load-bearing workarounds for the compiler changing a
+client's semantics, and one carried a comment asserting the two halves agreed.
+When an example defends against something, it is worth asking what it is
+defending against: it may be documenting a bug rather than being careful.
+
+**The instrument was twice the thing it was built to catch.** Treating knex's
+thenable query builder as a promise replaced the builder with a `Promise`,
+`.where` stopped existing, and every route touching the database answered 500
+-- *in both halves identically*, so the response comparison passed and called
+it agreement. Separately, rendering a value by opening it reached from a knex
+`Raw` into the client, the pg driver and its type tables: 173KB an event, and
+it carried the database password into a trace that a Lambda ships to
+CloudWatch. The first was caught by the server-error guard that exists because
+this suite was burned the same way before; the second by reading the diff
+rather than the verdict.
+
+The rule that came out of both: a transparent proxy over a real client library
+is harder than it looks, and unit tests built on convenient stubs will not find
+it. The tests that matter model the awkward shape -- a chainable thenable, a
+class instance that is not data -- and the suite-level guards matter more than
+either, because an instrument that breaks both halves equally is invisible to
+the comparison it feeds.
+
 ## What the program generator found
 
 `internal/fuzz` generates idiomatic Python and checks the compiler against its
@@ -354,6 +427,52 @@ deterministically, and the ECS mapping uses distinct ids as well.
 **Pulumi list outputs cannot be indexed.** `cluster.cacheNodes[0].address` is
 not valid TypeScript against an `Output`. Those properties select their element
 inside an `apply`.
+
+**A backing chosen at compile time has to be told to the runtime.** SNS is
+addressed by ARN and SQS by URL, and the two SDKs take one each. The shim
+therefore reads a `CLOUDCC_TOPIC_<id>_BACKING` binding rather than inferring the
+service from which of the two variables happens to be set — the same treatment
+the log destination gets, and for the same reason: an environment that is half
+populated then picks a client silently instead of failing.
+
+**An origin access identity rather than an origin access control.** OAC is what
+AWS documents today and is the better mechanism, but its bucket policy is
+written against the distribution's ARN while the distribution names the bucket,
+which is a cycle that has to be broken by deploying twice or by an explicit
+ordering edge. OAI has no cycle. Written down because moving to OAC later is a
+change with a deploy-ordering consequence, not a swap.
+
+**A queue's visibility timeout is derived from its subscriber.** AWS refuses an
+event source mapping whose function can run for longer than the queue's
+visibility timeout. Both facts are in the graph before either resource is built,
+so the resolver takes the largest subscriber timeout rather than defaulting to
+30 seconds and letting the rule be discovered from an API error partway through
+a deploy.
+
+**A resource type is not deployable against an emulator until its service is
+listed.** `EmulatedServices` sets a per-service endpoint, and a service missing
+from it does not degrade — the provider sends that one call to real AWS, which
+answers `InvalidClientTokenId` and takes the whole stack down on its first
+resource. SQS was added and the first deploy died on `CreateQueue` with an error
+that named credentials. A test now derives the list from the Pulumi registry, so
+the next resource type cannot repeat it.
+
+**A Node bundle needs `require` put back.** Bundling to ESM turns every
+CommonJS dependency into a module whose `require` esbuild replaces with a shim,
+and that shim throws for anything it did not bundle -- including Node's own
+builtins, which are external by definition. `serverless-http` reaches
+`require("http")` at import, so the bundle raised `Dynamic require of
+"node:https" is not supported` before the handler was called. The remedy is a
+one-line banner restoring a real `require` from `import.meta.url`.
+
+**Nothing had ever invoked a deployed Node function.** The bug above shipped
+because every functional assertion runs the unit's *source* from the output
+directory -- correct for "the compiled code runs unchanged", and it never
+touches the artefact that is deployed. The Python side had a deployed-invoke
+check in `nomnom.sh` and Node had no equivalent, so a bundle that could not
+start looked exactly like a bundle nobody had reason to doubt. `provisioning.sh`
+now probes every deployed function for a clean start and requires the exposed
+one to answer HTTP; the check was verified by removing the banner again.
 
 **The two parity tests earned their keep immediately.** The Go/Python naming
 test caught `sanitize.EnvVar` adding a guard character the shims did not, and

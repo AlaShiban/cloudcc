@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "app": "k8s-web",
+  "fingerprint": "3d0466c6bf26fbd8224ad1d210215f86b9ecab4a43a25acc49aebc99ec7d3b76",
+  "units": [
+    "web"
+  ]
+}

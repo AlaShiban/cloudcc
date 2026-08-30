@@ -7,7 +7,8 @@ provides it, and each becoming a different AWS service once compiled:
     an async SQLAlchemy    -> RDS Postgres  the breed catalogue
       engine
     a redis.asyncio.Redis  -> ElastiCache   a cache in front of the reads
-    a cloudcc.Topic        -> SNS           what the worker reacts to
+    a cloudcc.Topic        -> SQS           what the worker reacts to
+      (one subscriber)
 
 The two asynchronous clients are not the same libraries as their synchronous
 namesakes, and the compiler keeps them apart: what this unit is handed is an

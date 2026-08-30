@@ -18,10 +18,10 @@ Recompiling overwrites this file. Copy it before editing.
 from diagrams import Diagram, Edge
 from diagrams.aws.compute import Lambda
 from diagrams.aws.database import Dynamodb, ElastiCache, RDS
-from diagrams.aws.integration import SNS
-from diagrams.aws.network import APIGateway
+from diagrams.aws.integration import SQS
+from diagrams.aws.network import APIGateway, CloudFront
 from diagrams.aws.security import SecretsManager
-from diagrams.aws.storage import S3, SimpleStorageServiceS3BucketWithObjects
+from diagrams.aws.storage import S3
 
 with Diagram(
     "petstore-multi",
@@ -39,8 +39,8 @@ with Diagram(
     n_persist_orm_petsdb = RDS("petsdb\nRDS")
     n_persist_redis_petCache = ElastiCache("petCache\nElastiCache")
     n_persist_secret_auditKey = SecretsManager("auditKey\nSecrets Manager")
-    n_pubsub_petEvents = SNS("petEvents\nSNS")
-    n_static_unit_petstore_site = SimpleStorageServiceS3BucketWithObjects("petstore-site\nS3 website")
+    n_pubsub_petEvents = SQS("petEvents\nSQS")
+    n_static_unit_petstore_site = CloudFront("petstore-site\nCloudFront")
 
     n_expose_pet_api >> n_execution_unit_api
     n_execution_unit_api >> Edge(label="publishes") >> n_pubsub_petEvents

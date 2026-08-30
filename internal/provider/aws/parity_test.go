@@ -49,6 +49,8 @@ func TestShimsReadTheNamesTheCompilerWrites(t *testing.T) {
 		{"redis_.py", EnvRedisPort("x"), "CLOUDCC_REDIS_%s_PORT"},
 		{"redis_.py", EnvRedisTLS("x"), "CLOUDCC_REDIS_%s_TLS"},
 		{"pubsub.py", EnvTopicARN("x"), "CLOUDCC_TOPIC_%s_ARN"},
+		{"pubsub.py", EnvTopicURL("x"), "CLOUDCC_TOPIC_%s_URL"},
+		{"pubsub.py", EnvTopicBacking("x"), "CLOUDCC_TOPIC_%s_BACKING"},
 		{"config.py", EnvConfig("x"), "CLOUDCC_CONFIG_%s"},
 		{"expose.py", EnvGatewayURL("x"), "CLOUDCC_GATEWAY_%s_URL"},
 	}

@@ -46,6 +46,7 @@ var shimDependencies = map[string]map[string]string{
 		"@aws-sdk/client-lambda":          "^3.700.0",
 		"@aws-sdk/client-s3":              "^3.700.0",
 		"@aws-sdk/client-sns":             "^3.700.0",
+		"@aws-sdk/client-sqs":             "^3.700.0",
 		"@aws-sdk/client-secrets-manager": "^3.700.0",
 	},
 	"http": {"serverless-http": "^3.2.0"},
@@ -92,6 +93,9 @@ type unitTemplateData struct {
 	// the unit serves none. The field keeps its cross-language name because
 	// the IR does.
 	ASGIApp string
+	// Externals are the packages the bundler was told to leave alone, which is
+	// the only reason a container image needs a manifest at all.
+	Externals []string
 }
 
 // unitFiles generates the entrypoint, the manifest and, for a container unit,
@@ -101,6 +105,7 @@ func unitFiles(u *ir.ExecUnit, opts lang.UnitOptions) (map[string][]byte, error)
 		Unit:      u.ID,
 		EntryFile: u.Entrypoint(),
 		ASGIApp:   u.ASGIApp,
+		Externals: externalsFor(u),
 	}
 	out := map[string][]byte{}
 
@@ -209,9 +214,20 @@ func packagingScript(u *ir.ExecUnit, container bool) string {
 	if container {
 		name = "templates/fragment-container.sh.tmpl"
 	}
+	// What the bundler is pointed at is the *generated* entry in both cases: the
+	// Lambda one exports a handler, the container one calls listen(). Pointing
+	// it at the unit's own module instead would bundle a program that exports an
+	// app and never serves it -- which is what the container path used to do,
+	// and it produced an image that built, started and answered nothing.
+	//
+	// A unit with no HTTP application has no server entry, so its own module is
+	// the whole program and is bundled directly.
 	entry := LambdaEntryFile
 	if container {
-		entry = u.Entrypoint()
+		entry = ServerEntryFile
+		if u.ASGIApp == "" {
+			entry = u.Entrypoint()
+		}
 	}
 	out, err := render(name, struct {
 		ID        string

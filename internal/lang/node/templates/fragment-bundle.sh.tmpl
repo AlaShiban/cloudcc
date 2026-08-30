@@ -23,11 +23,19 @@ if command -v esbuild >/dev/null 2>&1; then
   bundler="esbuild"
 fi
 
+# The banner is not decoration. Bundling to ESM turns every CommonJS dependency
+# into a module whose `require` esbuild replaces with a shim, and that shim
+# throws for anything it did not bundle -- including Node's own builtins, which
+# are external by definition. serverless-http reaches `require("http")` at load,
+# so without this the bundle raises `Dynamic require of "node:https" is not
+# supported` before the handler is ever called. Restoring a real `require` from
+# import.meta.url is the standard remedy and costs one line in the output.
 $bundler "{{.ID}}/{{.Entry}}" \
   --bundle \
   --platform=node \
   --target=node22 \
   --format=esm \
+  --banner:js="import { createRequire as __cloudccCreateRequire } from 'node:module'; const require = __cloudccCreateRequire(import.meta.url);" \
   --outfile="$unit_build/index.mjs" \
   --log-level=warning{{range .Externals}} \
   --external:{{.}}{{end}}

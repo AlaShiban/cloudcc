@@ -17,14 +17,14 @@ const _http = serverless(_module.app);
  *
  * A single unit can be an HTTP handler, a topic subscriber and callable by
  * other units all at once, so the event shape decides: a call envelope goes to
- * the named function, SNS deliveries go to the registered subscribers, and
- * anything else is treated as an HTTP request.
+ * the named function, a topic or queue delivery goes to the registered
+ * subscribers, and anything else is treated as an HTTP request.
  */
 export async function handler(event, context) {
   if (_cloudccRpc.isCall(event)) {
     return _cloudccRpc.dispatch(_module, event);
   }
-  if (_cloudccPubsub.isSnsEvent(event)) {
+  if (_cloudccPubsub.isDelivery(event)) {
     return _cloudccPubsub.dispatch(event);
   }
   return _http(event, context);

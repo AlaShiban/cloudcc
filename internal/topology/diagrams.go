@@ -64,14 +64,30 @@ var diagramsNode = map[string]string{
 	"aws.elasticache": "aws.database.ElastiCache",
 	"aws.memorydb":    "aws.database.ElasticacheForRedis",
 
-	"aws.s3":         "aws.storage.S3",
-	"aws.s3.object":  "aws.storage.SimpleStorageServiceS3Object",
-	"aws.s3.website": "aws.storage.SimpleStorageServiceS3BucketWithObjects",
+	"aws.s3":              "aws.storage.S3",
+	"aws.s3.object":       "aws.storage.SimpleStorageServiceS3Object",
+	"aws.s3.website":      "aws.storage.SimpleStorageServiceS3BucketWithObjects",
+	"aws.s3.bucketpolicy": "aws.security.IAMPermissions",
 
-	"aws.sns":              "aws.integration.SNS",
-	"aws.sns.subscription": "aws.integration.EventResource",
-	"aws.sqs":              "aws.integration.SQS",
-	"aws.kinesis":          "aws.analytics.KinesisDataStreams",
+	"aws.cloudfront":     "aws.network.CloudFront",
+	"aws.cloudfront.oai": "aws.security.IAMRole",
+
+	// Kubernetes. The cluster is an AWS service and the workload is not, which
+	// is exactly the split the diagram should show: an EKS icon for the thing
+	// the account pays for, Kubernetes' own icons for what runs on it.
+	"aws.eks.cluster":     "aws.compute.EKS",
+	"aws.eks.nodegroup":   "aws.compute.EC2",
+	"aws.eks.clusterrole": "aws.security.IAMRole",
+	"aws.eks.noderole":    "aws.security.IAMRole",
+	"k8s.deployment":      "k8s.compute.Deploy",
+	"k8s.service":         "k8s.network.SVC",
+	"k8s.provider":        "aws.compute.EKS",
+
+	"aws.sns":                       "aws.integration.SNS",
+	"aws.sns.subscription":          "aws.integration.EventResource",
+	"aws.sqs":                       "aws.integration.SQS",
+	"aws.lambda.eventsourcemapping": "aws.integration.EventResource",
+	"aws.kinesis":                   "aws.analytics.KinesisDataStreams",
 }
 
 const fallbackNode = "aws.general.General"
@@ -103,6 +119,10 @@ var serviceLabel = map[string]string{
 	"aws.dynamodb":       "DynamoDB",
 	"aws.s3":             "S3",
 	"aws.s3.website":     "S3 website",
+	"aws.cloudfront":     "CloudFront",
+	"aws.eks.cluster":    "EKS",
+	"k8s.deployment":     "Deployment",
+	"k8s.service":        "Service",
 	"aws.rds":            "RDS",
 	"aws.elasticache":    "ElastiCache",
 	"aws.memorydb":       "MemoryDB",
@@ -118,6 +138,12 @@ var serviceLabel = map[string]string{
 // -- and exactly one of them is what the architecture is made of.
 var principalKinds = []string{
 	"aws.lambda",
+	// A unit on Kubernetes is its Deployment, and the gateway in front of it is
+	// its Service. Both rank above the cluster: an EKS cluster is where the
+	// application runs, not a thing the application is made of -- the same
+	// reason a VPC is drawn as supporting cast.
+	"k8s.deployment",
+	"k8s.service",
 	"aws.ecs.service",
 	"aws.apigatewayv2",
 	"aws.alb",
@@ -129,6 +155,10 @@ var principalKinds = []string{
 	"aws.sqs",
 	"aws.kinesis",
 	"aws.secretsmanager",
+	// Above the website configuration and the bucket both: when a site is
+	// fronted by a CDN, the CDN is the site's address and the bucket is where
+	// the bytes happen to live.
+	"aws.cloudfront",
 	"aws.s3.website",
 	"aws.s3",
 }
@@ -202,6 +232,17 @@ Recompiling overwrites this file. Copy it before editing.
 
 	fmt.Fprintf(&b, "with Diagram(\n    %q,\n    filename=%q,\n    outformat=%q,\n    show=False,\n    direction=%q,\n):\n",
 		opts.App, archPNGStem(opts.App), "png", "LR")
+
+	// An empty `with` body is a syntax error, not an empty picture. A program
+	// with nothing drawable -- or, until the Kubernetes kinds were mapped, any
+	// application running on Kubernetes -- produced a file that raised
+	// IndentationError the moment anything tried to run it, so the note said
+	// "no icon diagram rendered" and pointed at the renderer rather than at
+	// this generator.
+	if len(order) == 0 {
+		b.WriteString("    pass\n")
+		return []byte(b.String())
+	}
 
 	vars := map[string]string{}
 	for _, in := range order {

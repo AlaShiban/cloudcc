@@ -64,27 +64,32 @@ log "building cloudcc"
 # For Python the target is module:app and uvicorn does the serving. Node has no
 # uvicorn, so a launcher is written next to the program: the same arrangement,
 # since uvicorn is no more part of the application than that launcher is.
+# $SERVE_LOG, rather than another positional: the tail of this signature is
+# variadic (extra uv arguments), so a trailing parameter could not be told from
+# one of those.
+SERVE_LOG=""
+
 serve() {
   local dir="$1" target="$2" port="$3" label="$4"
   shift 4
 
+  # Tracing is on for both halves, so the two can be compared on the calls they
+  # made and not only on what they answered. Unset, the tracer hands the client
+  # straight back; this is the only thing that turns it on.
+  export CLOUDCC_TRACE=1
+
   if [ "$LANGUAGE" = "node" ]; then
-    local entry="${target%%:*}" appvar="${target##*:}"
-    cat > "$dir/cloudcc_serve.mjs" <<SERVE
-const m = await import("./$entry");
-const app = m.$appvar ?? m.default;
-if (!app) {
-  console.error("the entry exports neither $appvar nor default");
-  process.exit(1);
-}
-app.listen($port, "127.0.0.1");
-SERVE
-    ( cd "$dir" && exec node cloudcc_serve.mjs ) &
+    serve_node "$dir" "${target%%:*}" "${target##*:}" "$port" "$SERVE_LOG" ""
+  elif [ -n "$SERVE_LOG" ]; then
+    ( cd "$dir" && PYTHONPATH="$dir" exec uv run --quiet "$@" \
+        python -m uvicorn "$target" --host 127.0.0.1 --port "$port" --log-level error ) \
+      >"$SERVE_LOG" 2>&1 &
+    APP_PID=$!
   else
     ( cd "$dir" && PYTHONPATH="$dir" exec uv run --quiet "$@" \
         python -m uvicorn "$target" --host 127.0.0.1 --port "$port" --log-level error ) &
+    APP_PID=$!
   fi
-  APP_PID=$!
   if ! wait_for_http "http://127.0.0.1:$port/health" 60; then
     fail "the $label program did not start on port $port"
   fi
@@ -188,11 +193,13 @@ for seed in "${SEEDS[@]}"; do
   AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-cloudcc-local}" \
   AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-cloudcc-local}" \
   CLOUDCC_LOCAL_STATE_DIR="$case_dir/local-state" \
+    SERVE_LOG="$case_dir/uncompiled.log" \
     serve "$src" "$target" "$PORT_A" "uncompiled" \
       --with fastapi --with uvicorn --with boto3 \
       --with-editable "$REPO_ROOT/sdk/python"
   replay "$PORT_A" "$manifest" "$case_dir/uncompiled.txt"
   stop_app
+  trace_from_log "$case_dir/uncompiled.log" "$case_dir/uncompiled.trace"
   pass "uncompiled run recorded"
 
   # ------------------------------------------------------------ B: compiled
@@ -218,10 +225,12 @@ for seed in "${SEEDS[@]}"; do
     eval "$bindings"
     set +a
     export CLOUDCC_AWS_ENDPOINT_URL="$CLOUDCC_EMULATOR_ENDPOINT"
+    SERVE_LOG="$case_dir/compiled.log" \
     serve "$app_out_dir/$unit" "$target" "$PORT_B" "compiled" \
       --with fastapi --with uvicorn --with boto3
     replay "$PORT_B" "$manifest" "$case_dir/compiled.txt"
     stop_app
+    trace_from_log "$case_dir/compiled.log" "$case_dir/compiled.trace"
   )
   pass "compiled run recorded"
 
@@ -239,6 +248,30 @@ for seed in "${SEEDS[@]}"; do
     cat "$case_dir/diff.txt" >&2
     echo "--- the program ---" >&2
     find "$src" -name '*.py' -print -exec cat {} \; >&2
+  fi
+
+  # And the same programs compared on what they *did*, not only on what they
+  # answered. A generated program is mostly stores and handlers, so this is
+  # where a rewrite that reached the wrong one shows up -- responses can agree
+  # while the work behind them does not.
+  trace_normalize "$case_dir/uncompiled.trace" \
+    "$case_dir/uncompiled.seams" "$case_dir/uncompiled.async"
+  trace_normalize "$case_dir/compiled.trace" \
+    "$case_dir/compiled.seams" "$case_dir/compiled.async"
+
+  if [ ! -s "$case_dir/uncompiled.seams" ] && [ ! -s "$case_dir/compiled.seams" ]; then
+    # Zero events on both sides is not agreement, it is a comparison that did
+    # not happen -- and it would pass. Every generated program persists at
+    # least one store, so this means the tracer did not run.
+    failures=$((failures + 1))
+    printf '\033[1;31mFAIL\033[0m seed %s: no seam events in either half; the trace is not working\n' "$seed" >&2
+  elif ! diff -u "$case_dir/uncompiled.seams" "$case_dir/compiled.seams" \
+       > "$case_dir/seams.diff"; then
+    failures=$((failures + 1))
+    printf '\033[1;31mFAIL\033[0m seed %s: the two halves answered alike but did different work\n' "$seed" >&2
+    cat "$case_dir/seams.diff" >&2
+  else
+    pass "seed $seed: both halves did the same work at their stores"
   fi
 done
 

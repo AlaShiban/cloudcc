@@ -60,20 +60,26 @@ var typeSupport = map[string]map[string]Level{
 		"memorydb":    Supported,
 	},
 	// A topic's backing is chosen from the requirements the program declared,
-	// not configured -- see SelectTopicBacking. The four beyond SNS are listed
-	// because the selector can reach them, and a requirement set that resolves
-	// to one must be a clean error naming what it selected and why, rather than
-	// a quiet fall back to SNS. A topic that silently drops ordering is a bug
-	// that reproduces once a week.
+	// not configured -- see SelectTopicBacking. The three beyond SNS and SQS are
+	// listed because the selector can reach them, and a requirement set that
+	// resolves to one must be a clean error naming what it selected and why,
+	// rather than a quiet fall back to SNS. A topic that silently drops ordering
+	// is a bug that reproduces once a week.
 	config.KindPubSub: {
 		"sns":      Supported,
+		"sqs":      Supported,
 		"sns_fifo": NotYetSupported,
-		"sqs":      NotYetSupported,
 		"sqs_fifo": NotYetSupported,
 		"kinesis":  NotYetSupported,
 	},
 	config.KindStaticUnit: {
-		"s3": Supported,
+		// The bucket serves the site itself; `cloudfront` puts a distribution in
+		// front of the same objects. They are separate types rather than a flag
+		// because they are not the same architecture: the CloudFront form keeps
+		// the bucket private and reaches it through an origin access identity,
+		// so there is no website endpoint at all and no public object to fetch.
+		"s3":         Supported,
+		"cloudfront": Supported,
 	},
 	config.KindConfig: {},
 	// Where logs go. CloudWatch is the only destination that works, and the

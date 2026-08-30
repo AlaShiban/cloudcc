@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "app": "petstore-multi-ts",
+  "fingerprint": "fa25973837a8f0a23066d6c3ca913f1295e235aa0f259f55624986a951b0027c",
+  "units": [
+    "api",
+    "worker"
+  ]
+}

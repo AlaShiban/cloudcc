@@ -76,12 +76,14 @@ type jsModule struct {
 	body []string
 }
 
-// newJSModule picks a module's shape. In behavioural mode the program has to
-// be runnable by plain `node` before it is compiled, which rules out two
-// things: CommonJS (the harness serves the app through a dynamic import) and
-// TypeScript (node cannot import a .ts file without a loader). Generating
-// either would produce a program that fails to start for reasons that have
-// nothing to do with the compiler.
+// newJSModule picks a module's shape. In behavioural mode the program has to be
+// runnable before it is compiled, which still rules out CommonJS: the harness
+// serves the app through a dynamic import.
+//
+// TypeScript used to be ruled out too -- "node cannot import a .ts file without
+// a loader" -- and that was the reason no generated TypeScript program was ever
+// run or deployed. The harness has a loader now (tsx, see serve_node in
+// tests/e2e/lib.sh), so the differential suite covers TypeScript as well.
 func newJSModule(rng *rand.Rand, behavioural bool) *jsModule {
 	m := &jsModule{rng: rng, needed: map[string]string{}}
 	for {
@@ -94,7 +96,7 @@ func newJSModule(rng *rand.Rand, behavioural bool) *jsModule {
 	m.banner = rng.Intn(3) > 0
 	// TypeScript only under ESM: a .ts file compiled as CommonJS is a
 	// configuration people do reach for, but it is not what this is testing.
-	m.typescript = !behavioural && m.style.esm() && rng.Intn(4) == 0
+	m.typescript = m.style.esm() && rng.Intn(4) == 0
 	return m
 }
 

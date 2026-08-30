@@ -75,30 +75,34 @@ log "building cloudcc"
 
 # serve starts a program on a port and waits for /health.
 #
-# uvicorn for Python; for Node a launcher this script writes, which plays
-# exactly uvicorn's role and is no more part of the application than uvicorn is.
+# uvicorn for Python; serve_node for Node and TypeScript, which plays exactly
+# uvicorn's role and is no more part of the application than uvicorn is.
 serve() {
   local dir="$1" language="$2" target="$3" port="$4" label="$5" env_pairs="$6"
+  local logfile="${7:-}"
   local entry="${target%%:*}" appvar="${target##*:}"
 
+  # Tracing is on for both halves. With CLOUDCC_TRACE unset the tracer returns
+  # the client untouched, so this is the only thing that turns it on, and the
+  # log is where the events land -- see trace_from_log.
+  env_pairs="$env_pairs $(trace_env)"
+
   if [ "$language" = "node" ]; then
-    cat > "$dir/cloudcc_e2e_serve.mjs" <<SERVE
-const m = await import("./$entry");
-const app = m.$appvar ?? m.default;
-if (!app) {
-  console.error("the entry exports neither $appvar nor default");
-  process.exit(1);
-}
-app.listen($port, "127.0.0.1");
-SERVE
-    ( cd "$dir" && exec env $env_pairs node cloudcc_e2e_serve.mjs ) &
+    serve_node "$dir" "$entry" "$appvar" "$port" "$logfile" "$env_pairs"
+  elif [ -n "$logfile" ]; then
+    ( cd "$dir" && exec env $env_pairs PYTHONPATH="$dir" \
+        uv run --quiet $(py_run_deps "$dir") \
+          --with-editable "$REPO_ROOT/sdk/python" \
+          python -m uvicorn "$target" --host 127.0.0.1 --port "$port" --log-level error ) \
+      >"$logfile" 2>&1 &
+    APP_PID=$!
   else
     ( cd "$dir" && exec env $env_pairs PYTHONPATH="$dir" \
         uv run --quiet $(py_run_deps "$dir") \
           --with-editable "$REPO_ROOT/sdk/python" \
           python -m uvicorn "$target" --host 127.0.0.1 --port "$port" --log-level error ) &
+    APP_PID=$!
   fi
-  APP_PID=$!
   wait_for_http "http://127.0.0.1:$port/health" 60 \
     || fail "the $label program did not start on port $port"
 }
@@ -211,9 +215,11 @@ for example in "${EXAMPLES[@]}"; do
   # Manager. A route that uses a secret is otherwise untestable here: the local
   # half would read an empty string and the two could never match.
   env_pairs="$(printf '%s;%s' "$(local_aws_env)" "$(secret_env "$WORK/cloudcc" "$src")" | tr ';' ' ')"
-  serve "$work_src" "$language" "$target" "$PORT_A" "uncompiled" "$env_pairs"
+  serve "$work_src" "$language" "$target" "$PORT_A" "uncompiled" "$env_pairs" \
+    "$case_dir/uncompiled.log"
   replay "$PORT_A" "$scenario" "$case_dir/uncompiled.txt"
   stop_app
+  trace_from_log "$case_dir/uncompiled.log" "$case_dir/uncompiled.trace"
   pass "$example: uncompiled run recorded"
 
   # -------------------------------------------------------------- B: compiled
@@ -273,6 +279,31 @@ for example in "${EXAMPLES[@]}"; do
   # rewritten source is the thing to run, with the host's own dependencies.
   unit_dir="$app_out_dir/$unit"
 
+  # A compiled TypeScript unit has to type-check.
+  #
+  # The compiled copy is source someone reads and diffs, and the injected
+  # runtime is JavaScript -- so without declarations beside it, `tsc` reports
+  # every shim import as an implicit any, and `persist` losing its type takes
+  # every inference downstream of a store with it. Both are errors in code the
+  # user did not write and cannot fix, and neither shows up anywhere else in
+  # this suite: the unit runs perfectly well untyped.
+  #
+  # Only when the unit is TypeScript and carries a tsconfig. The dev
+  # dependencies are installed first because packaging deliberately omits them
+  # -- a deployed bundle has no use for @types/express -- and someone
+  # type-checking the compiled copy is a developer, who has them. npx supplies
+  # the compiler itself for the same reason.
+  if [ -f "$unit_dir/tsconfig.json" ] && \
+     [ -n "$(find "$unit_dir" -name node_modules -prune -o -name '*.ts' -print 2>/dev/null | head -1)" ]; then
+    ( cd "$unit_dir" && npm install --silent --no-audit --no-fund >/dev/null 2>&1 ) || true
+    if ( cd "$unit_dir" && npx --yes -p typescript@5 tsc --noEmit >"$WORK/tsc-$example.log" 2>&1 ); then
+      pass "$example: the compiled TypeScript unit type-checks"
+    else
+      sed 's/^/    /' "$WORK/tsc-$example.log" | head -20
+      fail "$example: the compiled unit does not type-check"
+    fi
+  fi
+
   # Again, before the compiled half. The table and the bucket differ between
   # the two runs -- one is the local name, the other is provisioned -- but the
   # engines are literally the same containers, because the emulator cannot run
@@ -282,9 +313,11 @@ for example in "${EXAMPLES[@]}"; do
   reset_engines "$scenario"
   log "running the compiled copy against the emulator"
   serve "$unit_dir" "$language" "$target" "$PORT_B" "compiled" \
-    "$bindings CLOUDCC_AWS_ENDPOINT_URL=$CLOUDCC_EMULATOR_ENDPOINT"
+    "$bindings CLOUDCC_AWS_ENDPOINT_URL=$CLOUDCC_EMULATOR_ENDPOINT" \
+    "$case_dir/compiled.log"
   replay "$PORT_B" "$scenario" "$case_dir/compiled.txt"
   stop_app
+  trace_from_log "$case_dir/compiled.log" "$case_dir/compiled.trace"
   pass "$example: compiled run recorded"
 
   # A container unit is provisioned by everything above and *run* by none of it.
@@ -330,7 +363,7 @@ for example in "${EXAMPLES[@]}"; do
       PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
       pulumi stack output --json --stack local 2>/dev/null \
       | jq -r 'to_entries[] | select(.key | endswith("Url")) | .value' \
-      | grep -vi 'execute-api\|s3-website' | head -1)"
+      | grep -vi 'execute-api\|s3-website\|cloudfront\|/sqs\.' | head -1)"
     if [ -n "$alb_host" ]; then
       if wait_for_http "http://${alb_host#http://}/health" 60; then
         pass "$example: L5 the load balancer routes to the task"
@@ -339,6 +372,58 @@ for example in "${EXAMPLES[@]}"; do
   running and reachable inside the emulator's network; whether an address it hands
   out is routable from here is a property of the emulator, not of the deployment."
       fi
+    fi
+  fi
+
+  # A queue-backed topic is delivered by a poller, not by the queue.
+  #
+  # `pulumi up` creating a queue says the queue exists. What makes a message
+  # reach a subscriber is an event source mapping that Lambda has actually
+  # enabled -- and a mapping created before its role policy landed is refused,
+  # or created and left disabled, either of which leaves a stack that looks
+  # complete and delivers nothing. Nothing else in this run would notice: the
+  # api's responses do not depend on the worker, so both halves agree while the
+  # asynchronous half is dead. (tests/e2e/load.sh proves delivery itself, by
+  # counting the subscriber's invocations.)
+  for queue_url in $(aws_local sqs list-queues --query 'QueueUrls[]' --output text 2>/dev/null \
+    | tr '\t' '\n' | grep -- "/$example-" || true); do
+    queue_arn="$(aws_local sqs get-queue-attributes --queue-url "$queue_url" \
+      --attribute-names QueueArn --query 'Attributes.QueueArn' --output text 2>/dev/null || true)"
+    [ -n "$queue_arn" ] && [ "$queue_arn" != "None" ] || continue
+    mapping_state="$(aws_local lambda list-event-source-mappings \
+      --event-source-arn "$queue_arn" \
+      --query 'EventSourceMappings[0].State' --output text 2>/dev/null || true)"
+    case "$mapping_state" in
+      Enabled|Creating)
+        pass "$example: L5 $(basename "$queue_url") is polled by an event source mapping ($mapping_state)" ;;
+      *)
+        fail "$example: the queue $(basename "$queue_url") has no enabled event source mapping (state: ${mapping_state:-none}); nothing would ever consume it" ;;
+    esac
+  done
+
+  # A CDN-fronted static unit is only fronted if the distribution serves the
+  # objects. The bucket is private and reached through an origin access
+  # identity, so a distribution that exists with a broken origin returns 403
+  # for everything -- and, exactly like the queue above, no other check in this
+  # run would see it.
+  #
+  # What this does not check is that the bucket is private, because the
+  # emulator does not enforce bucket policies: an unsigned GET straight at the
+  # object succeeds here and would not against AWS. That the origin access
+  # identity is the only grant is pinned by a unit test instead
+  # (TestACDNBackedSiteGrantsReadsToItsOriginAccessIdentityAlone).
+  cdn_domain="$(aws_local cloudfront list-distributions \
+    --query "DistributionList.Items[?contains(Comment, 'cloudcc $example ')].DomainName" \
+    --output text 2>/dev/null | tr '\t' '\n' | head -1 || true)"
+  if [ -n "$cdn_domain" ] && [ "$cdn_domain" != "None" ]; then
+    # Addressed through the emulator's own endpoint with the distribution's
+    # hostname, which is how a caller outside the emulator's network reaches it.
+    cdn_status="$(curl -s -o /dev/null -w '%{http_code}' -m 30 \
+      -H "Host: $cdn_domain" "$CLOUDCC_EMULATOR_ENDPOINT/" 2>/dev/null || true)"
+    if [ "$cdn_status" = "200" ]; then
+      pass "$example: L5 the CDN at $cdn_domain serves the site's index document"
+    else
+      fail "$example: the distribution at $cdn_domain answered $cdn_status for the index document"
     fi
   fi
 
@@ -371,6 +456,29 @@ for example in "${EXAMPLES[@]}"; do
   [ "$deployed_count" -gt 0 ] \
     || fail "$example: read no resources out of the deployed stack, so the diagram was not checked"
 
+  # Every subscriber the program declares must have something that delivers to
+  # it.
+  #
+  # This is the check that would have caught kitchen-sink: its reporter called
+  # subscribe(), its docstring said it subscribed, and the deployed stack
+  # contained *zero* subscription resources -- because the reporter is a
+  # container and a delivery is pushed to a function. The handler had never once
+  # been called, in either language, since the example was written, and nothing
+  # noticed because the records it should have produced are read by nothing.
+  #
+  # Counting is what makes it work. "Some subscription exists" would have passed
+  # for an application with two subscribers and one subscription, which is the
+  # shape a mistake actually takes.
+  declared_subs="$("$WORK/cloudcc" --dump-ir "$src" 2>/dev/null     | jq '[.edges[]? | select(.kind=="subscribes")] | length' 2>/dev/null || echo 0)"
+  if [ "${declared_subs:-0}" -gt 0 ]; then
+    deployed_subs="$(printf '%s\n' "$deployed_types"       | grep -cE 'aws:sns/topicSubscription:|aws:lambda/eventSourceMapping:' || true)"
+    [ "${deployed_subs:-0}" = "$declared_subs" ]       || fail "$example declares $declared_subs subscriber(s) and the stack has $deployed_subs
+  delivery mechanism(s). A subscriber with nothing delivering to it is a handler
+  that is never called, and the only sign is records that never appear."
+    pass "$example: every declared subscriber has something delivering to it"
+  fi
+
+
   # A few resources are named for the service that hosts them and drawn under
   # the thing they are. A VPC, its subnets and its route tables all live in the
   # ec2 API; nobody calls them ec2 resources, and the compiler does not either.
@@ -384,7 +492,24 @@ for example in "${EXAMPLES[@]}"; do
       # is looking for.
       lb) service=alb ;;
     esac
-    grep -q "aws_${service}" "$app_out_dir/architecture.mmd" \
+    # A few kinds are drawn under the thing they are rather than the API that
+    # serves them, so one service word can have several spellings. An ECS
+    # execution role and a task role are both aws:iam/role:Role and neither is
+    # called an IAM role by anyone reading the picture -- which only shows up in
+    # an application whose *only* roles are those two, and petstore-ts is the
+    # first of those.
+    #
+    # The count check below is the exhaustive one; this is the coarser net that
+    # says which service went missing, so widening it here loses nothing.
+    alternatives="aws_${service}"
+    case "$service" in
+      iam) alternatives="aws_iam aws_ecs_execrole aws_ecs_taskrole aws_eks_clusterrole aws_eks_noderole" ;;
+    esac
+    found=0
+    for node in $alternatives; do
+      grep -q "$node" "$app_out_dir/architecture.mmd" && { found=1; break; }
+    done
+    [ "$found" = 1 ] \
       || { warn "$example: $service is deployed but appears nowhere in architecture.mmd"; missing=$((missing + 1)); }
   done
   if [ "$deployed_count" != "$drawn_count" ]; then
@@ -427,6 +552,40 @@ for example in "${EXAMPLES[@]}"; do
     failures=$((failures + 1))
     printf '\033[1;31mFAIL\033[0m %s: the compiled program behaved differently\n' "$example"
     cat "$case_dir/diff.txt"
+  fi
+
+  # ---------------------------------------------------------- the same *work*
+  #
+  # Everything above compares what the two halves answered. This compares what
+  # they did to get there: every call through a persisted client, grouped by
+  # resource, in order.
+  #
+  # The two are not the same question, and the second is the one the compiler
+  # is actually judged on. A rewrite that pointed a unit at the wrong table, or
+  # dropped a publish, or read a secret that resolved to "", can answer every
+  # request identically -- and did, in the mutation checks that prove this
+  # comparison works.
+  trace_normalize "$case_dir/uncompiled.trace" \
+    "$case_dir/uncompiled.seams" "$case_dir/uncompiled.async"
+  trace_normalize "$case_dir/compiled.trace" \
+    "$case_dir/compiled.seams" "$case_dir/compiled.async"
+
+  if [ ! -s "$case_dir/uncompiled.seams" ] && [ ! -s "$case_dir/compiled.seams" ]; then
+    # Zero events on both sides is not agreement, it is a comparison that did
+    # not happen. Every example in this suite persists something, so this means
+    # the tracer did not run -- and a check that silently measures nothing is
+    # the failure mode this file already learned once, the hard way.
+    failures=$((failures + 1))
+    printf '\033[1;31mFAIL\033[0m %s: no seam events were recorded in either half; the trace is not working\n' \
+      "$example"
+  elif diff -u "$case_dir/uncompiled.seams" "$case_dir/compiled.seams" \
+       > "$case_dir/seams.diff"; then
+    seam_count="$(grep -c '^   ' "$case_dir/uncompiled.seams" || true)"
+    pass "$example: both halves did the same $seam_count operation(s) at their stores"
+  else
+    failures=$((failures + 1))
+    printf '\033[1;31mFAIL\033[0m %s: the two halves answered alike but did different work\n' "$example"
+    cat "$case_dir/seams.diff"
   fi
 done
 

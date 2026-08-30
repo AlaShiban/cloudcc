@@ -221,12 +221,13 @@ func awsCategory(kind string) string {
 		return config.KindExecutionUnit
 	case "aws.apigatewayv2", "aws.alb":
 		return config.KindExpose
-	case "aws.sns", "aws.sns.subscription", "aws.sqs", "aws.kinesis":
+	case "aws.sns", "aws.sns.subscription", "aws.sqs", "aws.kinesis",
+		"aws.lambda.eventsourcemapping":
 		return config.KindPubSub
 	case "aws.dynamodb", "aws.s3", "aws.rds", "aws.elasticache", "aws.memorydb",
 		"aws.secretsmanager":
 		return config.KindPersistKV
-	case "aws.s3.website", "aws.s3.object":
+	case "aws.s3.website", "aws.s3.object", "aws.cloudfront":
 		return config.KindStaticUnit
 	}
 	// Everything else -- roles, policies, log groups, VPC plumbing -- is

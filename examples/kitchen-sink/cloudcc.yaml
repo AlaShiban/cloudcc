@@ -11,6 +11,13 @@ execution_units:
     # A function takes any size from 128 MB up, in 1 MB steps.
     memory: 1024
     timeout: 30
+  auditor:
+    # A function, and it has to be: it is the unit that subscribes. A topic
+    # delivery is pushed to a function, so a container cannot receive one --
+    # the compiler says so rather than creating no subscription and leaving the
+    # messages to vanish, which is what happened while this handler lived in
+    # the reporter below.
+    type: function
   reporter:
     type: container
     # The same setting, and a value Fargate actually has. It takes 512, then

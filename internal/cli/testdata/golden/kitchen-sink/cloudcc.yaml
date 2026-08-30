@@ -31,6 +31,8 @@ execution_units:
     type: function
     memory: 1024
     timeout: 30
+  auditor:
+    type: function
   reporter:
     type: container
     memory: 2048

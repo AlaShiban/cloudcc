@@ -165,8 +165,17 @@ func TestAContainerUnitGetsAnEntryThatListens(t *testing.T) {
 	if !ok {
 		t.Fatal("a container unit should get a Dockerfile")
 	}
-	if !strings.Contains(string(dockerfile), `CMD ["node", "cloudcc_server_entry.mjs"]`) {
-		t.Errorf("the Dockerfile should run the generated entry:\n%s", dockerfile)
+	// The image runs the bundle, not a source file: a container is packaged the
+	// same way a function is, which is what makes a TypeScript unit runnable --
+	// `node app.ts` is not a thing.
+	if !strings.Contains(string(dockerfile), `CMD ["node", "index.mjs"]`) {
+		t.Errorf("the Dockerfile should run the bundle:\n%s", dockerfile)
+	}
+	// And what goes *into* the bundle is the generated entry, the one that
+	// calls listen(). Bundling the unit's own module instead gives an image
+	// that builds, starts, and serves nothing.
+	if script := packagingScript(unit, true); !strings.Contains(script, ServerEntryFile) {
+		t.Errorf("the container fragment should bundle %s:\n%s", ServerEntryFile, script)
 	}
 }
 
@@ -182,8 +191,13 @@ func TestAContainerWorkerRunsItsOwnModule(t *testing.T) {
 	if _, ok := files[ServerEntryFile]; ok {
 		t.Errorf("a unit with no application should not get a server entry")
 	}
-	if !strings.Contains(string(files[DockerfileName]), `CMD ["node", "worker.js"]`) {
-		t.Errorf("the Dockerfile should run the unit's own module:\n%s", files[DockerfileName])
+	if !strings.Contains(string(files[DockerfileName]), `CMD ["node", "index.mjs"]`) {
+		t.Errorf("the Dockerfile should run the bundle:\n%s", files[DockerfileName])
+	}
+	// With no application there is no server entry, so the unit's own module is
+	// the whole program and is what gets bundled.
+	if script := packagingScript(unit, true); !strings.Contains(script, "worker.js") {
+		t.Errorf("the container fragment should bundle the unit's own module:\n%s", script)
 	}
 }
 
@@ -232,5 +246,102 @@ console.log(menu);
 	}
 	if !strings.Contains(got, "menu") {
 		t.Errorf("menu is still used by this unit and must still be imported:\n%s", got)
+	}
+}
+
+// The compiled copy of a TypeScript program is source someone reads and
+// typechecks, and `persist` is type-preserving -- so the rewritten call has to
+// say what it holds. A shim's connect() is declared `any`, so without this
+// every inference downstream of a store is lost and the compiled tree stops
+// type-checking under `strict`, in code the user did not write.
+func TestARewrittenTypeScriptStoreKeepsItsType(t *testing.T) {
+	f := &source.File{Path: "store.ts", Content: []byte(`
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { persist } from "@cloudcompiler/sdk";
+const pets = persist(new DynamoDBClient({}), { id: "petsByOwner" });
+`)}
+	if err := (Frontend{}).Parse(f); err != nil {
+		t.Fatal(err)
+	}
+	var d diag.Diagnostics
+	hints := detectHints(f, &d)
+	if err := (Frontend{}).Rewrite(f, hints); err != nil {
+		t.Fatal(err)
+	}
+	got := string(f.Content)
+	if !strings.Contains(got, `_cloudccKv.connect("petsByOwner") as DynamoDBClient`) {
+		t.Errorf("the rewritten store does not carry its type:\n%s", got)
+	}
+}
+
+// JavaScript gets no assertion: it would be a syntax error, and there is no
+// inference to preserve.
+func TestARewrittenJavaScriptStoreGetsNoAssertion(t *testing.T) {
+	f := &source.File{Path: "store.js", Content: []byte(`
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { persist } from "@cloudcompiler/sdk";
+const pets = persist(new DynamoDBClient({}), { id: "petsByOwner" });
+`)}
+	if err := (Frontend{}).Parse(f); err != nil {
+		t.Fatal(err)
+	}
+	var d diag.Diagnostics
+	hints := detectHints(f, &d)
+	if err := (Frontend{}).Rewrite(f, hints); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(f.Content); strings.Contains(got, " as DynamoDBClient") {
+		t.Errorf("a JavaScript file must not get a type assertion:\n%s", got)
+	}
+}
+
+// A factory call is not a type. `createClient()` names a function, and
+// `as createClient` does not compile.
+func TestAFactoryBuiltClientGetsNoAssertion(t *testing.T) {
+	f := &source.File{Path: "store.ts", Content: []byte(`
+import { createClient } from "redis";
+import { persist } from "@cloudcompiler/sdk";
+const cache = persist(createClient(), { id: "itemCache" });
+`)}
+	if err := (Frontend{}).Parse(f); err != nil {
+		t.Fatal(err)
+	}
+	var d diag.Diagnostics
+	hints := detectHints(f, &d)
+	if err := (Frontend{}).Rewrite(f, hints); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(f.Content); strings.Contains(got, " as createClient") {
+		t.Errorf("a factory function is not a type:\n%s", got)
+	}
+}
+
+// The two classes the SDK supplies get no assertion, because the SDK's import
+// is removed by the same rewrite -- `as Secret` would name a type nothing
+// declares, and the compiled unit would stop type-checking. They need none:
+// the shim's own declarations return a Secret and a Topic.
+func TestSDKSuppliedClassesGetNoAssertion(t *testing.T) {
+	for name, decl := range map[string]string{
+		"secret": `const key = persist(new Secret(), { id: "auditKey" });`,
+		"topic":  `const events = persist(new Topic(), { id: "petEvents" });`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &source.File{Path: "store.ts", Content: []byte(`
+import { persist, Secret, Topic } from "@cloudcompiler/sdk";
+` + decl + `
+`)}
+			if err := (Frontend{}).Parse(f); err != nil {
+				t.Fatal(err)
+			}
+			var d diag.Diagnostics
+			hints := detectHints(f, &d)
+			if err := (Frontend{}).Rewrite(f, hints); err != nil {
+				t.Fatal(err)
+			}
+			got := string(f.Content)
+			if strings.Contains(got, " as Secret") || strings.Contains(got, " as Topic") {
+				t.Errorf("the SDK's import is gone, so its classes cannot be named:\n%s", got)
+			}
+		})
 	}
 }

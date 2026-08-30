@@ -40,9 +40,20 @@ CURRENT_OUT=""
 cleanup() {
   local status=$?
   if [ -n "$CURRENT_OUT" ] && [ -d "$CURRENT_OUT" ]; then
+    # With the kubeconfig, exactly as the explicit teardown at the end passes
+    # it. Without it the generated program cannot build its Kubernetes provider,
+    # so `pulumi destroy` fails on the first Kubernetes resource and leaves the
+    # *whole* stack behind -- silently, because this runs on the way out of a
+    # failure and its output is discarded.
+    #
+    # That is how a failed run came to leave five DynamoDB tables, two topics, a
+    # bucket and six log groups for the next run to collide with. purge_previous
+    # below then looked like the mechanism for cleaning up, when it is meant to
+    # be the backstop for when even this could not run.
     ( cd "$CURRENT_OUT" \
         && PULUMI_BACKEND_URL="file://$CURRENT_OUT/.pulumi-state" \
            PULUMI_CONFIG_PASSPHRASE=cloudcc-emulator \
+           CLOUDCC_KUBECONFIG="$(cat "${KUBECONFIG_FILE:-/dev/null}" 2>/dev/null)" \
            pulumi destroy -y --stack local >/dev/null 2>&1 ) || true
   fi
   # The k3s container outlives the stack it belonged to: deleting the EKS
@@ -85,6 +96,21 @@ purge_previous() {
       ;;
     esac
   done
+  # Log groups, which a failed run leaves behind and nothing else removes.
+  #
+  # The compiler creates them up front rather than letting the first invocation
+  # do it -- that is what makes retention configurable and destroy clean -- so a
+  # run that dies before its destroy leaves one per unit, and the next run of
+  # the same application fails on ResourceAlreadyExistsException before it
+  # reaches anything worth testing. That is a harness that cannot be re-run
+  # after a failure, which is exactly when re-running matters.
+  for name in $(aws_local logs describe-log-groups \
+      --query 'logGroups[].logGroupName' --output text 2>/dev/null | tr '\t' '\n'); do
+    case "$name" in
+      */"$app"-*) aws_local logs delete-log-group --log-group-name "$name" >/dev/null 2>&1 || true ;;
+    esac
+  done
+
   for name in $(aws_local ecr describe-repositories \
                   --query 'repositories[].repositoryName' --output text 2>/dev/null); do
     case "$name" in "$app"-*) aws_local ecr delete-repository --repository-name "$name" --force >/dev/null 2>&1 || true ;; esac
@@ -449,10 +475,25 @@ trap 'kill $FORWARD_PID 2>/dev/null || true' RETURN 2>/dev/null || true
 wait_for_http "http://127.0.0.1:18080/health" 45 \
   || { kill $FORWARD_PID 2>/dev/null; fail "the Service did not route to the pod"; }
 
-BODY="$(curl -sf http://127.0.0.1:18080/where || true)"
+# /health proves the Service routes somewhere. /where proves *where*: it
+# returns the pod's own hostname, so a reply carrying one is a reply that came
+# from inside the cluster rather than from anything else that might be
+# listening. Not every application serves it -- it exists in k8s-web because a
+# test wanted it -- so the stronger claim is made when it is available and the
+# weaker one is named when it is not.
+WHERE="$(curl -sf http://127.0.0.1:18080/where 2>/dev/null || true)"
+HEALTH="$(curl -sf http://127.0.0.1:18080/health 2>/dev/null || true)"
 kill $FORWARD_PID 2>/dev/null || true
-echo "$BODY" | grep -q '"host"' || fail "unexpected reply through the Service: $BODY"
-pass "L5 the Service routes to the pod: $BODY"
+
+if echo "$WHERE" | grep -q '"host"'; then
+  pass "L5 the Service routes to the pod, and the pod says which it is: $WHERE"
+elif [ -n "$HEALTH" ]; then
+  pass "L5 the Service routes to the pod: $HEALTH
+  (this application serves no /where, so the reply does not name the pod --
+  what is proven is that the Service selected something that answers)"
+else
+  fail "the Service accepted a connection and returned nothing"
+fi
 
 log "tearing down"
 CLOUDCC_KUBECONFIG="$(cat "$KUBECONFIG_FILE")" \

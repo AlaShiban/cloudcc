@@ -288,10 +288,77 @@ func (r *Resolver) cache(p *ir.Persist) error {
 }
 
 func (r *Resolver) topic(t *ir.Topic) error {
-	props := map[string]any{"name": r.uniqueName("sns", t.ID, sanitize.SNSTopic)}
-	r.resolve(t.Key(), KindSNSTopic, t.ID, "aws.sns.Topic", props,
-		ir.Env(EnvTopicARN(t.ID), "arn"), t.Config())
+	// Which service this is was decided from the program's requirements, not
+	// from configuration -- see SelectTopicBacking. All this does is build it.
+	switch t.Config().Type {
+	case TopicSQS:
+		return r.queue(t)
+	case TopicSNS:
+		props := map[string]any{"name": r.uniqueName("sns", t.ID, sanitize.SNSTopic)}
+		r.resolve(t.Key(), KindSNSTopic, t.ID, "aws.sns.Topic", props, ir.Env(
+			EnvTopicARN(t.ID), "arn",
+			EnvTopicBacking(t.ID), ir.FromExpr(TopicSNS),
+		), t.Config())
+		return nil
+	}
+	return fmt.Errorf("no AWS mapping for topic type %q", t.Config().Type)
+}
+
+// queue builds the SQS form of a topic: one queue, consumed by whichever units
+// subscribe to it.
+//
+// The difference from SNS is not only the resource. SNS pushes, so a
+// subscription plus a resource policy on the function is the whole wiring; SQS
+// is pulled, so the function needs an event source mapping and permission of
+// its own -- both of which are attached in subscriptions().
+func (r *Resolver) queue(t *ir.Topic) error {
+	props := map[string]any{
+		"name": r.uniqueName("sqs", t.ID, sanitize.SQSQueue),
+		// How long a message a subscriber never got round to survives. Zero
+		// means the program did not say, and AWS's own default (4 days) is the
+		// honest answer to that.
+		"visibilityTimeoutSeconds": r.queueVisibility(t),
+	}
+	if t.Requires.RetentionHours > 0 {
+		props["messageRetentionSeconds"] = t.Requires.RetentionHours * 3600
+	}
+	r.resolve(t.Key(), KindSQSQueue, t.ID, "aws.sqs.Queue", props, ir.Env(
+		// Both, because the two ends need different ones: a publisher sends to
+		// a URL and a policy is written against an ARN.
+		EnvTopicURL(t.ID), "url",
+		EnvTopicARN(t.ID), "arn",
+		EnvTopicBacking(t.ID), ir.FromExpr(TopicSQS),
+	), t.Config())
 	return nil
+}
+
+// queueVisibility is how long a message stays invisible after a consumer picks
+// it up, and it is derived rather than defaulted.
+//
+// AWS refuses an event source mapping whose function can run for longer than
+// its queue's visibility timeout, because a function still working on a message
+// that has become visible again means a second consumer gets a copy. Defaulting
+// this to 30 seconds and letting the user discover the rule from an API error
+// eight minutes into a deploy is exactly the failure the compiler exists to
+// take on: the subscribers are in the graph already, so their timeouts are
+// knowable here.
+func (r *Resolver) queueVisibility(t *ir.Topic) int {
+	const floor = 30 // the AWS default for a queue, and for a function
+	longest := floor
+	for _, edge := range r.Program.EdgesTo(t.Key(), ir.EdgeSubscribes) {
+		in, ok := r.Program.Intent(edge.From)
+		if !ok {
+			continue
+		}
+		unit, ok := in.(*ir.ExecUnit)
+		if !ok {
+			continue
+		}
+		if timeout := unit.Config().Timeout; timeout > longest {
+			longest = timeout
+		}
+	}
+	return longest
 }
 
 func (r *Resolver) staticSite(s *ir.StaticSite) error {
@@ -303,12 +370,23 @@ func (r *Resolver) staticSite(s *ir.StaticSite) error {
 	r.resolve(s.Key(), KindS3Bucket, s.ID, "aws.s3.BucketV2", bucketProps,
 		ir.Env(EnvStaticBucket(s.ID), "bucket"), s.Config())
 
-	website := ir.NewResource(KindS3Website, s.ID, "aws.s3.BucketWebsiteConfigurationV2", map[string]any{
-		"bucket":        ir.Ref{Key: bucketKey, Prop: "id"},
-		"indexDocument": map[string]any{"suffix": s.IndexDocument},
-	}, ir.Env(EnvStaticURL(s.ID), "websiteEndpoint"))
-	r.Program.Resolve(s.Key(), website)
-	r.Program.Connect(website.Key(), bucketKey, ir.EdgeDependsOn)
+	// Two shapes, and only one of them exists at a time. A CDN-fronted site has
+	// no website endpoint -- the bucket stays private and is read through an
+	// origin access identity -- so emitting the website configuration as well
+	// would leave a second, public-looking address that serves nothing.
+	switch s.Config().Type {
+	case "cloudfront":
+		if err := r.staticCDN(s, bucketKey); err != nil {
+			return err
+		}
+	default:
+		website := ir.NewResource(KindS3Website, s.ID, "aws.s3.BucketWebsiteConfigurationV2", map[string]any{
+			"bucket":        ir.Ref{Key: bucketKey, Prop: "id"},
+			"indexDocument": map[string]any{"suffix": s.IndexDocument},
+		}, ir.Env(EnvStaticURL(s.ID), "websiteEndpoint"))
+		r.Program.Resolve(s.Key(), website)
+		r.Program.Connect(website.Key(), bucketKey, ir.EdgeDependsOn)
+	}
 
 	// One object per claimed file, in sorted order, so the emitted project is
 	// stable across compiles.
@@ -328,11 +406,106 @@ func (r *Resolver) staticSite(s *ir.StaticSite) error {
 	return nil
 }
 
-// siteRelative strips the declaring module's directory and the glob's fixed
-// root from an asset path, so public/index.html is served as index.html.
+// staticCDN puts a CloudFront distribution in front of a static site's bucket
+// and closes the bucket to everything else.
+//
+// The bucket keeps no website configuration and no public access. What reaches
+// the objects is an origin access identity: a principal CloudFront signs
+// requests as, named in a bucket policy that grants it s3:GetObject and grants
+// nobody else anything. The alternative -- a public bucket behind a CDN -- has
+// two addresses for the same content, one of them cacheless and unlogged, and
+// the bucket's URL outlives any decision made about the distribution.
+//
+// An origin access *identity* rather than the newer origin access *control*.
+// OAC is what AWS documents today, and it is the better mechanism, but its
+// bucket policy is written against the distribution's ARN while the
+// distribution names the bucket -- a cycle that has to be broken by deploying
+// twice or by an explicit dependency edge that says the policy may lag the
+// thing it protects. OAI has no cycle. When this moves to OAC that is a change
+// with a deploy-ordering consequence, which is why it is written down here.
+func (r *Resolver) staticCDN(s *ir.StaticSite, bucketKey ir.Key) error {
+	oai := ir.NewResource(KindCloudFrontOAI, s.ID, "aws.cloudfront.OriginAccessIdentity", map[string]any{
+		"comment": "cloudcc " + r.App + " static unit " + s.ID,
+	}, nil)
+	r.Program.Resolve(s.Key(), oai)
+
+	policy := ir.NewResource(KindS3BucketPolicy, s.ID, "aws.s3.BucketPolicy", map[string]any{
+		"bucket": ir.Ref{Key: bucketKey, Prop: "id"},
+		"policy": ir.JSONDoc{Value: map[string]any{
+			"Version": "2012-10-17",
+			"Statement": []any{map[string]any{
+				"Effect":    "Allow",
+				"Principal": map[string]any{"AWS": ir.Ref{Key: oai.Key(), Prop: "iamArn"}},
+				"Action":    []any{"s3:GetObject"},
+				"Resource":  []any{ir.Lit(ir.Ref{Key: bucketKey, Prop: "arn"}, "/*")},
+			}},
+		}},
+	}, nil)
+	r.Program.Resolve(s.Key(), policy)
+	r.Program.Connect(policy.Key(), bucketKey, ir.EdgeDependsOn)
+	r.Program.Connect(policy.Key(), oai.Key(), ir.EdgeDependsOn)
+
+	originID := "s3-" + sanitize.Identifier(s.ID)
+	dist := ir.NewResource(KindCloudFront, s.ID, "aws.cloudfront.Distribution", map[string]any{
+		"enabled": true,
+		"comment": "cloudcc " + r.App + " static unit " + s.ID,
+		// The index document, which the bucket's website configuration would
+		// otherwise have served. CloudFront only applies it at the root: a
+		// request for /docs/ is not rewritten to /docs/index.html the way an S3
+		// website would rewrite it. That is a real difference between the two
+		// types and the reason they are two types.
+		"defaultRootObject": s.IndexDocument,
+		"origins": []any{map[string]any{
+			"originId":   originID,
+			"domainName": ir.Ref{Key: bucketKey, Prop: "bucketRegionalDomainName"},
+			"s3OriginConfig": map[string]any{
+				"originAccessIdentity": ir.Ref{Key: oai.Key(), Prop: "cloudfrontAccessIdentityPath"},
+			},
+		}},
+		"defaultCacheBehavior": map[string]any{
+			"targetOriginId": originID,
+			// A static site is public content, and the whole point of the
+			// bucket being private is that this is the only way in.
+			"viewerProtocolPolicy": "redirect-to-https",
+			"allowedMethods":       []any{"GET", "HEAD"},
+			"cachedMethods":        []any{"GET", "HEAD"},
+			"forwardedValues": map[string]any{
+				"queryString": false,
+				"cookies":     map[string]any{"forward": "none"},
+			},
+			"minTtl":     0,
+			"defaultTtl": 3600,
+			"maxTtl":     86400,
+		},
+		"restrictions": map[string]any{
+			"geoRestriction": map[string]any{"restrictionType": "none"},
+		},
+		"viewerCertificate": map[string]any{"cloudfrontDefaultCertificate": true},
+		// North America and Europe. The cheapest class that is still a CDN;
+		// a site that needs the other edges says so with `pulumi_params`.
+		"priceClass": "PriceClass_100",
+	}, ir.Env(EnvStaticURL(s.ID), "domainName"))
+	r.Program.Resolve(s.Key(), dist)
+	r.Program.Connect(dist.Key(), bucketKey, ir.EdgeDependsOn)
+	r.Program.Connect(dist.Key(), oai.Key(), ir.EdgeDependsOn)
+	// Not for correctness -- CloudFront will serve once the policy lands -- but
+	// so that a stack which has finished creating is a stack that serves. A
+	// distribution reported as ready while its origin still returns 403 is a
+	// deploy that looks done and is not.
+	r.Program.Connect(dist.Key(), policy.Key(), ir.EdgeDependsOn)
+	return nil
+}
+
+// siteRelative turns a claimed path into the object's key, so
+// public/index.html is served as index.html.
+//
+// The prefix is read off the intent rather than derived here. It depends on the
+// declaring module's directory and the glob resolved against each other, and
+// deriving that in two places is how a `../public/**/*` glob from a module in
+// src/ uploaded `public/index.html` while the distribution asked for
+// `index.html` -- a stack that deployed clean and served a 404.
 func siteRelative(s *ir.StaticSite, rel string) string {
-	base := trimDir(rel, s.Root)
-	return trimDir(base, globRootDir(s.StaticFiles))
+	return trimDir(trimDir(rel, s.Root), s.Prefix)
 }
 
 func trimDir(p, dir string) string {
@@ -343,22 +516,6 @@ func trimDir(p, dir string) string {
 		return p[len(dir)+1:]
 	}
 	return p
-}
-
-func globRootDir(pattern string) string {
-	pattern = strings.TrimPrefix(pattern, "./")
-	dir := ""
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] != '/' {
-			continue
-		}
-		seg := pattern[:i]
-		if strings.ContainsAny(seg, "*?[{") {
-			return dir
-		}
-		dir = seg
-	}
-	return dir
 }
 
 func contentType(rel string) string {

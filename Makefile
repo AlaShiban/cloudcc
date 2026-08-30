@@ -25,7 +25,10 @@ golden:             ## Accept the current output as the golden trees
 sdk-test:           ## Python SDK and shim-parity suite
 	cd sdk/python && uv run --with pytest --with-editable . python -m pytest tests -q
 
-check: fmt vet test sdk-test  ## Everything that needs no network
+sdk-test-node:      ## Node SDK, shim-parity and tracer suites
+	cd sdk/node && npm test
+
+check: fmt vet test sdk-test sdk-test-node  ## Everything that needs no network
 
 e2e:                ## Provisioning and functional tests against the emulator
 	./tests/e2e/ministack.sh

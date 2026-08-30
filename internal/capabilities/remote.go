@@ -55,6 +55,26 @@ func (p *RemotePlugin) declaration(ctx *compiler.Context, h sdkdetect.Hint) {
 		return
 	}
 
+	// A call over the wire is an *invocation*, and only a function has one.
+	//
+	// A container is reached at an address, by something that already knows the
+	// address; there is no API that says "run this and give me the answer". So
+	// a remote() pointed at one compiled cleanly, emitted no function binding,
+	// and left the caller to die on its first call with a message about an
+	// environment variable -- a green deploy and a broken application, which is
+	// the failure this check exists to move to compile time.
+	if unit, isUnit := callee.(*ir.ExecUnit); isUnit {
+		if typ := unit.Config().Type; typ != "" && typ != config.TypeFunction {
+			ctx.Diags.Errorf(ctx.HintPos(h), sdkdetect.CapRemote,
+				"execution unit %q is `type: %s`, and only `type: %s` can be called over the wire: "+
+					"a call is an invocation, and a container is reached at an address instead. "+
+					"Make %q a function, or send it a message with a Topic -- which is what the "+
+					"other direction of this seam is for",
+				target, typ, config.TypeFunction, target)
+			return
+		}
+	}
+
 	callers := ctx.UnitsFor(h.File)
 	if len(callers) == 0 {
 		ctx.Diags.Warnf(ctx.HintPos(h), sdkdetect.CapRemote,

@@ -23,6 +23,11 @@ const apiLogs = new aws.cloudwatch.LogGroup("api", {
     retentionInDays: 14,
 });
 
+const auditorLogs = new aws.cloudwatch.LogGroup("auditor", {
+    name: "/aws/lambda/kitchen-sink-auditor",
+    retentionInDays: 14,
+});
+
 const reporterLogs = new aws.cloudwatch.LogGroup("reporter", {
     name: "/ecs/kitchen-sink-reporter",
     retentionInDays: 14,
@@ -101,6 +106,25 @@ const apiRole = new aws.iam.Role("api", {
         "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
     ],
     name: "kitchen-sink-api-role",
+});
+
+const auditorRole = new aws.iam.Role("auditor", {
+    assumeRolePolicy: pulumi.jsonStringify({
+    Statement: [
+        {
+            Action: "sts:AssumeRole",
+            Effect: "Allow",
+            Principal: {
+                Service: "lambda.amazonaws.com",
+            },
+        },
+    ],
+    Version: "2012-10-17",
+}),
+    managedPolicyArns: [
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    ],
+    name: "kitchen-sink-auditor-role",
 });
 
 const itemDocsBucket = new aws.s3.BucketV2("itemDocs", {
@@ -284,6 +308,7 @@ const reporterEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_REDIS_ITEMCACHE_TLS: "false",
     CLOUDCC_SECRET_SIGNINGKEY_ARN: pulumi.interpolate`${signingKeySecret.arn}`,
     CLOUDCC_TOPIC_ITEMEVENTS_ARN: pulumi.interpolate`${itemEventsTopic.arn}`,
+    CLOUDCC_TOPIC_ITEMEVENTS_BACKING: "sns",
     CLOUDCC_UNIT: `reporter`,
 };
 
@@ -468,6 +493,64 @@ const apiPolicy = new aws.iam.RolePolicy("api", {
     role: apiRole.id,
 });
 
+const auditorPolicy = new aws.iam.RolePolicy("auditor", {
+    name: "kitchen-sink-auditor-policy",
+    policy: pulumi.jsonStringify({
+    Statement: [
+        {
+            Action: [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:ListBucket",
+            ],
+            Effect: "Allow",
+            Resource: [
+                itemDocsBucket.arn,
+                pulumi.interpolate`${itemDocsBucket.arn}/*`,
+            ],
+        },
+        {
+            Action: [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:BatchGetItem",
+                "dynamodb:BatchWriteItem",
+            ],
+            Effect: "Allow",
+            Resource: [
+                catalogueTable.arn,
+                pulumi.interpolate`${catalogueTable.arn}/index/*`,
+            ],
+        },
+        {
+            Action: [
+                "secretsmanager:GetSecretValue",
+            ],
+            Effect: "Allow",
+            Resource: [
+                shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? ""),
+            ],
+        },
+        {
+            Action: [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:PutSecretValue",
+            ],
+            Effect: "Allow",
+            Resource: [
+                signingKeySecret.arn,
+            ],
+        },
+    ],
+    Version: "2012-10-17",
+}),
+    role: auditorRole.id,
+});
+
 const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
     CLOUDCC_CONFIG_LOG_LEVEL: "info",
@@ -482,6 +565,7 @@ const apiEnv: { [key: string]: pulumi.Input<string> } = {
     CLOUDCC_REDIS_ITEMCACHE_TLS: "false",
     CLOUDCC_SECRET_SIGNINGKEY_ARN: pulumi.interpolate`${signingKeySecret.arn}`,
     CLOUDCC_TOPIC_ITEMEVENTS_ARN: pulumi.interpolate`${itemEventsTopic.arn}`,
+    CLOUDCC_TOPIC_ITEMEVENTS_BACKING: "sns",
     CLOUDCC_UNIT: `api`,
 };
 
@@ -524,6 +608,47 @@ const shopApiPermission = new aws.lambda.Permission("shop-api", {
     statementId: "kitchen-sink-shop-api-invoke",
 });
 
+const auditorEnv: { [key: string]: pulumi.Input<string> } = {
+    CLOUDCC_AWS_ENDPOINT_URL: pulumi.interpolate`${process.env.CLOUDCC_AWS_ENDPOINT_URL ?? ""}`,
+    CLOUDCC_FS_ITEMDOCS_BUCKET: pulumi.interpolate`${itemDocsBucket.bucket}`,
+    CLOUDCC_KV_CATALOGUE_TABLE: pulumi.interpolate`${catalogueTable.name}`,
+    CLOUDCC_LOG_DESTINATION: `cloudwatch`,
+    CLOUDCC_ORM_SHOPDB_SECRET_ARN: pulumi.interpolate`${shopdbDb.masterUserSecrets.apply(s => s?.[0]?.secretArn ?? "")}`,
+    CLOUDCC_ORM_SHOPDB_URL: pulumi.interpolate`postgresql://ccadmin@${shopdbDb.address}:${shopdbDb.port}/shopdb`,
+    CLOUDCC_REDIS_ITEMCACHE_ENDPOINT: pulumi.interpolate`${itemCacheCache.cacheNodes.apply(n => n?.[0]?.address ?? "")}`,
+    CLOUDCC_REDIS_ITEMCACHE_PORT: "6379",
+    CLOUDCC_REDIS_ITEMCACHE_TLS: "false",
+    CLOUDCC_SECRET_SIGNINGKEY_ARN: pulumi.interpolate`${signingKeySecret.arn}`,
+    CLOUDCC_TOPIC_ITEMEVENTS_ARN: pulumi.interpolate`${itemEventsTopic.arn}`,
+    CLOUDCC_TOPIC_ITEMEVENTS_BACKING: "sns",
+    CLOUDCC_UNIT: `auditor`,
+};
+
+const auditorFn = new aws.lambda.Function("auditor", {
+    code: new pulumi.asset.FileArchive("build/auditor.zip"),
+    environment: { variables: auditorEnv },
+    handler: "cloudcc_lambda_entry.handler",
+    memorySize: 512,
+    name: "kitchen-sink-auditor",
+    role: auditorRole.arn,
+    runtime: "python3.12",
+    timeout: 30,
+});
+
+const auditorItemEventsSnsPermission = new aws.lambda.Permission("auditor-itemEvents-sns", {
+    action: "lambda:InvokeFunction",
+    function: auditorFn.name,
+    principal: "sns.amazonaws.com",
+    sourceArn: itemEventsTopic.arn,
+    statementId: "kitchen-sink-auditor-itemEvents-sns",
+});
+
+const auditorItemEventsSubscription = new aws.sns.TopicSubscription("auditor-itemEvents", {
+    endpoint: auditorFn.arn,
+    protocol: "lambda",
+    topic: itemEventsTopic.arn,
+});
+
 const network1RouteAssoc = new aws.ec2.RouteTableAssociation("network-1", {
     routeTableId: networkRoutes.id,
     subnetId: network1Subnet.id,
@@ -544,6 +669,8 @@ export const CLOUDCC_REDIS_ITEMCACHE_PORT = "6379";
 export const CLOUDCC_REDIS_ITEMCACHE_TLS = "false";
 export const CLOUDCC_SECRET_SIGNINGKEY_ARN = pulumi.interpolate`${signingKeySecret.arn}`;
 export const CLOUDCC_TOPIC_ITEMEVENTS_ARN = pulumi.interpolate`${itemEventsTopic.arn}`;
+export const CLOUDCC_TOPIC_ITEMEVENTS_BACKING = "sns";
 export const CLOUDCC_UNIT_API_FUNCTION = pulumi.interpolate`${apiFn.name}`;
+export const CLOUDCC_UNIT_AUDITOR_FUNCTION = pulumi.interpolate`${auditorFn.name}`;
 export const reporterWebUrl = reporterWebAlb.dnsName;
 export const shopApiUrl = shopApiApi.apiEndpoint;

@@ -1,0 +1,18 @@
+app: petstore-ts
+provider: aws
+
+execution_units:
+  web:
+    # A container rather than a function, which is what this example is for.
+    # Everything else about the program is unchanged: `type` says what shape of
+    # compute it needs, not which product runs it.
+    type: container
+    memory: 512
+
+exposed:
+  pet-api:
+    # A container is not something an HTTP API can integrate with, so the
+    # gateway in front of it is a load balancer. This is the one line that has
+    # to agree with `type: container` above; choosing the default instead is a
+    # compile error naming the unit, not a stack that deploys and never routes.
+    type: alb

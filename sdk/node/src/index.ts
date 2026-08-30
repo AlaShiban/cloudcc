@@ -42,7 +42,8 @@
  * the `_cloudcc_runtime` package the compiler injects into the compiled copy.
  */
 
-import { Gateway, Json, slug } from "./emulation.js";
+import { Gateway, Json, Secret, Topic, slug } from "./emulation.js";
+import { wrap } from "./trace.js";
 
 export {
   Gateway,
@@ -108,8 +109,59 @@ export function expose(app: unknown, options: { id?: string; target?: string } =
  * Returns `client`, unchanged.
  */
 export function persist<T>(client: T, options: { id: string; models?: string[] }): T {
-  void options;
-  return client;
+  // A secret with no source of its own learns where to look. Uncompiled it
+  // reads CLOUDCC_SECRET_<ID> -- the same name the compiled binding uses -- so
+  // a value supplied to a local run and a value put in Secrets Manager can be
+  // the same value, and a program that reads one behaves the same either way.
+  //
+  // The Python SDK has done this since a differential test first needed it;
+  // Node did not, and the asymmetry only surfaced when a TypeScript example
+  // declared a secret: the local half always read an empty string, so the two
+  // halves of that example could never agree.
+  if (client instanceof Secret && client._envName() === null) {
+    client._bindEnv(`CLOUDCC_SECRET_${slug(options.id)}`);
+  }
+
+  // With CLOUDCC_TRACE unset this returns `client` itself, so the promise
+  // above -- that what you hold is the library's own type -- is untouched.
+  // With it set, calls through the client are recorded, so an uncompiled run
+  // and a compiled one can be compared on what they *did* rather than only on
+  // what they answered. Topic and Secret record from inside instead; they are
+  // ours, so there is no foreign object to proxy.
+  if (client instanceof Topic || client instanceof Secret) {
+    client._bindTrace(options.id);
+    return client;
+  }
+  return wrap(client, kindOf(client), options.id);
+}
+
+/**
+ * How a client's library maps to the capability the compiler provisions.
+ *
+ * The compiled half records these names literally -- each shim knows what it
+ * is -- so this half has to arrive at the same word or every event would
+ * differ on `kind` alone. A test pins the two vocabularies together.
+ *
+ * There is no import to inspect here as there is in Python, so this goes on
+ * the constructor's name: it is what is available without this package taking
+ * a dependency on every client library it supports, which it will not do.
+ */
+function kindOf(client: unknown): string {
+  const name = (client as { constructor?: { name?: string } })?.constructor?.name ?? "";
+  if (name === "DynamoDBClient" || name === "DynamoDBDocumentClient") return "kv";
+  if (name === "S3Client") return "fs";
+  if (name === "Pool" || name === "Client" || name === "Sequelize") return "orm";
+  if (name === "Redis" || name === "Commander" || name === "RedisClient") return "redis";
+  // knex hands back a callable whose name is not stable across versions; its
+  // marker property is.
+  if (typeof client === "function" && (client as { raw?: unknown }).raw !== undefined) {
+    return "orm";
+  }
+  if (name === "RedisClientImpl" || name.startsWith("RedisClient")) return "redis";
+  // Unrecognised is recorded as such rather than guessed. A wrong kind would
+  // make two identical runs differ, which is the one failure this comparison
+  // must never invent.
+  return "unknown";
 }
 
 /**

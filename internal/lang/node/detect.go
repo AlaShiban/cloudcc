@@ -310,7 +310,11 @@ func buildHint(f *source.File, call *ts.Node, fn string) (sdkdetect.Hint, *hintE
 
 	positional := 0
 	for i := uint(0); i < args.NamedChildCount(); i++ {
-		arg := args.NamedChild(i)
+		// Unwrapped first, so a TypeScript program's `as`, `satisfies` and `!`
+		// are gone before anything asks what kind of argument this is. An
+		// options object written `{ id: "x" } as const` is still an options
+		// object.
+		arg := unwrapTS(args.NamedChild(i))
 		// tree-sitter counts a comment as a named child, and people comment
 		// their arguments.
 		if arg.Kind() == "comment" {
@@ -374,6 +378,15 @@ func resolveClient(f *source.File, call *ts.Node, h *sdkdetect.Hint) *hintError 
 		return &hintError{"persist() requires a client to wrap", int(call.StartByte())}
 	}
 	h.Client = f.Text(clientNode)
+	// Only the `new X(...)` form, and only when X is a plain name: a class is
+	// also a type, so the rewritten TypeScript can say what it holds. A
+	// factory call is not a type, and a qualified name may not be in scope
+	// under the same spelling in the rewritten file.
+	if unwrapped := unwrapTS(clientNode); unwrapped.Kind() == "new_expression" {
+		if ctor := unwrapped.ChildByFieldName("constructor"); ctor != nil && ctor.Kind() == "identifier" {
+			h.ClientClass = f.Text(ctor)
+		}
+	}
 
 	constructor, ctorCall := constructorOf(f, clientNode)
 	if constructor == "" {
@@ -502,7 +515,9 @@ func positionalArg(args *ts.Node, n int) *ts.Node {
 	}
 	seen := 0
 	for i := uint(0); i < args.NamedChildCount(); i++ {
-		arg := args.NamedChild(i)
+		// Unwrapped before the options object is recognised, because
+		// `{ id: "x" } as const` is an object and does not look like one.
+		arg := unwrapTS(args.NamedChild(i))
 		if arg.Kind() == "comment" || arg.Kind() == "object" {
 			continue
 		}
@@ -514,10 +529,72 @@ func positionalArg(args *ts.Node, n int) *ts.Node {
 	return nil
 }
 
+// unwrapTS strips the wrappers that carry no runtime meaning, so everything
+// downstream sees the value itself.
+//
+// `new Redis() as Redis`, `pool!`, `<Redis>new Redis()`, `"pets" as const` and
+// `(new Redis())` all describe a value this compiler already understands, with
+// something around it that is erased before the program runs. Reading them
+// without this is how a TypeScript program gets told its client is
+// unrecognised: the node under inspection is an as_expression, and the
+// new_expression is inside it.
+//
+// One helper rather than a case in each reader, for the reason the literal
+// decoder below is also one function: the Python frontend once had two and they
+// drifted, silently losing routes.
+func unwrapTS(n *ts.Node) *ts.Node {
+	for n != nil {
+		switch n.Kind() {
+		case "as_expression", "satisfies_expression", "non_null_expression",
+			"parenthesized_expression":
+			// The value comes first; a type or nothing follows it.
+			inner := onlyValueChild(n, false)
+			if inner == nil {
+				return n
+			}
+			n = inner
+
+		case "type_assertion":
+			// `<T>value` is the other way round: the type leads, so the value
+			// is what is left once the type arguments are skipped.
+			inner := onlyValueChild(n, true)
+			if inner == nil {
+				return n
+			}
+			n = inner
+
+		default:
+			return n
+		}
+	}
+	return n
+}
+
+// onlyValueChild returns the value inside a wrapper node: its first named child
+// that is neither a comment nor part of the type annotation. Returns nil when
+// there is no single obvious candidate, which leaves the caller looking at the
+// wrapper rather than at a guess.
+func onlyValueChild(n *ts.Node, skipTypeArgs bool) *ts.Node {
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		switch c.Kind() {
+		case "comment":
+			continue
+		case "type_arguments":
+			if skipTypeArgs {
+				continue
+			}
+		}
+		return c
+	}
+	return nil
+}
+
 // constructorOf returns the name at the head of a client expression.
 // `new Redis(...)`, `redis.createClient(...)` and `createClient()` all reduce
 // to the name that identifies the library.
 func constructorOf(f *source.File, n *ts.Node) (string, *ts.Node) {
+	n = unwrapTS(n)
 	switch n.Kind() {
 	case "new_expression":
 		if ctor := n.ChildByFieldName("constructor"); ctor != nil {
@@ -663,6 +740,12 @@ func propertyNames(sig sdkdetect.Signature) []string {
 // evalArg statically evaluates one argument. A nil value with a nil error
 // means "explicitly null or undefined", which is treated as absent.
 func evalArg(f *source.File, n *ts.Node, p sdkdetect.Param) (any, *hintError) {
+	// Also here, not only in the caller: an option read out of the options
+	// object arrives straight from readOptions, so `{ secret: true as const }`
+	// would otherwise reach the boolean case still wrapped. And an expression
+	// argument must have its wrapper gone before it is turned into text --
+	// `expose(app!)` names the binding `app`, and `app!` matches nothing.
+	n = unwrapTS(n)
 	switch p.Kind {
 	case sdkdetect.ParamExpr, sdkdetect.ParamClient:
 		return f.Text(n), nil
@@ -824,6 +907,9 @@ func literalString(f *source.File, n *ts.Node) string {
 // One decoder, used by both hint arguments and route paths. The Python
 // frontend once had two and they drifted, silently losing routes.
 func stringLiteral(f *source.File, n *ts.Node) (string, bool) {
+	// `"pets" as const` is how a TypeScript program writes a literal it wants
+	// narrowed, and it is still a literal.
+	n = unwrapTS(n)
 	switch n.Kind() {
 	case "string":
 		var b strings.Builder
@@ -854,20 +940,6 @@ func stringLiteral(f *source.File, n *ts.Node) (string, bool) {
 			}
 		}
 		return b.String(), true
-
-	case "parenthesized_expression":
-		var inner *ts.Node
-		for i := uint(0); i < n.NamedChildCount(); i++ {
-			if child := n.NamedChild(i); child.Kind() != "comment" {
-				if inner != nil {
-					return "", false
-				}
-				inner = child
-			}
-		}
-		if inner != nil {
-			return stringLiteral(f, inner)
-		}
 
 	case "binary_expression":
 		// "a" + "b" is how a long literal gets split, and a formatter produces

@@ -3,13 +3,13 @@
 One application, two units, two languages, four stores — and eight different
 client libraries between them.
 
-* `api.js` is a Node HTTP unit, compiled to Lambda behind API Gateway v2.
+* `api.ts` is a TypeScript HTTP unit, compiled to Lambda behind API Gateway v2.
 * `worker.py` is a Python unit with no HTTP surface.
 
 Three of the four stores are declared by *both* units, under the same id, with
 whatever client each ecosystem actually uses:
 
-| id | `api.js` holds | `worker.py` holds | becomes |
+| id | `api.ts` holds | `worker.py` holds | becomes |
 |---|---|---|---|
 | `petsByOwner` | a `DynamoDBClient` | a boto3 `Table` | DynamoDB |
 | `shopdb` | a `pg` `Pool` | a SQLAlchemy engine | RDS Postgres |

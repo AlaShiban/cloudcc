@@ -60,10 +60,10 @@ persisted:
     type: rds_postgres
 pubsub:
   petEvents:
-    type: sns
+    type: sqs
 static_units:
   petstore-site:
-    type: s3
+    type: cloudfront
     static_files: ./public/**/*
     index_document: index.html
 config:

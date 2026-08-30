@@ -6,7 +6,7 @@ all behave as they do locally. A program that declared a ``Path`` keeps working
 against the same shape.
 """
 
-from . import _client
+from . import _client, trace
 
 
 def connect(id):
@@ -22,4 +22,4 @@ def connect(id):
     if _client.endpoint():
         kwargs["endpoint_url"] = _client.endpoint()
 
-    return S3Path("s3://%s" % bucket, client=S3Client(**kwargs))
+    return trace.wrap(S3Path("s3://%s" % bucket, client=S3Client(**kwargs)), "fs", id)

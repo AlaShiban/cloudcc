@@ -92,9 +92,13 @@ func (p *ExecUnitsPlugin) Transform(ctx *compiler.Context) error {
 			reached, unresolved := front.Closure(ctx.Files, entry, excluded)
 			files = union(files, reached)
 			for _, imp := range unresolved {
+				why := ""
+				if imp.Why != "" {
+					why = " -- " + imp.Why
+				}
 				ctx.Diags.Warnf(ctx.Pos(entry, imp.Offset), config.KindExecutionUnit,
 					"the import %q could not be resolved to a file in the source tree; "+
-						"it will not be bundled into execution unit %q", imp.Rendered, id)
+						"it will not be bundled into execution unit %q%s", imp.Rendered, id, why)
 			}
 		}
 		// Everything that is not Python source -- templates, data files,

@@ -1,0 +1,16 @@
+{
+  "name": "k8s-web-ts",
+  "private": true,
+  "type": "module",
+  "main": "src/web.ts",
+  "dependencies": {
+    "@cloudcompiler/sdk": "file:../../sdk/node",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

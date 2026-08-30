@@ -1,0 +1,24 @@
+{
+  // A tsconfig is JSON with comments, which is worth having in the example:
+  // the compiler reads this file, and a decoder that choked on a comment would
+  // fail on most real projects.
+  "compilerOptions": {
+    "target": "ES2022",
+    // The unit is bundled by esbuild on the way out and run by tsx before
+    // that, so `Bundler` is the resolution these sources are actually built
+    // under: extensionless imports and path aliases both resolve, which
+    // NodeNext deliberately refuses.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    // The project's own code is reached through "@/". cloudcc resolves this the
+    // same way the type checker does, so `@/store` lands in the unit's bundle.
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+    },
+  },
+  "include": ["src"],
+}

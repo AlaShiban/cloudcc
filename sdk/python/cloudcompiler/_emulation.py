@@ -27,6 +27,8 @@ import pathlib
 import shutil
 from typing import Any, Callable, Iterable
 
+from . import _trace
+
 #: Where the supplied clients keep their local state.
 LOCAL_ROOT_ENV = "CLOUDCC_LOCAL_STATE_DIR"
 DEFAULT_LOCAL_ROOT = ".cloudcc-local"
@@ -54,6 +56,11 @@ class Secret:
     def __init__(self, env: str | None = None) -> None:
         self._env = env
         self._value: str | None = None
+        self._trace_id: str | None = None
+
+    def _bind_trace(self, id: str) -> None:
+        """Name this secret for the trace. See _trace for why."""
+        self._trace_id = id
 
     # Private, and deliberately so. The compiled shim hands back a Secrets
     # Manager-backed object with the same *public* API as this one -- a parity
@@ -70,13 +77,24 @@ class Secret:
     def get(self) -> str:
         """Return the secret's value."""
         if self._value is not None:
-            return self._value
-        if self._env:
-            return os.environ.get(self._env, "")
-        return ""
+            value = self._value
+        elif self._env:
+            value = os.environ.get(self._env, "")
+        else:
+            value = ""
+        # The value itself is never recorded -- a trace is written to stderr
+        # and read by a test harness, and a secret that leaks there has leaked
+        # (D21). What is recorded is that the program read it, and whether it
+        # got anything, which is what distinguishes a working binding from one
+        # that silently yields "".
+        _trace.emit("secret", self._trace_id or "", "get",
+                    ret="<secret:%d>" % len(value))
+        return value
 
     def set(self, value: str) -> None:
         """Replace the secret's value."""
+        _trace.emit("secret", self._trace_id or "", "set",
+                    args={"len": len(value)})
         self._value = value
 
     def __repr__(self) -> str:
@@ -137,6 +155,11 @@ class Topic:
         self.retention_hours = retention_hours
         self.max_message_kb = max_message_kb
         self._subscribers: list[Callable[[dict], Any]] = []
+        self._trace_id: str | None = None
+
+    def _bind_trace(self, id: str) -> None:
+        """Name this topic for the trace. See _trace for why."""
+        self._trace_id = id
 
     def publish(self, message: dict) -> None:
         """Deliver ``message`` to every subscriber.
@@ -148,7 +171,14 @@ class Topic:
         that appears to have run, wrote nothing, and warned about a coroutine
         that was never awaited.
         """
+        _trace.emit("pubsub", self._trace_id or "", "publish", args=message)
         for fn in list(self._subscribers):
+            # Recorded separately from the publish, and compared separately.
+            # Locally a subscriber runs inside publish(); compiled it runs
+            # later, in another process, after the publisher has answered. The
+            # two orderings cannot be made to match, so the comparison groups
+            # events by resource rather than pretending one stream exists.
+            _trace.emit("pubsub", self._trace_id or "", "deliver", args=message)
             result = fn(message)
             if inspect.iscoroutine(result):
                 asyncio.run(result)

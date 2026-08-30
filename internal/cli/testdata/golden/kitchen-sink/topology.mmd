@@ -3,6 +3,7 @@ flowchart LR
     config_log_level{{"log_level\nconfig"}}
     config_stripe_key{{"stripe_key\nconfig"}}
     execution_unit_api["api\nexecution_unit"]
+    execution_unit_auditor["auditor\nexecution_unit"]
     execution_unit_reporter["reporter\nexecution_unit"]
     expose_reporter_web(["reporter-web\nexpose"])
     expose_shop_api(["shop-api\nexpose"])
@@ -15,7 +16,7 @@ flowchart LR
     expose_reporter_web -->|exposes| execution_unit_reporter
     expose_shop_api -->|exposes| execution_unit_api
     execution_unit_api -->|publishes| pubsub_itemEvents
-    execution_unit_reporter -.->|subscribes| pubsub_itemEvents
+    execution_unit_auditor -.->|subscribes| pubsub_itemEvents
     execution_unit_api -->|uses| config_log_level
     execution_unit_api -->|uses| config_stripe_key
     execution_unit_api -->|uses| persist_fs_itemDocs
@@ -24,6 +25,12 @@ flowchart LR
     execution_unit_api -->|uses| persist_redis_itemCache
     execution_unit_api -->|uses| persist_secret_signingKey
     execution_unit_api -->|uses| pubsub_itemEvents
+    execution_unit_auditor -->|uses| persist_fs_itemDocs
+    execution_unit_auditor -->|uses| persist_kv_catalogue
+    execution_unit_auditor -->|uses| persist_orm_shopdb
+    execution_unit_auditor -->|uses| persist_redis_itemCache
+    execution_unit_auditor -->|uses| persist_secret_signingKey
+    execution_unit_auditor -->|uses| pubsub_itemEvents
     execution_unit_reporter -->|uses| persist_fs_itemDocs
     execution_unit_reporter -->|uses| persist_kv_catalogue
     execution_unit_reporter -->|uses| persist_orm_shopdb

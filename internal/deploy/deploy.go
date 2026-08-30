@@ -289,10 +289,16 @@ func configureEmulator(ctx context.Context, stack auto.Stack, opts Options) erro
 }
 
 // EmulatedServices are the AWS services pointed at the emulator endpoint.
+// A service the resolver can emit and this list omits is not a degraded
+// deploy: the provider sends that one call to the real AWS endpoint, which
+// answers InvalidClientTokenId to the emulator's throwaway credentials and
+// takes the whole stack down. Adding a resource type means adding its service
+// here, which is a rule a test enforces rather than a rule to remember.
 var EmulatedServices = []string{
-	"apigateway", "apigatewayv2", "cloudwatch", "cloudwatchlogs", "dynamodb",
-	"ec2", "ecr", "ecs", "eks", "elasticache", "elbv2", "iam", "lambda", "logs",
-	"memorydb", "rds", "s3", "secretsmanager", "sns", "sts",
+	"apigateway", "apigatewayv2", "cloudfront", "cloudwatch", "cloudwatchlogs",
+	"dynamodb", "ec2", "ecr", "ecs", "eks", "elasticache", "elbv2", "iam",
+	"lambda", "logs", "memorydb", "rds", "s3", "secretsmanager", "sns", "sqs",
+	"sts",
 }
 
 func emulatorCredential(env string) string {

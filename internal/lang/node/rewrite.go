@@ -142,7 +142,7 @@ func rewrite(f *source.File, hints []sdkdetect.Hint, esm bool) error {
 			continue
 		}
 		needed[target.Alias] = target.Module
-		splices = append(splices, splice{h.Span[0], h.Span[1], renderCall(target, withLibrary(h))})
+		splices = append(splices, splice{h.Span[0], h.Span[1], renderCall(target, withLibrary(h), isTypeScript(f.Path))})
 	}
 
 	for _, span := range imp.spans {
@@ -195,7 +195,7 @@ func rewrite(f *source.File, hints []sdkdetect.Hint, esm bool) error {
 // renderCall builds the shim call that replaces one hint. The first declared
 // argument is positional and the rest become an options object, which is how
 // the SDK is written and so how the runtime mirrors it.
-func renderCall(target shimTarget, h sdkdetect.Hint) string {
+func renderCall(target shimTarget, h sdkdetect.Hint, typescript bool) string {
 	var positional string
 	var options []string
 
@@ -231,7 +231,25 @@ func renderCall(target shimTarget, h sdkdetect.Hint) string {
 		}
 		args += "{ " + strings.Join(options, ", ") + " }"
 	}
-	return fmt.Sprintf("%s.%s(%s)", target.Alias, target.Call, args)
+	call := fmt.Sprintf("%s.%s(%s)", target.Alias, target.Call, args)
+	// In TypeScript, say what the store is. A shim's connect() is declared to
+	// return `any` -- which client it hands back is a fact about this call site
+	// rather than about the shim -- and without the assertion every inference
+	// downstream of a store is lost, so the compiled copy stops type-checking
+	// under `strict` in code the user did not write and cannot fix.
+	//
+	// Exact rather than a guess: the class the program constructed *is* the
+	// type of what it held, and the import that named it is still in this file.
+	//
+	// Not for the two classes this SDK supplies. `Topic` and `Secret` come from
+	// the SDK, whose import the rewrite removes -- so naming them would leave a
+	// type nothing declares. They need no assertion anyway: the shim's own
+	// declarations return a Topic and a Secret, which is exactly what the
+	// program held. An empty ClientLibrary is what says the SDK supplied it.
+	if typescript && h.ClientClass != "" && h.ClientLibrary != "" {
+		call += " as " + h.ClientClass
+	}
+	return call
 }
 
 // insertImports adds the runtime imports at the top of the module, in whichever
@@ -302,4 +320,14 @@ func runtimePrefix(path string) string {
 
 func jsString(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\t", `\t`).Replace(s) + `"`
+}
+
+// isTypeScript reports a file whose types the rewritten copy has to keep.
+func isTypeScript(p string) bool {
+	for _, ext := range []string{".ts", ".tsx", ".mts", ".cts"} {
+		if strings.HasSuffix(p, ext) {
+			return true
+		}
+	}
+	return false
 }
