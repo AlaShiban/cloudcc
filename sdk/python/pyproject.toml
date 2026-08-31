@@ -1,11 +1,24 @@
 [project]
 name = "cloudcompiler"
-version = "0.1.0"
+version = "0.2.0"
 description = "Compile-time hints for CloudCompiler; the compiler reads these calls, never runs them."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
+keywords = ["infrastructure-from-code", "pulumi", "aws", "serverless", "iac"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Compilers",
+  "Topic :: System :: Systems Administration",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/AlaShiban/cloudcc"
+Source = "https://github.com/AlaShiban/cloudcc"
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

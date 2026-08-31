@@ -3,20 +3,43 @@
   "version": "0.2.0",
   "description": "Compile-time hints for CloudCompiler; the compiler reads these calls, never runs them.",
   "license": "Apache-2.0",
+  "keywords": [
+    "infrastructure-from-code",
+    "pulumi",
+    "aws",
+    "serverless",
+    "iac",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlaShiban/cloudcc.git",
+    "directory": "sdk/node"
+  },
+  "homepage": "https://github.com/AlaShiban/cloudcc#readme",
+  "bugs": {
+    "url": "https://github.com/AlaShiban/cloudcc/issues"
+  },
   "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "require": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
-    "test": "node --test test/*.test.js",
+    "test": "npm run build && node --test test/*.test.js",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -39,22 +39,38 @@ out_dir: %s
 # Uncomment to change a provider default for a whole capability kind.
 # defaults:
 #   execution_unit:
-#     type: lambda        # lambda | ecs
+#     type: function      # function | container  (lambda | ecs also accepted)
 #   persist_redis:
 #     type: elasticache   # elasticache | memorydb
 
 # Uncomment to configure one resource by id.
+#
+# "type" is what a unit is; "platform" is where it runs. Both are portable, so
+# moving a container from Fargate to Kubernetes is this file's business and not
+# your program's.
 # execution_units:
 #   api:
-#     type: lambda
+#     type: function
+#     memory: 512
 #     environment_variables:
 #       LOG_LEVEL: info
+#   worker:
+#     type: container
+#     platform: kubernetes   # serverless | kubernetes
 #
 # persisted:
 #   petsByOwner:
 #     type: dynamodb
 #     pulumi_params:
 #       billingMode: PAY_PER_REQUEST
+#
+# static_units:
+#   site:
+#     type: cloudfront    # s3 | cloudfront
+#
+# logging:
+#   type: cloudwatch
+#   retention_days: 14
 `
 
 func newInitCommand() *cobra.Command {

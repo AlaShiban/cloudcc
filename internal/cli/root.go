@@ -36,10 +36,12 @@ func NewRootCommand() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:   "cloudcc [path]",
-		Short: "CloudCompiler: compile a Python app into cloud infrastructure",
-		Long: "CloudCompiler reads a plain Python application that uses the cloudcompiler\n" +
-			"SDK for hints, and emits a runnable Pulumi project alongside a copy of the\n" +
-			"application wired to real cloud services.\n\n" +
+		Short: "CloudCompiler: compile an app into cloud infrastructure",
+		Long: "CloudCompiler reads a plain Python, TypeScript or JavaScript application\n" +
+			"that uses the cloudcompiler SDK for hints, and emits a runnable Pulumi\n" +
+			"project alongside a copy of the application wired to real cloud services.\n\n" +
+			"The hints are read statically -- your program is never imported or run --\n" +
+			"and your own tree is never modified.\n\n" +
 			"Running `cloudcc ./app` is the same as running `cloudcc compile ./app`.",
 		SilenceUsage:  true,
 		SilenceErrors: true,

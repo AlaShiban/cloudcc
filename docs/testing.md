@@ -128,10 +128,19 @@ shim *inventing* an option; a program that explicitly writes
 
 ## Generated programs
 
-`internal/fuzz` writes idiomatic Python programs that use the SDK, from a seed,
-along with the ground truth of what a correct compiler must find in them. That
-turns the oracle from "did it compile" into "did it find exactly what I
-planted, and nothing else".
+`internal/fuzz` writes idiomatic programs that use the SDK, from a seed, along
+with the ground truth of what a correct compiler must find in them. That turns
+the oracle from "did it compile" into "did it find exactly what I planted, and
+nothing else".
+
+Python, JavaScript and TypeScript, in every import spelling each language
+offers — `import cloudcompiler as cloudcc`, `from cloudcompiler import persist`,
+`import { persist } from "@cloudcompiler/sdk"`, `require(...)` in three
+shapes. Note one gap in that list: *runnable* generated programs are restricted
+to ESM (`newJSModule`), so a CommonJS program is parsed and IR-checked and never
+executed. That is how `require("@cloudcompiler/sdk")` stayed broken — the
+manifest named a `dist/index.cjs` that `tsc` never emitted — until
+`sdk/node/test/packaging.test.js` went looking.
 
 The point is coverage of *shape*. The compiler reads syntax rather than running
 code, so a hint written in a form it does not recognise becomes a resource that
