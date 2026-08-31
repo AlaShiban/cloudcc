@@ -195,12 +195,33 @@ require_emulator_still_up() {
 # It is the only signal the emulator offers for "this function ran" that does
 # not require the unit to have written to a store -- and a unit whose whole job
 # is to answer a call may never write to one.
+# unit_invocations counts the log streams a unit has, as evidence it ran.
+#
+# A unit is a Lambda or a container, and the two log to different groups:
+# `/aws/lambda/<app>-<unit>` and `/ecs/<app>-<unit>`. Looking only in the first
+# is what broke when nomnom's storefront became `type: container` -- and it did
+# not fail loudly. `describe-log-streams` exits **254** on a log group that does
+# not exist, the stderr was already sent to /dev/null, and under
+# `set -euo pipefail` that status propagated out of the command substitution and
+# killed the whole run. The symptom was an exit 254 with no message at all,
+# several steps after the last thing printed.
+#
+# So: try both groups, and never let a missing one end the run. A unit that
+# genuinely has not run reports 0, which is a dead edge -- a real finding, and
+# the caller's to report.
 unit_invocations() {
-  local app fn
+  local app group streams
   app="$(app_name "$REPO_ROOT/examples/$EXAMPLE")"
-  fn="/aws/lambda/${app}-${1}"
-  aws_local logs describe-log-streams --log-group-name "$fn" --output json 2>/dev/null \
-    | jq -r '(.logStreams // []) | length'
+  for group in "/aws/lambda/${app}-${1}" "/ecs/${app}-${1}"; do
+    streams="$(aws_local logs describe-log-streams --log-group-name "$group" \
+                 --output json 2>/dev/null \
+               | jq -r '(.logStreams // []) | length' 2>/dev/null || true)"
+    if [ -n "${streams:-}" ] && [ "$streams" -gt 0 ] 2>/dev/null; then
+      printf '%s' "$streams"
+      return 0
+    fi
+  done
+  printf '0'
 }
 
 # env_slug mirrors sanitize.EnvVar: the environment spelling of a capability id.
@@ -393,7 +414,19 @@ for EXAMPLE in "${EXAMPLES[@]}"; do
     # Captured rather than discarded. Pulumi reports a failed update on
     # stdout along with the resource list, so suppressing the noise suppresses
     # the reason too -- and "pulumi up failed" on its own is not a diagnosis.
-    pulumi up -y --stack local --non-interactive > "$case_dir/pulumi-up.log" 2>&1
+    #
+    # Kubernetes resources are excluded, exactly as nomnom.sh excludes them.
+    # A Deployment needs a provider pointed at the cluster with TLS
+    # verification off -- the emulator's certificate is for
+    # localhost.localstack.cloud and the API server is reached at localhost --
+    # and building that kubeconfig is kubernetes.sh's job, not this one's.
+    # Without the exclusion, `nomnom` fails here with "configured Kubernetes
+    # cluster is unreachable", which reads as a compiler fault and is a missing
+    # fixture. What this harness drives is the exposed unit; the pod is not on
+    # that path.
+    pulumi up -y --stack local --non-interactive \
+      --exclude "**kubernetes:**" --exclude-dependents \
+      > "$case_dir/pulumi-up.log" 2>&1
   ) || {
     sed 's/^/    /' "$case_dir/pulumi-up.log" | tail -30
     fail "$EXAMPLE: pulumi up failed"
