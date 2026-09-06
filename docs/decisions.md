@@ -374,6 +374,45 @@ class instance that is not data -- and the suite-level guards matter more than
 either, because an instrument that breaks both halves equally is invisible to
 the comparison it feeds.
 
+## Metadata rots, and nothing is watching it
+
+A review of what this project says about itself found three claims that were
+not merely stale but false. All three are the same shape: a file that describes
+the code, changed less often than the code, and checked by nothing.
+
+**`require("@cloudcompiler/sdk")` had never worked.** The manifest named
+`"require": "./dist/index.cjs"`, and `tsc` emits no such file, so every
+CommonJS consumer got `MODULE_NOT_FOUND`. The compiler explicitly supports
+`require` — the generator writes three spellings of it — but `newJSModule`
+restricts *runnable* generated programs to ESM, so a CommonJS program had only
+ever been parsed and IR-checked, never executed against the SDK. That is
+precisely the shape of the Node Lambda bundle that could not start: a supported
+input nothing ever ran. The condition now points at the ESM entry, which Node
+resolves through `require(esm)`, and `engines` says `>=22.12` because that is
+where it became available rather than as decoration.
+
+**The two SDKs disagreed about their own version.** `pyproject.toml` said
+0.1.0 while `cloudcompiler.__version__` said 0.2.0, so `pip show` and the
+running package reported different numbers and neither was obviously
+authoritative. The Node package was 0.2.0.
+
+**`package.json` listed a README in `files` that did not exist**, so the
+package would have published without one.
+
+The interesting part is not the three bugs. It is that a manifest is *code that
+nobody executes*, so the ordinary feedback loop — change it, run it, see it
+break — never closes. Both packages now carry tests asserting the boring
+things: every path a manifest points at exists, every file it promises to ship
+is there, the package can be both imported and required, and the two SDKs
+report one version. Each was checked against the bug it describes.
+
+Scope claims rot the same way and are worse, because they are the first thing a
+reader is told. The GitHub description, `cloudcc --help` and the fuzz section
+of `docs/testing.md` all still said "Python" long after a unit's frontend
+started being chosen from its entrypoint's extension. `cloudcc init` scaffolded
+`type: lambda | ecs` and knew nothing of the portable compute axis — the first
+file a user edits, teaching a vocabulary the compiler had moved past.
+
 ## What the program generator found
 
 `internal/fuzz` generates idiomatic Python and checks the compiler against its

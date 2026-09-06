@@ -276,6 +276,87 @@ against, and the assertion **skips with a printed reason**:
 A gap in the emulator must never read as a pass. If a row in the matrix below
 starts skipping, that is a signal, not noise.
 
+## When a harness fails and says nothing
+
+An exit code with no message is the worst failure this suite produces, because
+every plausible explanation is cheaper to believe than to check. It has
+happened once, and the way out is worth writing down.
+
+`load.sh nomnom` began exiting **254** with the last output several steps
+earlier. The cause was one line:
+
+```bash
+aws_local logs describe-log-streams --log-group-name "$fn" --output json 2>/dev/null \
+  | jq -r '(.logStreams // []) | length'
+```
+
+`nomnom`'s storefront had become `type: container`, so it is Fargate and logs
+to `/ecs/<app>-<unit>`; there was no `/aws/lambda/<app>-<unit>`. **The AWS CLI
+exits 254 on a log group that does not exist.** The stderr was already going to
+`/dev/null` and the status was not guarded, so under `set -euo pipefail` it
+propagated out of the command substitution and ended the run — silently, by
+construction.
+
+Two rules come out of it.
+
+**`2>/dev/null` without `|| true` is a trap.** Suppressing a command's
+complaint while leaving its exit status live means the run dies with the
+evidence discarded. If a failure is expected and tolerable, tolerate it
+explicitly; if it is not, let the message through.
+
+**`bash -x` names the command; nothing else will.** Three plausible theories
+were discarded before the trace was run, and each would have produced a
+confident wrong fix:
+
+| theory | how it died |
+|---|---|
+| the compiled half was barely serving (`routes 0/4`) | byte-identical in the last *passing* CI run — Lambda cold starts, not a regression |
+| the new Kubernetes unit added a gateway edge the checker could not observe | the plan contained the same fifteen edges as before, and no menu edge |
+| the emulator was killed under load | healthy, and its own guard's `curl` returned 0 |
+
+Reach for the trace before the third theory, not after.
+
+### One example, several harnesses
+
+The same failure had a second cause, and it is the more general lesson:
+`nomnom` gained a Kubernetes unit, `nomnom.sh` and `kubernetes.sh` were taught
+to cope, and `load.sh` — which deploys the same example — was not. It ran a
+bare `pulumi up`, reached the Deployment, and died on the emulator's
+certificate.
+
+**Changing an example changes every harness that deploys it.** Both
+`examples.sh` and `load.sh` default to every scenario in
+`tests/e2e/scenarios/`, so an example is rarely the property of one harness:
+
+| example | deployed by |
+|---|---|
+| `nomnom` | `nomnom.sh`, `load.sh`, and `kubernetes.sh nomnom menu` |
+| `k8s-web` | `kubernetes.sh` |
+| everything else with a scenario | `examples.sh`, `load.sh`, and `provisioning.sh` when named |
+
+And there is a specific trap in how the two treat `skip`, which is exactly what
+hid this regression:
+
+* `examples.sh` skips any scenario with a `skip` reason.
+* `load.sh` skips it **only if there is no `load` block as well**.
+
+`nomnom` is the one example with both — `skip` because its two halves
+deliberately do different work, `load` because it is the richest thing to drive
+traffic at. So every check that reaches `nomnom` through `examples.sh` skips
+it, and `load.sh` deploys it. The Kubernetes unit was verified through
+`nomnom.sh` and `kubernetes.sh`, `examples.sh` skipped it, and `load.sh` — the
+one harness that would have caught it — was never run.
+
+**When you change `nomnom`, run `load.sh nomnom`.** It is the only example that
+falls through this gap.
+
+One latent case is deliberately left alone: `provisioning.sh` also runs a bare
+`pulumi up`, and CI only ever hands it examples with no Kubernetes unit. Run
+`./tests/e2e/provisioning.sh nomnom` by hand and it will fail exactly as
+`load.sh` did. Excluding Kubernetes there would be wrong by default — that
+harness asserts on what was actually deployed — so it is recorded here rather
+than papered over.
+
 ## Capability × emulator matrix
 
 | Capability | AWS target | Provisioning (L4) | Functional (L5) |
@@ -504,6 +585,32 @@ the stack never existed.
 
 This is safe by construction: the emulator holds nothing except what this suite
 put there.
+
+### Failures that pass on a retry
+
+Distinct from the above, and worth telling apart before spending an hour:
+**residue is deterministic and repeats forever; a transient passes on an
+unchanged re-run.** Two have been seen, both of which look exactly like
+deployment defects:
+
+* **ElastiCache stuck in `creating`** for the full 40-minute Pulumi timeout.
+  Probed straight afterwards — bare, then inside a VPC subnet group matching
+  what the failing stack deploys — it reached `available` in 20 seconds both
+  times, and the re-run passed with every resource.
+* **ECR `docker login` answering 404.** The re-run passed from an emulator with
+  zero repositories.
+
+Chasing the second turned up a real and reproducible emulator behaviour that is
+*not* what caused it: `/v2/` returns 404 while ECR holds no repositories and
+200 once one exists. It is a tempting explanation and it is the wrong one —
+`push-images.sh` reads the repository URI from the stack outputs and failed
+*after* that check passed, so `up` had already created the repository.
+`cloudcc` sequences the two correctly and deliberately (`deploy.go`: the push
+runs after `stack.Up`, because the registries do not exist until then).
+
+Retry once before investigating. Do not report a retried pass as a clean one —
+say which failure it was, because "flaky" written into a report is how a real
+intermittent bug gets ignored for a month.
 
 ## Kubernetes on the emulator
 
